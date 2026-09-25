@@ -1,4 +1,6 @@
 import { childTraits, dayKey, hash01, loveChance, type Parent } from "@blob-land/sim";
+import { normalizeSeed } from "blobatar";
+import { freeBabyName } from "./names";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -85,14 +87,23 @@ export async function resolvePendingBirths(db: D1Database, now: number): Promise
     const childSeed = `child:${union.id}`;
     const traits = childTraits(parentA, parentB, childSeed);
     const traitsJson = JSON.stringify(traits);
+    const name = await freeBabyName(db, childSeed);
 
-    await db.batch([
-      db
-        .prepare(`INSERT OR IGNORE INTO blobs (seed, traits, parent_union_id, born_at) VALUES (?, ?, ?, ?)`)
-        .bind(childSeed, traitsJson, union.id, bornAt),
-      db
-        .prepare(`UPDATE unions SET child_traits = ?, ended_at = ? WHERE id = ? AND child_traits IS NULL`)
-        .bind(traitsJson, bornAt, union.id),
-    ]);
+    // Only a duplicate *seed* (a concurrent resolve) is ignored: a name taken
+    // in the meantime fails the whole batch, and the next resolve retries,
+    // rather than silently dropping the child while ending the union.
+    await db
+      .batch([
+        db
+          .prepare(
+            `INSERT INTO blobs (seed, traits, parent_union_id, born_at, name, name_key) VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(seed) DO NOTHING`,
+          )
+          .bind(childSeed, traitsJson, union.id, bornAt, name, normalizeSeed(name)),
+        db
+          .prepare(`UPDATE unions SET child_traits = ?, ended_at = ? WHERE id = ? AND child_traits IS NULL`)
+          .bind(traitsJson, bornAt, union.id),
+      ])
+      .catch(() => {});
   }
 }

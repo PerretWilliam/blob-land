@@ -134,6 +134,36 @@ describe("blob-land API", () => {
     expect(childTreeBody.parents).not.toBeNull();
     expect(childTreeBody.parents!.map((p) => p.seed).sort()).toEqual([alice.seed, partnerPseudo].sort());
 
+    // The child is born with a generated name, in the namespace pseudos use.
+    const child = (await jsonAs<{ children: { seed: string; name: string; parents: { seed: string }[] }[]; partner: unknown }>(
+      await SELF.fetch(`https://api.test/tree/${encodeURIComponent(alice.seed)}`),
+    )).children[0]!;
+    expect(child.name).toMatch(/^[A-Z][a-z]+$/);
+    expect(child.parents.map((p) => p.seed).sort()).toEqual([alice.seed, partnerPseudo].sort());
+    const nameCheck = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent(child.name.toLowerCase())}`);
+    expect(await jsonAs<{ available: boolean }>(nameCheck)).toMatchObject({ available: false });
+    const squatter = await SELF.fetch("https://api.test/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pseudo: child.name, password: PASSWORD }),
+    });
+    expect(squatter.status).toBe(409);
+
+    // Only a parent may rename it, and not to anyone else's pseudo.
+    const rename = (token: string, name: string) =>
+      SELF.fetch(`https://api.test/blobs/${encodeURIComponent(child.seed)}/name`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name }),
+      });
+    const stranger = await register("stranger");
+    expect((await rename(stranger.token, "Pebble")).status).toBe(403);
+    expect((await rename(aliceLogin.token, partnerPseudo)).status).toBe(409);
+    expect((await rename(aliceLogin.token, "  ")).status).toBe(400);
+    expect((await rename(aliceLogin.token, "Pebble")).status).toBe(200);
+    const renamed = await jsonAs<{ name: string }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
+    expect(renamed.name).toBe("Pebble");
+
     // The union ends at birth, not via a separate endpoint: ended_at must now
     // be set, and both members must be free of any active union.
     const union = await env.DB.prepare(`SELECT ended_at FROM unions WHERE child_traits IS NOT NULL`).first<{

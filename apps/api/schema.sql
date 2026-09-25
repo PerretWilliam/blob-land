@@ -29,5 +29,9 @@ CREATE TABLE blobs (
   seed TEXT PRIMARY KEY,
   traits TEXT NOT NULL, -- frozen JSON, never recomputed once written
   parent_union_id TEXT REFERENCES unions(id), -- NULL for an account/seed-only blob
-  born_at INTEGER NOT NULL
+  born_at INTEGER NOT NULL,
+  name TEXT, -- a child's display name: generated at birth, parents can rename it
+  -- normalizeSeed(name). Names share one namespace with account pseudos
+  -- (users.seed): the API checks both before writing either (see names.ts).
+  name_key TEXT UNIQUE
 );
