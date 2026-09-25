@@ -13,6 +13,7 @@ import {
   Minus,
   Plus,
   Menu,
+  Network,
   Pencil,
   RotateCcw,
   Trees,
@@ -21,6 +22,7 @@ import {
   ArrowUpFromLine,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { FamilyPanel } from "@/components/family-tree";
 import { Button } from "@/components/ui/button";
 import { ACTIVITY_LABELS, ActivityIcon, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import type { GardenBlob } from "@/lib/api";
@@ -30,7 +32,7 @@ import { usePrefersReducedMotion } from "@/lib/motion";
 export interface GardenScreenProps {
   localPseudo: string;
   localSeed: string;
-  account: { pseudo: string; seed: string } | null;
+  account: { pseudo: string; seed: string; token: string } | null;
   blobs: GardenBlob[];
   visible: boolean;
   onToggleVisibility: () => void;
@@ -66,7 +68,7 @@ export function GardenScreen({
   const [editing, setEditing] = useState(false);
   const [tool, setTool] = useState<IslandTool>("grass");
   // The side panel: one at a time.
-  const [panel, setPanel] = useState<"journal" | null>(null);
+  const [panel, setPanel] = useState<"journal" | "family" | null>(null);
   // Re-render now and then, so states (and expressions) follow the clock.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -182,6 +184,16 @@ export function GardenScreen({
             >
               Journal
             </MenuItem>
+            <MenuItem
+              icon={<Network />}
+              active={panel === "family"}
+              onClick={() => {
+                setPanel((p) => (p === "family" ? null : "family"));
+                setMenuOpen(false);
+              }}
+            >
+              Family tree
+            </MenuItem>
 
             <div className="my-1 h-px bg-border" aria-hidden="true" />
 
@@ -221,6 +233,13 @@ export function GardenScreen({
       </nav>
 
       {panel === "journal" ? <JournalPanel seed={localSeed} name={localPseudo} now={now} onClose={() => setPanel(null)} /> : null}
+      {panel === "family" ? (
+        <FamilyPanel
+          seed={account?.seed ?? null}
+          token={account?.token ?? null}
+          onClose={() => setPanel(null)}
+        />
+      ) : null}
 
       {editing && !inGarden ? (
         <div className="absolute bottom-4 left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md">
