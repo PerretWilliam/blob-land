@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { journal } from "./journal";
+import { activityLog, journal } from "./journal";
+import { activityChanges, stateAt } from "./state";
 import { dayStart } from "./time";
 
 describe("journal", () => {
@@ -32,5 +33,15 @@ describe("journal", () => {
     for (const entry of entries) {
       expect(entry.at).toBeGreaterThanOrEqual(earliestAllowed);
     }
+  });
+
+  it("logs every activity change of a day, each matching stateAt", () => {
+    const from = dayStart("2026-09-01");
+    const to = dayStart("2026-09-02");
+    const changes = activityChanges("alice", from, to);
+    for (const c of ["sleep", "rest", "explore"]) expect(changes.some((x) => x.activity === c)).toBe(true);
+    for (const c of changes) expect(stateAt("alice", c.at).activity).toBe(c.activity);
+    for (let i = 1; i < changes.length; i++) expect(changes[i]!.at).toBeGreaterThan(changes[i - 1]!.at);
+    expect(activityLog("alice", from, to).map((e) => e.at)).toEqual(changes.map((c) => c.at));
   });
 });

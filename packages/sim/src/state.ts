@@ -90,3 +90,31 @@ export function stateAt(seed: string, t: number, _tz: Tz = "UTC"): BlobState {
   }
   return { activity: hit.activity, expression: hit.expression, since: hit.start };
 }
+
+export interface ActivityChange extends BlobState {
+  /** Epoch ms of the change — equal to `since`. */
+  at: number;
+}
+
+/**
+ * Every time the blob's activity changed in (from, to], oldest first. Read off
+ * the schedules' own boundaries, then checked against stateAt, so it can never
+ * disagree with what the blob was actually shown doing.
+ */
+export function activityChanges(seed: string, from: number, to: number): ActivityChange[] {
+  const exprAt = (key: string, options: readonly Expression[]): Expression =>
+    options[Math.floor(hash01(key) * options.length)]!;
+  const bounds = new Set<number>();
+  for (let day = addDays(dayKey(from), -1); day <= dayKey(to); day = addDays(day, 1)) {
+    for (const seg of daySchedule(seed, day, exprAt)) bounds.add(seg.start).add(seg.end);
+  }
+  const changes: ActivityChange[] = [];
+  let prev = stateAt(seed, from);
+  for (const at of [...bounds].sort((a, b) => a - b)) {
+    if (at <= from || at > to) continue;
+    const next = stateAt(seed, at);
+    if (next.activity !== prev.activity || next.since !== prev.since) changes.push({ ...next, at });
+    prev = next;
+  }
+  return changes;
+}

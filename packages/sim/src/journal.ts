@@ -1,4 +1,5 @@
 import { eventsOfDay } from "./events";
+import { activityChanges, stateAt } from "./state";
 import { addDays, dayKey } from "./time";
 
 export interface JournalEntry {
@@ -26,4 +27,19 @@ export function journal(seed: string, from: number, to: number): JournalEntry[] 
     }
   }
   return entries;
+}
+
+/** Everything the blob did in (from, to], oldest first — the journal you can
+ * scroll back through, not just the notable bits `journal` notifies about. */
+export function activityLog(seed: string, from: number, to: number): JournalEntry[] {
+  const changes = activityChanges(seed, from, to);
+  return changes.map(({ at, activity }, i) => {
+    const before = i ? changes[i - 1]!.activity : stateAt(seed, from).activity;
+    if (activity === "explore" && before === "sleep") return { at, text: "Woke up." };
+    if (activity === "discover") {
+      const found = eventsOfDay(seed, dayKey(at)).find((e) => e.type === "discover" && e.at === at);
+      return { at, text: found ? `Found ${found.detail}.` : "Found something." };
+    }
+    return { at, text: { sleep: "Fell asleep.", rest: "Took a break.", explore: "Went exploring." }[activity] };
+  });
 }
