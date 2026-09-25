@@ -1,0 +1,9 @@
+{
+  "name": "blob-land",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "pnpm --filter @blob-land/desktop tauri dev",
+    "sim:test": "pnpm --filter @blob-land/sim test"
+  }
+}
