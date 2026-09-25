@@ -33,9 +33,13 @@ function authHeader(token: string) {
   return { authorization: `Bearer ${token}` };
 }
 
-export async function isPseudoAvailable(pseudo: string): Promise<boolean> {
-  const { available } = await request<{ available: boolean }>(`/pseudo/${encodeURIComponent(pseudo)}`);
-  return available;
+export interface PseudoAvailability {
+  available: boolean;
+  suggestions?: string[];
+}
+
+export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
+  return request(`/pseudo/${encodeURIComponent(pseudo)}`);
 }
 
 export function register(pseudo: string, password: string): Promise<AuthResponse> {

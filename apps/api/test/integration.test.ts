@@ -73,15 +73,23 @@ describe("blob-land API", () => {
     expect(body.blobs.some((b) => b.pseudo === "wanderer")).toBe(true);
   });
 
-  it("reports pseudo availability, and flips to unavailable once registered", async () => {
+  it("reports pseudo availability, and offers suggestions once taken", async () => {
     const before = await SELF.fetch("https://api.test/pseudo/brand-new-pseudo");
     expect(before.status).toBe(200);
-    expect(await jsonAs<{ available: boolean }>(before)).toMatchObject({ available: true });
+    expect(await jsonAs<{ available: boolean; suggestions?: string[] }>(before)).toMatchObject({ available: true });
 
     await register("brand-new-pseudo");
 
     const after = await SELF.fetch("https://api.test/pseudo/brand-new-pseudo");
-    expect(await jsonAs<{ available: boolean }>(after)).toMatchObject({ available: false });
+    const afterBody = await jsonAs<{ available: boolean; suggestions: string[] }>(after);
+    expect(afterBody.available).toBe(false);
+    expect(afterBody.suggestions.length).toBeGreaterThan(0);
+
+    // Each suggested variant must itself be free to register.
+    for (const suggestion of afterBody.suggestions) {
+      const check = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent(suggestion)}`);
+      expect(await jsonAs<{ available: boolean }>(check)).toMatchObject({ available: true });
+    }
 
     // Same seed under different casing/surrounding whitespace must also read
     // as taken — it's normalizeSeed's job (trim + lowercase), not a raw

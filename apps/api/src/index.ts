@@ -52,9 +52,21 @@ interface UserRow {
 // to /auth/register, so a collision with someone else's account doesn't
 // surface only after the user has already typed a password (R7).
 app.get("/pseudo/:p", async (c) => {
-  const seed = normalizeSeed(c.req.param("p"));
+  const raw = c.req.param("p");
+  const seed = normalizeSeed(raw);
   const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE seed = ?`).bind(seed).first();
-  return c.json({ seed, available: !existing });
+  if (!existing) return c.json({ seed, available: true });
+
+  // Deterministic short suffixes, checked in order, until 3 free ones are
+  // found — lets the desktop client offer variants right away instead of
+  // just reporting the collision.
+  const suggestions: string[] = [];
+  for (let i = 2; suggestions.length < 3 && i < 100; i++) {
+    const candidate = `${raw}${i}`;
+    const taken = await c.env.DB.prepare(`SELECT id FROM users WHERE seed = ?`).bind(normalizeSeed(candidate)).first();
+    if (!taken) suggestions.push(candidate);
+  }
+  return c.json({ seed, available: false, suggestions });
 });
 
 app.post("/auth/register", rateLimitAuth, async (c) => {

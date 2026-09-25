@@ -4,17 +4,28 @@ export interface AppSettings {
   visible: boolean;
 }
 
-/**
- * Plaintext on disk in $APPDATA (R8: no keyring in this v1). The token is a
- * 30-day JWT, not a long-lived secret, so the exposure this accepts is bounded.
- */
-export interface AppState {
+export interface AccountState {
   pseudo: string;
   seed: string;
   token: string;
+}
+
+/**
+ * Plaintext on disk in $APPDATA (R8: no keyring in this v1). The token is a
+ * 30-day JWT, not a long-lived secret, so the exposure this accepts is bounded.
+ *
+ * `localSeed` is always present — it's the blob picked on first launch,
+ * before any account exists. `account` is only set once the user explicitly
+ * joins the garden, and its seed can differ from `localSeed` (a taken pseudo
+ * forces a variant for the account only — the private blob never changes).
+ */
+export interface AppState {
+  localPseudo: string;
+  localSeed: string;
   createdAt: number;
   lastOpenedAt: number;
   settings: AppSettings;
+  account: AccountState | null;
 }
 
 const STATE_FILE = "state.json";
