@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { login, register, type AuthResponse } from "@/lib/api";
+import { isPseudoAvailable, login, register, type AuthResponse } from "@/lib/api";
 
 export interface AuthScreenProps {
   onAuthenticated: (pseudo: string, response: AuthResponse) => void;
@@ -18,6 +18,10 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     setError(null);
     setPending(true);
     try {
+      if (mode === "register" && !(await isPseudoAvailable(pseudo))) {
+        setError("That pseudo is already taken — pick another one for your account.");
+        return;
+      }
       const response = await (mode === "login" ? login : register)(pseudo, password);
       onAuthenticated(pseudo, response);
     } catch (err) {

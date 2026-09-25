@@ -73,6 +73,23 @@ describe("blob-land API", () => {
     expect(body.blobs.some((b) => b.pseudo === "wanderer")).toBe(true);
   });
 
+  it("reports pseudo availability, and flips to unavailable once registered", async () => {
+    const before = await SELF.fetch("https://api.test/pseudo/brand-new-pseudo");
+    expect(before.status).toBe(200);
+    expect(await jsonAs<{ available: boolean }>(before)).toMatchObject({ available: true });
+
+    await register("brand-new-pseudo");
+
+    const after = await SELF.fetch("https://api.test/pseudo/brand-new-pseudo");
+    expect(await jsonAs<{ available: boolean }>(after)).toMatchObject({ available: false });
+
+    // Same seed under different casing/surrounding whitespace must also read
+    // as taken — it's normalizeSeed's job (trim + lowercase), not a raw
+    // string match.
+    const variant = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent("  Brand-New-Pseudo  ")}`);
+    expect(await jsonAs<{ available: boolean }>(variant)).toMatchObject({ available: false });
+  });
+
   it("pairs two present users into a union and exposes their child via /tree/:seed once born", async () => {
     const now = Date.now();
     const day = dayKey(now);

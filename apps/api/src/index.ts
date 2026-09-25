@@ -48,6 +48,15 @@ interface UserRow {
   password_salt: string;
 }
 
+// Public, no auth: lets the desktop client check a pseudo before it commits
+// to /auth/register, so a collision with someone else's account doesn't
+// surface only after the user has already typed a password (R7).
+app.get("/pseudo/:p", async (c) => {
+  const seed = normalizeSeed(c.req.param("p"));
+  const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE seed = ?`).bind(seed).first();
+  return c.json({ seed, available: !existing });
+});
+
 app.post("/auth/register", rateLimitAuth, async (c) => {
   const body = await c.req.json<{ pseudo?: string; password?: string }>().catch(() => ({}) as { pseudo?: string; password?: string });
   const pseudo = body.pseudo?.trim();
