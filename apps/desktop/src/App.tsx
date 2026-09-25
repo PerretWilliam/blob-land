@@ -1,11 +1,12 @@
 import { journal } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GardenScreen } from "@/components/garden-screen";
 import { JoinGardenScreen } from "@/components/join-garden-screen";
 import { PseudoScreen } from "@/components/pseudo-screen";
 import { getGarden, ping, setVisibility, type AuthResponse, type GardenBlob } from "@/lib/api";
+import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { loadState, saveState, type AppState } from "@/lib/state";
 
 const PING_INTERVAL_MS = 60_000;
@@ -15,12 +16,21 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [joining, setJoining] = useState(false);
   const [blobs, setBlobs] = useState<GardenBlob[]>([]);
+  const [island, setIsland] = useState<IslandLayout>(() => defaultIsland(ISLAND_SIZE));
+  const saveIslandTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
-    loadState()
-      .then(setAppState)
-      .finally(() => setLoaded(true));
+    Promise.all([loadState().then(setAppState), loadIsland().then(setIsland)]).finally(() => setLoaded(true));
   }, []);
+
+  // A drag paints many cells in a row; save once it settles, so overlapping
+  // async writes can't land out of order and leave a stale island on disk.
+  function handleIslandChange(next: IslandLayout) {
+    if (next === island) return;
+    setIsland(next);
+    clearTimeout(saveIslandTimer.current);
+    saveIslandTimer.current = setTimeout(() => void saveIsland(next), 400);
+  }
 
   const refreshGarden = useCallback(async (token: string) => {
     const { blobs } = await getGarden(token);
@@ -108,6 +118,8 @@ export default function App() {
       visible={appState.settings.visible}
       onToggleVisibility={handleToggleVisibility}
       onJoinGarden={() => setJoining(true)}
+      island={island}
+      onIslandChange={handleIslandChange}
     />
   );
 }

@@ -128,3 +128,17 @@
     @apply font-sans;
     }
 }
+/* Clouds drifting across a scene's sky (see components/scene.tsx). */
+@keyframes cloud-drift {
+  from {
+    transform: translateX(-25vw);
+  }
+  to {
+    transform: translateX(105vw);
+  }
+}
+
+/* A black outline that follows a blob's silhouette (hover / selected, see components/scene.tsx). */
+@utility blob-outline {
+  filter: drop-shadow(2px 0 0 #000) drop-shadow(-2px 0 0 #000) drop-shadow(0 2px 0 #000) drop-shadow(0 -2px 0 #000);
+}
