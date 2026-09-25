@@ -17,6 +17,7 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "notification:default",
-    "autostart:default"
+    "autostart:default",
+    "http:default"
   ]
 }

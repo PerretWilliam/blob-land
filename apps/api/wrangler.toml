@@ -1,0 +1,19 @@
+name = "blob-land-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-25"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "blob-land"
+database_id = "REPLACE_ME" # `wrangler d1 create blob-land`, then paste the id here
+
+# Cloudflare's Rate Limiting binding, applied to /auth/* only (see src/index.ts).
+[[unsafe.bindings]]
+name = "AUTH_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+# JWT_SECRET is a secret, not a var: `wrangler secret put JWT_SECRET`.
+# For local dev/tests, put it in a .dev.vars file (gitignored).
