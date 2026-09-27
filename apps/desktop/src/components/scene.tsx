@@ -125,6 +125,8 @@ const HOP_SPEED = 0.045;
 const FOCUS_ZOOM = 2;
 // On a big map, following a blob shows about this many tiles across.
 const FOCUS_TILES = 6;
+// The most the island is laid out bigger than fitting the screen (see `res`).
+const MAX_RES = 16;
 // Clouds zoom this fraction as much as the ground: farther away, so they move less.
 const CLOUD_PARALLAX = 0.5;
 const CAMERA_EASE_S = 0.45;
@@ -430,29 +432,50 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selected]);
+  /*
+   * Zooming in scales the world with a transform, which only magnifies what
+   * was already drawn: blurry past ×1.5 or so. So the island is also laid out
+   * `res` times bigger (a power of two near the zoom) and the transform only
+   * makes up the difference; everything gets redrawn sharp at each step.
+   * Camera coordinates stay those of the island at `res` 1 ("fit" px).
+   */
+  const [res, setRes] = useState(1);
+  const resRef = useRef(1);
+  const resWanted = useRef(1);
   // The island is sized by CSS from the window; blobs follow its tile width.
-  const [islandPx, setIslandPx] = useState(0);
+  const [fitPx, setFitPx] = useState(0);
   /*
    * The island box and the camera's sizes, read once per resize. The frame
    * loop writes transforms; reading a size after that would force a layout
-   * per blob per frame. `left`/`top`: the box's corner in the camera's
-   * unscaled coordinates (it's centred with a -50%/-50% translate that
-   * offsetLeft/Top ignore).
+   * per blob per frame. `bw`/`bh`: the box as laid out (res included);
+   * `w`/`h`/`left`/`top`: the box in fit px, in the camera's coordinates
+   * (it's centred with a -50%/-50% translate that offsetLeft/Top ignore,
+   * which keeps its centre `cx`/`cy` put whatever `res`).
    */
-  const size = useRef({ w: 0, h: 0, left: 0, top: 0, camW: 0, camH: 0 });
+  const size = useRef({ bw: 0, bh: 0, w: 0, h: 0, cx: 0, cy: 0, left: 0, top: 0, camW: 0, camH: 0 });
+  function measure() {
+    const [box, cam] = [islandRef.current, cameraRef.current];
+    if (!box || !cam) return;
+    const [bw, bh, r] = [box.clientWidth, box.clientHeight, resRef.current];
+    const [w, h, cx, cy] = [bw / r, bh / r, box.offsetLeft, box.offsetTop];
+    size.current = { bw, bh, w, h, cx, cy, left: cx - w / 2, top: cy - h / 2, camW: cam.clientWidth, camH: cam.clientHeight };
+    setFitPx(w);
+  }
   useLayoutEffect(() => {
     const [box, cam] = [islandRef.current, cameraRef.current];
     if (!box || !cam) return;
-    const observer = new ResizeObserver(() => {
-      const [w, h] = [box.clientWidth, box.clientHeight];
-      size.current = { w, h, left: box.offsetLeft - w / 2, top: box.offsetTop - h / 2, camW: cam.clientWidth, camH: cam.clientHeight };
-      setIslandPx(w);
-    });
+    const observer = new ResizeObserver(measure);
     observer.observe(box);
     observer.observe(cam);
     return () => observer.disconnect();
   }, []);
-  const blobSize = Math.max(32 / baseZoom, Math.round(((islandPx * 2 * HALF_W) / island.w) * blobScale));
+  // A new layout size: measure it now, before the next frame places anything.
+  useLayoutEffect(() => {
+    resRef.current = res;
+    measure();
+  }, [res]);
+  // In the box's own px, like everything inside it.
+  const blobSize = res * Math.max(32 / baseZoom, Math.round(((fitPx * 2 * HALF_W) / island.w) * blobScale));
   const blobSizeRef = useRef(blobSize);
   blobSizeRef.current = blobSize;
   // Per blob: the anchor (moved), its hopping body and shadow, and its label.
@@ -476,8 +499,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   /** A blob's feet, in px from the island box's top-left corner. */
   function blobPx(p: GroundPoint & { lift: number }) {
     const { left, top } = groundRef.current(p);
-    const { w, h } = size.current;
-    return { x: (left / 100) * w, y: (top / 100) * h - (p.lift * h) / islandGeomRef.current.h };
+    const { bw, bh } = size.current;
+    return { x: (left / 100) * bw, y: (top / 100) * bh - (p.lift * bh) / islandGeomRef.current.h };
   }
 
   function applyPosition(seed: string, p: GroundPoint & { lift: number }) {
@@ -548,10 +571,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const cam = cameraRef.current;
     const { camW: w, camH: h, left, top } = size.current;
     if (!cam || !w) return;
-    // A blob's head, in the camera's unscaled coordinates.
+    const r = resRef.current;
+    // A blob's head, in fit px.
     const headOf = (p: GroundPoint & { lift: number }) => {
       const feet = blobPx(p);
-      return { x: left + feet.x, y: top + feet.y - blobSizeRef.current * 0.4 };
+      return { x: left + feet.x / r, y: top + (feet.y - blobSizeRef.current * 0.4) / r };
     };
     const seed = selectedRef.current;
     const p = seed ? shown.current.get(seed) : undefined;
@@ -567,14 +591,24 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const c = camera.current ?? target;
     const next = { x: c.x + (target.x - c.x) * k, y: c.y + (target.y - c.y) * k, z: c.z + (target.z - c.z) * k };
     camera.current = next;
-    cam.style.transform = `translate(${w / 2 - next.x * next.z}px, ${h / 2 - next.y * next.z}px) scale(${next.z})`;
+    // The box is laid out `r` times bigger around its centre, so scale by what's left.
+    const { cx, cy } = size.current;
+    const [scale, grow] = [next.z / r, next.z * (1 - 1 / r)];
+    cam.style.transform = `translate(${w / 2 - next.x * next.z + cx * grow}px, ${h / 2 - next.y * next.z + cy * grow}px) scale(${scale})`;
+    // Re-lay out at the power of two nearest the zoom once the scale strays
+    // too far from 1 (not at every step, so zooming doesn't keep relaying out).
+    const want = Math.min(MAX_RES, 2 ** Math.round(Math.log2(Math.max(1, next.z))));
+    if (want !== resWanted.current && Math.abs(Math.log2(scale)) > 0.6) {
+      resWanted.current = want;
+      setRes(want);
+    }
     const clouds = cloudsRef.current;
     if (clouds) {
       const z = 1 + (next.z - 1) * CLOUD_PARALLAX;
       clouds.style.transform = `translate(${w / 2 - next.x * z}px, ${h / 2 - next.y * z}px) scale(${z})`;
     }
     // Labels divide by this to keep their on-screen size while zoomed.
-    cam.style.setProperty("--camera-zoom", String(next.z));
+    cam.style.setProperty("--camera-zoom", String(scale));
     cull();
   }
 
@@ -622,7 +656,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     }
     // Blobs a little past the edges too, so they're drawn before they walk in.
     const g = islandGeomRef.current;
-    const pad = (blobSizeRef.current * 2 * g.w) / (size.current.w || 1);
+    const pad = (blobSizeRef.current * 2 * g.w) / (size.current.bw || 1);
     const blobs = new Set<string>();
     for (const b of blobsRef.current) {
       const p = shown.current.get(b.seed);
@@ -975,7 +1009,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         ref={islandRef}
         className="absolute top-[54%] left-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{
-          width: `min(94cqw, ${84 * (island.w / island.h)}cqh)`,
+          width: `calc(min(94cqw, ${84 * (island.w / island.h)}cqh) * ${res})`,
           aspectRatio: `${island.w} / ${island.h}`,
         }}
       >
