@@ -16,7 +16,7 @@ export function CountryField({ value, onChange }: { value: string | null; onChan
       <select
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || null)}
-        className="rounded-md border bg-transparent px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="toon-input"
       >
         <option value="">Prefer not to say</option>
         {OPTIONS.map(({ code, name }) => (

@@ -1,6 +1,7 @@
 import { Blobatar } from "@blobatar/react";
 import { Baby, Heart, HeartCrack, type LucideIcon, Newspaper, Swords, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { EmptyState, LoadFailed } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { getGardenJournal, type GardenEvent } from "@/lib/api";
 
@@ -26,13 +27,15 @@ function since(ms: number): string {
 /** What's been happening in the garden: couples, breakups, births and big fights. */
 export function GardenNewsPanel({ token, onClose }: { token: string; onClose: () => void }) {
   const [news, setNews] = useState<{ now: number; events: GardenEvent[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  // Bumped by "Try again".
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
     const load = () =>
       getGardenJournal(token).then(
         (r) => live && (setNews(r), setError(null)),
-        (e: unknown) => live && setError(e instanceof Error ? e.message : String(e)),
+        (e: unknown) => live && setError(e),
       );
     void load();
     const id = setInterval(load, REFRESH_MS);
@@ -40,29 +43,29 @@ export function GardenNewsPanel({ token, onClose }: { token: string; onClose: ()
       live = false;
       clearInterval(id);
     };
-  }, [token]);
+  }, [token, attempt]);
 
   return (
     <aside
       aria-label="Garden news"
-      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col rounded-xl border bg-background/85 shadow-lg backdrop-blur-md"
+      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col toon"
     >
-      <header className="flex items-center gap-2 border-b p-3">
+      <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-sun">
         <Newspaper className="size-4" />
-        <h2 className="flex-1 text-sm font-semibold">Garden news</h2>
+        <h2 className="flex-1 text-base font-bold">Garden news</h2>
         <Button variant="ghost" size="icon-sm" aria-label="Close garden news" onClick={onClose}>
           <X />
         </Button>
       </header>
       <div className="overflow-y-auto p-2" aria-live="polite">
         {error && !news ? (
-          <p className="p-1 text-sm text-destructive" role="alert">
-            Couldn't load the news: {error}
-          </p>
+          <LoadFailed error={error} what="news" onRetry={() => setAttempt((n) => n + 1)} />
         ) : !news ? (
           <p className="p-1 text-sm text-muted-foreground">Loading…</p>
         ) : news.events.length === 0 ? (
-          <p className="p-1 text-sm text-muted-foreground">Nothing big yet. Give the garden a little time.</p>
+          <EmptyState face="sleepy" title="All quiet for now">
+            Couples, births, breakups and big fights will show up here. Give the garden a little time.
+          </EmptyState>
         ) : (
           <ul className="flex flex-col gap-1.5">
             {news.events.map((e) => {

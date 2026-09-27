@@ -63,14 +63,64 @@ export interface GardenClock {
 
 export const gardenTime = (clock: GardenClock) => clock.at + (Date.now() - clock.readAt) * clock.rate;
 
+/**
+ * A request that failed, said the way a player can act on. `offline`: the
+ * server couldn't be reached at all. `code`: the server's own error, for
+ * callers that react to one (see join-garden-screen).
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly offline = false,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
+// How long a request may take before it counts as unreachable.
+const TIMEOUT_MS = 10_000;
+
+// The server's errors a player can meet, in words they can act on. Anything
+// else is a bug on one side or the other: it's shown as is.
+const FRIENDLY: Record<string, string> = {
+  "invalid pseudo or password": "That pseudo and password don't match. Check them and try again.",
+  "pseudo already taken": "Someone in the garden already goes by that pseudo.",
+  "pseudo and password are required": "Pick a pseudo and a password first.",
+  "name already taken": "Another blob already has that name. Try a different one.",
+  "no account goes by that friend's pseudo": "No one in the garden goes by that friend's pseudo. Check the spelling, or leave it empty.",
+  "only a parent can name this blob": "Only its parents can name this blob.",
+  rate_limited: "That's a lot of tries in a row. Wait a minute, then try again.",
+  unauthorized: "Your session has expired. Log in again to get back to the garden.",
+};
+const SERVER_TROUBLE = "The garden is having trouble right now. Try again in a moment.";
+export const OFFLINE_MESSAGE = "Can't reach the garden. Check your internet connection, then try again.";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...init,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { "content-type": "application/json", ...init?.headers },
+    });
+  } catch {
+    throw new ApiError(OFFLINE_MESSAGE, true);
+  }
   const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!res.ok) throw new Error(body?.error ?? `request failed: ${res.status}`);
+  if (!res.ok) {
+    const code = body?.error;
+    throw new ApiError(res.status >= 500 ? SERVER_TROUBLE : ((code && FRIENDLY[code]) ?? code ?? SERVER_TROUBLE), false, code);
+  }
   return body as T;
+}
+
+/** Whether the garden's server answers at all (any answer will do). */
+export function reachable(): Promise<boolean> {
+  return fetch(API_URL, { signal: AbortSignal.timeout(5_000) }).then(
+    () => true,
+    () => false,
+  );
 }
 
 function authHeader(token: string) {

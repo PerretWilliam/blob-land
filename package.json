@@ -4,6 +4,8 @@
   "packageManager": "pnpm@10.0.0",
   "scripts": {
     "dev": "pnpm -r --parallel run \"/^dev/\"",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
     "sim:test": "pnpm --filter @blob-land/sim test",
     "api:dev": "pnpm --filter @blob-land/api dev",
     "api:test": "pnpm --filter @blob-land/api test",

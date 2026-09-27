@@ -109,7 +109,7 @@ export function IdentityFields({ value, onChange }: { value: Identity; onChange:
             type="button"
             aria-pressed={current === o}
             onClick={() => set(o)}
-            className={`flex-1 rounded-md border px-2 py-1.5 text-sm transition-colors ${current === o ? "border-foreground bg-foreground text-background" : "hover:bg-muted"}`}
+            className={`flex-1 rounded-xl border-[2.5px] border-ink px-2 py-1.5 text-sm font-semibold transition-colors ${current === o ? "bg-sun shadow-[0_3px_0_var(--ink)]" : "bg-white hover:bg-accent"}`}
           >
             {labels[o]}
           </button>

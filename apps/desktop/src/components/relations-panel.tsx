@@ -2,6 +2,7 @@ import { STATUSES, type RelationStatus } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
 import { Hand, Heart, HeartCrack, HeartHandshake, House, type LucideIcon, Search, Smile, Sparkles, Star, Swords, UserRound, X, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
+import { EmptyState, LoadFailed } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { getRelationships, type Relation } from "@/lib/api";
 
@@ -92,18 +93,20 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
     setQuery("");
     setOnly(null);
   }, [root]);
-  const [result, setResult] = useState<{ seed: string; relations?: Relation[]; error?: string } | null>(null);
+  const [result, setResult] = useState<{ seed: string; relations?: Relation[]; error?: unknown } | null>(null);
+  // Bumped by "Try again".
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!root) return;
     let live = true;
     getRelationships(root.seed).then(
       ({ relationships }) => live && setResult({ seed: root.seed, relations: relationships }),
-      (e: unknown) => live && setResult({ seed: root.seed, error: e instanceof Error ? e.message : String(e) }),
+      (e: unknown) => live && setResult({ seed: root.seed, error: e }),
     );
     return () => {
       live = false;
     };
-  }, [root]);
+  }, [root, attempt]);
   const current = result?.seed === root?.seed ? result : null;
   const mine = root?.seed === seed;
   const counts = new Map<RelationStatus, number>();
@@ -116,11 +119,11 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
   return (
     <aside
       aria-label="Relations"
-      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col rounded-xl border bg-background/85 shadow-lg backdrop-blur-md"
+      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col toon"
     >
-      <header className="flex items-center gap-2 border-b p-3">
+      <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-berry">
         <HeartHandshake className="size-4" />
-        <h2 className="flex-1 truncate text-sm font-semibold">{mine || !root ? "Relations" : `${root.name}'s relations`}</h2>
+        <h2 className="flex-1 truncate text-base font-bold">{mine || !root ? "Relations" : `${root.name}'s relations`}</h2>
         {!mine && seed ? (
           <Button variant="ghost" size="sm" onClick={() => setRoot({ seed, name: "" })}>
             Back to mine
@@ -157,7 +160,7 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search by name"
-                className="h-7 w-full rounded-md border bg-background/60 pr-2 pl-7 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-7 w-full rounded-lg border-2 border-ink bg-white pr-2 pl-7 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </label>
             <label>
@@ -165,7 +168,7 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as Sort)}
-                className="h-7 rounded-md border bg-background/60 px-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-7 rounded-lg border-2 border-ink bg-white px-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {Object.entries(SORTS).map(([key, { label }]) => (
                   <option key={key} value={key}>
@@ -179,12 +182,18 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
       ) : null}
       <div className="overflow-y-auto p-2">
         {!seed ? (
-          <p className="p-1 text-sm text-muted-foreground">Relations grow in the garden: join it, and your blob will start meeting others.</p>
+          <EmptyState face="sleepy" title="No one to meet here">
+            Relations grow in the garden. Join it from the main menu, and your blob will start meeting others.
+          </EmptyState>
         ) : current?.relations ? (
           current.relations.length === 0 ? (
-            <p className="p-1 text-sm text-muted-foreground">No one met yet. Give it a little time in the garden.</p>
+            <EmptyState face="thinking" seed={root?.seed} title="No one met yet">
+              Blobs meet as they wander the garden. Give it a little time, and friends will show up here.
+            </EmptyState>
           ) : shown.length === 0 ? (
-            <p className="p-1 text-sm text-muted-foreground">No one matches.</p>
+            <EmptyState face="unsure" title="No one matches">
+              No relation fits that search or filter. Try another name, or clear the filter.
+            </EmptyState>
           ) : (
             <ul className="flex flex-col gap-1.5">
               {shown.map((r) => (
@@ -192,10 +201,8 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
               ))}
             </ul>
           )
-        ) : current?.error ? (
-          <p className="p-1 text-sm text-destructive" role="alert">
-            Couldn't load the relations: {current.error}
-          </p>
+        ) : current && "error" in current ? (
+          <LoadFailed error={current.error} what="relations" onRetry={() => setAttempt((n) => n + 1)} />
         ) : (
           <p className="p-1 text-sm text-muted-foreground" aria-live="polite">
             Loading…

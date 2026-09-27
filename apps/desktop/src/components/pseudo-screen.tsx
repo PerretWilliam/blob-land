@@ -1,6 +1,8 @@
 import { MAX_NAME_LENGTH, type Identity } from "@blob-land/sim";
 import { useState } from "react";
 import { IdentityFields } from "@/components/blob-gender";
+import { normalizeSeed } from "blobatar";
+import { MenuScreen } from "@/components/main-menu";
 import { Button } from "@/components/ui/button";
 
 export interface PseudoScreenProps {
@@ -17,14 +19,15 @@ export function PseudoScreen({ onChosen }: PseudoScreenProps) {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-8">
-      <form onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4 rounded-lg border p-6">
-        <h1 className="text-xl font-semibold">Name your blob</h1>
+    // The top blob of the stack is the one being named, as it's typed.
+    <MenuScreen seed={normalizeSeed(pseudo.trim())}>
+      <form onSubmit={submit} className="toon flex w-full flex-col gap-4 p-5">
+        <h2 className="text-xl font-bold">Name your blob</h2>
         <p className="text-sm text-muted-foreground">
           This becomes your blob right away, on this device — no account, no network yet.
         </p>
         <input
-          className="rounded-md border bg-transparent px-3 py-2 text-sm"
+          className="toon-input"
           placeholder="pseudo"
           maxLength={MAX_NAME_LENGTH}
           value={pseudo}
@@ -32,10 +35,10 @@ export function PseudoScreen({ onChosen }: PseudoScreenProps) {
           autoFocus
         />
         <IdentityFields value={identity} onChange={setIdentity} />
-        <Button type="submit" disabled={!pseudo.trim()}>
+        <Button type="submit" size="lg" disabled={!pseudo.trim()}>
           Continue
         </Button>
       </form>
-    </main>
+    </MenuScreen>
   );
 }

@@ -1,8 +1,8 @@
 [package]
 name = "blob-land-desktop"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "A little world of blobs that live on their own"
+authors = ["William Perret"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

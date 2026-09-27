@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question or share an idea
+    url: https://github.com/PerretWilliam/blob-land/discussions
+    about: Not sure it's a bug, or want to talk an idea through first? Start a discussion.
+  - name: Report a security problem
+    url: https://github.com/PerretWilliam/blob-land/security/advisories/new
+    about: Please don't open a public issue for a vulnerability. Report it privately here.

@@ -1,0 +1,44 @@
+name: Feature idea
+description: Something new for blobs to do, or for players to see.
+title: "feat: "
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome. Blob Land keeps a few promises, written down in [The Blob Land way](https://github.com/PerretWilliam/blob-land/blob/main/CONTRIBUTING.md#the-blob-land-way): please read them first, as ideas that break one can't be taken on.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What would it be, as a player would see it?
+      placeholder: Blobs could have picnics on the beach when the weather is nice.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it would make Blob Land better
+      description: What does it add to the blobs' lives, or to watching them?
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How it could work
+      description: Optional. Any thoughts on how it could fit in.
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: The Blob Land way
+      options:
+        - label: I've read the rules of the game, and this idea keeps to them.
+          required: true
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you like to build it?
+      options:
+        - "Yes, I'd like to open a pull request"
+        - Maybe, with some help
+        - No, just sharing the idea

@@ -1,0 +1,40 @@
+name: Change a rule of the game
+description: Propose a change to The Blob Land way, or to how the game fundamentally works.
+title: "rule: "
+labels: ["rule change", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The rules in [The Blob Land way](https://github.com/PerretWilliam/blob-land/blob/main/CONTRIBUTING.md#the-blob-land-way) protect what Blob Land is. They can change, but only after a good case is made here, before any code is written.
+  - type: dropdown
+    id: rule
+    attributes:
+      label: Which rule?
+      options:
+        - 1. Blobs live their own lives
+        - 2. Being away never hurts
+        - 3. Kind by design
+        - 4. No money in the garden
+        - 5. A blob is its name
+        - 6. Believable, never scripted
+        - 7. Your island is yours, offline
+        - 8. Everyone's welcome
+        - 9. It looks like one world
+        - 10. Light enough for any laptop
+        - A new rule
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: What should change?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What would players gain, and what could they lose?
+    validations:
+      required: true

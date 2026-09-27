@@ -2,6 +2,7 @@ import { activityLog, gardenSize, listNames, segmentAt, type Identity } from "@b
 import {
   BookOpen,
   Check,
+  DoorOpen,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -23,6 +24,7 @@ import {
   ArrowUpFromLine,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { EmptyState, RetryButton } from "@/components/empty-state";
 import { FamilyPanel } from "@/components/family-tree";
 import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { RelationsPanel } from "@/components/relations-panel";
@@ -35,6 +37,16 @@ import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, 
 import { usePrefersReducedMotion } from "@/lib/motion";
 
 export interface GardenScreenProps {
+  /** The scene it opens on. */
+  initialView: "private" | "garden";
+  /** Back to the main menu. */
+  onMainMenu: () => void;
+  /** Whether the garden's server can be reached; `onRetryOnline` looks again. */
+  online: boolean;
+  onRetryOnline: () => Promise<boolean>;
+  /** A change that couldn't be saved, to tell the player about. */
+  notice: string | null;
+  onDismissNotice: () => void;
   localPseudo: string;
   localSeed: string;
   /** The private blob's own, locally lived timeline and identity. */
@@ -64,6 +76,12 @@ const STATE_TICK_MS = 5_000;
 const NEWBORN_MS = 30 * 60 * 1000;
 
 export function GardenScreen({
+  initialView,
+  onMainMenu,
+  online,
+  onRetryOnline,
+  notice,
+  onDismissNotice,
   localPseudo,
   localSeed,
   life,
@@ -81,7 +99,7 @@ export function GardenScreen({
   onIslandChange,
 }: GardenScreenProps) {
   // One scene at a time: your own island, or the garden (with you in it).
-  const [view, setView] = useState<"private" | "garden">("private");
+  const [view, setView] = useState(initialView);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [tool, setTool] = useState<IslandTool>("grass");
@@ -182,7 +200,7 @@ export function GardenScreen({
 
       <nav
         aria-label="Menu"
-        className="absolute top-4 left-4 z-10 flex w-max flex-col gap-1 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md"
+        className="absolute top-4 left-4 z-10 flex w-max flex-col gap-1 toon p-1.5"
       >
         <Button
           variant="ghost"
@@ -205,7 +223,7 @@ export function GardenScreen({
                 Garden
               </MenuItem>
             ) : (
-              <MenuItem icon={<Trees />} onClick={onJoinGarden}>
+              <MenuItem icon={<Trees />} onClick={onJoinGarden} disabled={!online}>
                 Join the garden
               </MenuItem>
             )}
@@ -256,6 +274,9 @@ export function GardenScreen({
 
             <div className="my-1 h-px bg-border" aria-hidden="true" />
 
+            <MenuItem icon={<DoorOpen />} onClick={onMainMenu}>
+              Main menu
+            </MenuItem>
             {inGarden ? (
               <>
                 <MenuItem icon={visible ? <Eye /> : <EyeOff />} onClick={onToggleVisibility}>
@@ -278,6 +299,30 @@ export function GardenScreen({
         ) : null}
       </nav>
 
+      {notice ? <Notice text={notice} onDismiss={onDismissNotice} /> : null}
+
+      {inGarden && !online ? (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 p-6">
+          <div className="toon w-full max-w-sm">
+            <EmptyState
+              face="sad"
+              seed={account.seed}
+              title="The garden is out of reach"
+              action={
+                <div className="flex flex-col items-center gap-2">
+                  <RetryButton onRetry={onRetryOnline} />
+                  <Button variant="link" onClick={() => switchView("private")}>
+                    Go to my island
+                  </Button>
+                </div>
+              }
+            >
+              The garden lives online, and it can't be reached right now. Check your internet connection. Your own island keeps living offline.
+            </EmptyState>
+          </div>
+        </div>
+      ) : null}
+
       {inGarden && regions && regions.list.length > 1 ? <RegionSwitcher regions={regions} onVisit={onVisit} /> : null}
 
       {panel === "journal" ? <JournalPanel segments={life.segments} name={localPseudo} now={now} onClose={() => setPanel(null)} /> : null}
@@ -295,7 +340,7 @@ export function GardenScreen({
       {panel === "news" && account ? <GardenNewsPanel token={account.token} onClose={() => setPanel(null)} /> : null}
 
       {editing && !inGarden ? (
-        <div className="absolute bottom-4 left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md">
+        <div className="absolute bottom-4 left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 toon p-1.5">
           <IslandToolbar
             tool={tool}
             onTool={setTool}
@@ -310,6 +355,27 @@ export function GardenScreen({
   );
 }
 
+// How long a notice stays up.
+const NOTICE_MS = 7_000;
+
+/** A change that didn't go through: a note at the bottom, gone after a while. */
+function Notice({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const id = setTimeout(onDismiss, NOTICE_MS);
+    return () => clearTimeout(id);
+  }, [text, onDismiss]);
+  return (
+    <div role="alert" className="toon absolute bottom-4 left-1/2 z-30 flex w-max max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 bg-sun px-4 py-2.5">
+      <p className="text-sm font-medium">
+        <span className="font-bold">Not saved.</span> {text}
+      </p>
+      <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onClick={onDismiss}>
+        <X />
+      </Button>
+    </div>
+  );
+}
+
 /** What your blob has been up to: its current activity, then the last few
  * days of changes, newest first. */
 function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["segments"]; name: string; now: number; onClose: () => void }) {
@@ -321,11 +387,11 @@ function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["s
   return (
     <aside
       aria-label={`${name}'s journal`}
-      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-72 flex-col rounded-xl border bg-background/85 shadow-lg backdrop-blur-md"
+      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-72 flex-col toon"
     >
-      <header className="flex items-center gap-2 border-b p-3">
+      <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-sky">
         <BookOpen className="size-4" />
-        <h2 className="flex-1 text-sm font-semibold">{name}'s journal</h2>
+        <h2 className="flex-1 text-base font-bold">{name}'s journal</h2>
         <Button variant="ghost" size="icon-sm" aria-label="Close journal" onClick={onClose}>
           <X />
         </Button>
@@ -368,7 +434,7 @@ function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScree
   return (
     <nav
       aria-label="Islands"
-      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md"
+      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 toon p-1.5"
     >
       <Button variant="ghost" size="icon-sm" aria-label="Previous island" disabled={!prev} onClick={() => prev && onVisit(prev.region)}>
         <ChevronLeft />
@@ -392,11 +458,13 @@ function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScree
 function MenuItem({
   icon,
   active = false,
+  disabled,
   onClick,
   children,
 }: {
   icon: ReactNode;
   active?: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -405,6 +473,7 @@ function MenuItem({
       variant={active ? "secondary" : "ghost"}
       className="justify-start"
       aria-current={active ? "page" : undefined}
+      disabled={disabled}
       onClick={onClick}
     >
       {icon}

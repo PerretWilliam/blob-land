@@ -2,6 +2,7 @@ import { MAX_NAME_LENGTH } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
 import { Check, Heart, Network, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { EmptyState, LoadFailed } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { getTree, renameChild, type FamilyChild, type FamilyMember, type FamilyTree } from "@/lib/api";
 
@@ -185,7 +186,7 @@ function RenameForm({ initial, onRename, onDone }: { initial: string; onRename: 
           aria-label="New name"
           aria-invalid={error ? true : undefined}
           maxLength={MAX_NAME_LENGTH}
-          className="h-6 min-w-0 flex-1 rounded border bg-background px-1.5 text-xs"
+          className="h-6 min-w-0 flex-1 rounded-md border-2 border-ink bg-white px-1.5 text-xs"
           value={value}
           onChange={(e) => setValue(e.target.value)}
         />
@@ -214,15 +215,15 @@ export function FamilyPanel({
   onClose: () => void;
 }) {
   const [root, setRoot] = useState(seed);
-  const [result, setResult] = useState<{ seed: string; tree?: FamilyTree; error?: string } | null>(null);
-  // Bumped after a rename, to reload the tree with the new name.
+  const [result, setResult] = useState<{ seed: string; tree?: FamilyTree; error?: unknown } | null>(null);
+  // Bumped after a rename (to show the new name) and by "Try again".
   const [version, setVersion] = useState(0);
   useEffect(() => {
     if (!root) return;
     let live = true;
     getTree(root).then(
       (tree) => live && setResult({ seed: root, tree }),
-      (e: unknown) => live && setResult({ seed: root, error: e instanceof Error ? e.message : String(e) }),
+      (e: unknown) => live && setResult({ seed: root, error: e }),
     );
     return () => {
       live = false;
@@ -231,7 +232,7 @@ export function FamilyPanel({
   const current = result?.seed === root ? result : null;
 
   async function rename(child: string, name: string) {
-    if (!token) throw new Error("Sign in to rename");
+    if (!token) throw new Error("Log in to the garden to name this blob.");
     await renameChild(token, child, name);
     setVersion((v) => v + 1);
   }
@@ -239,11 +240,11 @@ export function FamilyPanel({
   return (
     <aside
       aria-label="Family tree"
-      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col rounded-xl border bg-background/85 shadow-lg backdrop-blur-md"
+      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col toon"
     >
-      <header className="flex items-center gap-2 border-b p-3">
+      <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-berry">
         <Network className="size-4" />
-        <h2 className="flex-1 text-sm font-semibold">Family tree</h2>
+        <h2 className="flex-1 text-base font-bold">Family tree</h2>
         {root !== seed && seed ? (
           <Button variant="ghost" size="sm" onClick={() => setRoot(seed)}>
             Back to mine
@@ -255,13 +256,13 @@ export function FamilyPanel({
       </header>
       <div className="overflow-y-auto">
         {!seed ? (
-          <p className="p-3 text-sm text-muted-foreground">Families grow in the garden: join it, pair up with another blob, and your children will show up here.</p>
+          <EmptyState face="sleepy" title="No family yet">
+            Families grow in the garden. Join it from the main menu, pair up with another blob, and your children will show up here.
+          </EmptyState>
         ) : current?.tree ? (
           <FamilyTreeView tree={current.tree} viewer={seed} onOpen={setRoot} onRename={rename} />
-        ) : current?.error ? (
-          <p className="p-3 text-sm text-destructive" role="alert">
-            Couldn't load the family tree: {current.error}
-          </p>
+        ) : current && "error" in current ? (
+          <LoadFailed error={current.error} what="family tree" onRetry={() => setVersion((v) => v + 1)} />
         ) : (
           <p className="p-3 text-sm text-muted-foreground" aria-live="polite">
             Loading…

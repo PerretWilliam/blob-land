@@ -1,10 +1,13 @@
 name: build
 
+# Building the app on three systems is slow and, on macOS, costly in Actions
+# minutes: it runs for a release of the app (the tag Changesets pushes) or by
+# hand, not on every push. Pull requests get the quick checks in ci.yml.
 on:
   push:
-    branches:
-      - main
-  pull_request:
+    tags:
+      - "@blob-land/desktop@*"
+  workflow_dispatch:
 
 jobs:
   build:

@@ -1,10 +1,16 @@
 import { MAX_NAME_LENGTH, type Identity } from "@blob-land/sim";
 import { useState } from "react";
 import { CountryField } from "@/components/country-field";
+import { normalizeSeed } from "blobatar";
+import { MenuScreen } from "@/components/main-menu";
 import { Button } from "@/components/ui/button";
-import { checkPseudo, login, register, type AuthResponse } from "@/lib/api";
+import { EmptyState, RetryButton } from "@/components/empty-state";
+import { ApiError, checkPseudo, login, register, type AuthResponse } from "@/lib/api";
 
 export interface JoinGardenScreenProps {
+  /** Whether the garden's server can be reached; `onRetry` looks again. */
+  online: boolean;
+  onRetry: () => Promise<boolean>;
   localPseudo: string;
   /** Carried over to the account's blob. */
   identity: Identity;
@@ -12,7 +18,7 @@ export interface JoinGardenScreenProps {
   onCancel: () => void;
 }
 
-export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: JoinGardenScreenProps) {
+export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoined, onCancel }: JoinGardenScreenProps) {
   const [mode, setMode] = useState<"register" | "login">("register");
   const [pseudo, setPseudo] = useState(localPseudo);
   const [password, setPassword] = useState("");
@@ -31,14 +37,13 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
       const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity, country, friend));
       onJoined(pseudo, response);
     } catch (err) {
-      // Tauri plugins reject with plain strings, not Errors.
-      const message = err instanceof Error ? err.message : String(err);
-      if (mode === "register" && message === "pseudo already taken") {
-        const availability = await checkPseudo(pseudo);
-        setSuggestions(availability.suggestions ?? []);
-        setError("That pseudo is already taken for an account — pick a variant below, or edit it yourself.");
+      if (mode === "register" && err instanceof ApiError && err.code === "pseudo already taken") {
+        const availability = await checkPseudo(pseudo).catch(() => null);
+        setSuggestions(availability?.suggestions ?? []);
+        setError("Someone in the garden already goes by that pseudo. Pick one of these, or change it yourself.");
       } else {
-        setError(message);
+        // Tauri plugins reject with plain strings, not Errors.
+        setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       setPending(false);
@@ -46,16 +51,35 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-8">
-      <form onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4 rounded-lg border p-6">
-        <h1 className="text-xl font-semibold">{mode === "login" ? "Log in to your account" : "Join the garden"}</h1>
+    <MenuScreen seed={normalizeSeed(pseudo.trim() || localPseudo)}>
+      {!online ? (
+        <div className="toon w-full">
+          <EmptyState
+            face="sad"
+            seed={normalizeSeed(localPseudo)}
+            title="The garden is out of reach"
+            action={
+              <div className="flex flex-col items-center gap-2">
+                <RetryButton onRetry={onRetry} />
+                <Button variant="link" onClick={onCancel}>
+                  Back to the menu
+                </Button>
+              </div>
+            }
+          >
+            Joining needs an internet connection, and the garden can't be reached right now. Your own island keeps living meanwhile.
+          </EmptyState>
+        </div>
+      ) : (
+      <form onSubmit={submit} className="toon flex w-full flex-col gap-3 p-5">
+        <h2 className="text-xl font-bold">{mode === "login" ? "Log in to your account" : "Join the garden"}</h2>
         {mode === "register" ? (
           <p className="text-sm text-muted-foreground">
             Your private blob keeps its own seed either way — joining just grows a public copy in the garden.
           </p>
         ) : null}
         <input
-          className="rounded-md border bg-transparent px-3 py-2 text-sm"
+          className="toon-input"
           placeholder="pseudo"
           maxLength={MAX_NAME_LENGTH}
           value={pseudo}
@@ -63,7 +87,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
           autoFocus
         />
         <input
-          className="rounded-md border bg-transparent px-3 py-2 text-sm"
+          className="toon-input"
           placeholder="password"
           type="password"
           value={password}
@@ -73,7 +97,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
           <>
             <CountryField value={country} onChange={setCountry} />
             <input
-              className="rounded-md border bg-transparent px-3 py-2 text-sm"
+              className="toon-input"
               placeholder="a friend's pseudo, to live on their island (optional)"
               maxLength={MAX_NAME_LENGTH}
               value={friend}
@@ -88,7 +112,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
               <button
                 key={s}
                 type="button"
-                className="rounded-md border px-2 py-1 text-xs"
+                className="rounded-lg border-2 border-ink bg-sun px-2 py-1 text-xs font-semibold shadow-[0_2px_0_var(--ink)]"
                 onClick={() => {
                   setPseudo(s);
                   setSuggestions([]);
@@ -100,20 +124,21 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
             ))}
           </div>
         ) : null}
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" size="lg" disabled={pending}>
           {mode === "login" ? "Log in" : "Join the garden"}
         </Button>
         <button
           type="button"
-          className="text-sm text-muted-foreground underline"
+          className="text-sm font-medium text-muted-foreground underline decoration-2 underline-offset-4 hover:text-ink"
           onClick={() => setMode(mode === "login" ? "register" : "login")}
         >
           {mode === "login" ? "New account? Join instead" : "Already joined? Log in"}
         </button>
-        <button type="button" className="text-sm text-muted-foreground underline" onClick={onCancel}>
+        <button type="button" className="text-sm font-medium text-muted-foreground underline decoration-2 underline-offset-4 hover:text-ink" onClick={onCancel}>
           Not now
         </button>
       </form>
-    </main>
+      )}
+    </MenuScreen>
   );
 }
