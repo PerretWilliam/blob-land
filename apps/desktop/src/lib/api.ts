@@ -33,6 +33,15 @@ function authHeader(token: string) {
   return { authorization: `Bearer ${token}` };
 }
 
+export interface PseudoAvailability {
+  available: boolean;
+  suggestions?: string[];
+}
+
+export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
+  return request(`/pseudo/${encodeURIComponent(pseudo)}`);
+}
+
 export function register(pseudo: string, password: string): Promise<AuthResponse> {
   return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password }) });
 }
@@ -55,4 +64,41 @@ export function setVisibility(token: string, visible: boolean): Promise<{ ok: tr
 
 export function ping(token: string): Promise<{ ok: true }> {
   return request("/me/ping", { method: "PATCH", headers: authHeader(token) });
+}
+
+/** GET /tree/:seed — public, no token. Children's names share one namespace
+ * with pseudos; unborn children are listed with a future `born_at`. */
+export interface FamilyMember {
+  seed: string;
+  pseudo: string;
+}
+
+export interface FamilyChild {
+  seed: string;
+  name: string | null;
+  born_at: number;
+  depth: number;
+  /** The couple it was born to. */
+  parents: [FamilyMember, FamilyMember];
+}
+
+export interface FamilyTree {
+  seed: string;
+  name: string | null;
+  parents: FamilyMember[] | null;
+  partner: FamilyMember | null;
+  children: FamilyChild[];
+}
+
+export function getTree(seed: string): Promise<FamilyTree> {
+  return request(`/tree/${encodeURIComponent(seed)}`);
+}
+
+/** Parents only. Fails with "name already taken" when a pseudo or another child has it. */
+export function renameChild(token: string, seed: string, name: string): Promise<{ ok: true; name: string }> {
+  return request(`/blobs/${encodeURIComponent(seed)}/name`, {
+    method: "PATCH",
+    headers: authHeader(token),
+    body: JSON.stringify({ name }),
+  });
 }

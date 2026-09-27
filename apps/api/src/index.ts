@@ -6,6 +6,7 @@ import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
 import type { Env } from "./env";
 import { resolvePendingBirths, resolvePendingUnions } from "./garden";
+import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
 import { familyTree } from "./tree";
 
 type Vars = { userId: string };
@@ -48,6 +49,26 @@ interface UserRow {
   password_salt: string;
 }
 
+// Public, no auth: lets the desktop client check a pseudo before it commits
+// to /auth/register, so a collision with someone else's account doesn't
+// surface only after the user has already typed a password (R7).
+app.get("/pseudo/:p", async (c) => {
+  const raw = c.req.param("p");
+  const seed = normalizeSeed(raw);
+  // Children's names count too: pseudos and names are one namespace.
+  if (!(await nameTaken(c.env.DB, raw))) return c.json({ seed, available: true });
+
+  // Deterministic short suffixes, checked in order, until 3 free ones are
+  // found — lets the desktop client offer variants right away instead of
+  // just reporting the collision.
+  const suggestions: string[] = [];
+  for (let i = 2; suggestions.length < 3 && i < 100; i++) {
+    const candidate = `${raw}${i}`;
+    if (!(await nameTaken(c.env.DB, candidate))) suggestions.push(candidate);
+  }
+  return c.json({ seed, available: false, suggestions });
+});
+
 app.post("/auth/register", rateLimitAuth, async (c) => {
   const body = await c.req.json<{ pseudo?: string; password?: string }>().catch(() => ({}) as { pseudo?: string; password?: string });
   const pseudo = body.pseudo?.trim();
@@ -57,8 +78,7 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
   }
 
   const seed = normalizeSeed(pseudo);
-  const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE seed = ?`).bind(seed).first();
-  if (existing) return c.json({ error: "pseudo already taken" }, 409);
+  if (await nameTaken(c.env.DB, pseudo)) return c.json({ error: "pseudo already taken" }, 409);
 
   const { hash, salt } = await hashPassword(password);
   const id = crypto.randomUUID();
@@ -103,9 +123,10 @@ app.get("/garden", requireAuth, async (c) => {
   ).all<{ user_a: string; user_b: string }>();
   const paired = new Set(activeUnionMembers.flatMap((u) => [u.user_a, u.user_b]));
 
-  const { results: children } = await c.env.DB.prepare(`SELECT seed, born_at FROM blobs`).all<{
+  const { results: children } = await c.env.DB.prepare(`SELECT seed, born_at, name FROM blobs`).all<{
     seed: string;
     born_at: number;
+    name: string | null;
   }>();
 
   // No `state` here: the client is the one with stateAt, and recomputes it
@@ -117,7 +138,7 @@ app.get("/garden", requireAuth, async (c) => {
       ...users.map((u) => ({ seed: u.seed, pseudo: u.pseudo, paired: paired.has(u.id) })),
       ...children
         .filter((child) => child.born_at <= now)
-        .map((child) => ({ seed: child.seed, pseudo: null, paired: false })),
+        .map((child) => ({ seed: child.seed, pseudo: child.name, paired: false })),
     ],
   });
 });
@@ -137,6 +158,31 @@ app.patch("/me/ping", requireAuth, async (c) => {
   await resolvePendingUnions(c.env.DB, now);
   await resolvePendingBirths(c.env.DB, now);
   return c.json({ ok: true });
+});
+
+// Either parent can rename their child, within the shared pseudo/name namespace.
+app.patch("/blobs/:seed/name", requireAuth, async (c) => {
+  const seed = c.req.param("seed");
+  const body = await c.req.json<{ name?: unknown }>().catch(() => ({}) as { name?: unknown });
+  const name = cleanName(body.name);
+  if (!name) return c.json({ error: `a name of 1 to ${MAX_NAME_LENGTH} characters is required` }, 400);
+
+  const parent = await c.env.DB.prepare(
+    `SELECT 1 FROM blobs b JOIN unions u ON u.id = b.parent_union_id
+     WHERE b.seed = ? AND (u.user_a = ?2 OR u.user_b = ?2)`,
+  )
+    .bind(seed, c.get("userId"))
+    .first();
+  if (!parent) return c.json({ error: "only a parent can name this blob" }, 403);
+
+  if (await nameTaken(c.env.DB, name, seed)) return c.json({ error: "name already taken" }, 409);
+  try {
+    await c.env.DB.prepare(`UPDATE blobs SET name = ?, name_key = ? WHERE seed = ?`).bind(name, normalizeSeed(name), seed).run();
+  } catch {
+    // name_key UNIQUE: another child took it between the check and the write.
+    return c.json({ error: "name already taken" }, 409);
+  }
+  return c.json({ ok: true, name });
 });
 
 // Genealogy is part of the public garden layer, not the private one — no auth.

@@ -6,9 +6,21 @@
     "dev": "pnpm --filter @blob-land/desktop tauri dev",
     "sim:test": "pnpm --filter @blob-land/sim test",
     "api:dev": "pnpm --filter @blob-land/api dev",
-    "api:test": "pnpm --filter @blob-land/api test"
+    "api:test": "pnpm --filter @blob-land/api test",
+    "changeset": "changeset",
+    "prepare": "husky"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "workerd", "sharp"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd",
+      "sharp"
+    ]
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3",
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
+    "husky": "^9.1.7"
   }
 }

@@ -73,6 +73,31 @@ describe("blob-land API", () => {
     expect(body.blobs.some((b) => b.pseudo === "wanderer")).toBe(true);
   });
 
+  it("reports pseudo availability, and offers suggestions once taken", async () => {
+    const before = await SELF.fetch("https://api.test/pseudo/brand-new-pseudo");
+    expect(before.status).toBe(200);
+    expect(await jsonAs<{ available: boolean; suggestions?: string[] }>(before)).toMatchObject({ available: true });
+
+    await register("brand-new-pseudo");
+
+    const after = await SELF.fetch("https://api.test/pseudo/brand-new-pseudo");
+    const afterBody = await jsonAs<{ available: boolean; suggestions: string[] }>(after);
+    expect(afterBody.available).toBe(false);
+    expect(afterBody.suggestions.length).toBeGreaterThan(0);
+
+    // Each suggested variant must itself be free to register.
+    for (const suggestion of afterBody.suggestions) {
+      const check = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent(suggestion)}`);
+      expect(await jsonAs<{ available: boolean }>(check)).toMatchObject({ available: true });
+    }
+
+    // Same seed under different casing/surrounding whitespace must also read
+    // as taken — it's normalizeSeed's job (trim + lowercase), not a raw
+    // string match.
+    const variant = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent("  Brand-New-Pseudo  ")}`);
+    expect(await jsonAs<{ available: boolean }>(variant)).toMatchObject({ available: false });
+  });
+
   it("pairs two present users into a union and exposes their child via /tree/:seed once born", async () => {
     const now = Date.now();
     const day = dayKey(now);
@@ -108,6 +133,36 @@ describe("blob-land API", () => {
     const childTreeBody = await jsonAs<{ parents: { seed: string }[] | null }>(childTree);
     expect(childTreeBody.parents).not.toBeNull();
     expect(childTreeBody.parents!.map((p) => p.seed).sort()).toEqual([alice.seed, partnerPseudo].sort());
+
+    // The child is born with a generated name, in the namespace pseudos use.
+    const child = (await jsonAs<{ children: { seed: string; name: string; parents: { seed: string }[] }[]; partner: unknown }>(
+      await SELF.fetch(`https://api.test/tree/${encodeURIComponent(alice.seed)}`),
+    )).children[0]!;
+    expect(child.name).toMatch(/^[A-Z][a-z]+$/);
+    expect(child.parents.map((p) => p.seed).sort()).toEqual([alice.seed, partnerPseudo].sort());
+    const nameCheck = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent(child.name.toLowerCase())}`);
+    expect(await jsonAs<{ available: boolean }>(nameCheck)).toMatchObject({ available: false });
+    const squatter = await SELF.fetch("https://api.test/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pseudo: child.name, password: PASSWORD }),
+    });
+    expect(squatter.status).toBe(409);
+
+    // Only a parent may rename it, and not to anyone else's pseudo.
+    const rename = (token: string, name: string) =>
+      SELF.fetch(`https://api.test/blobs/${encodeURIComponent(child.seed)}/name`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name }),
+      });
+    const stranger = await register("stranger");
+    expect((await rename(stranger.token, "Pebble")).status).toBe(403);
+    expect((await rename(aliceLogin.token, partnerPseudo)).status).toBe(409);
+    expect((await rename(aliceLogin.token, "  ")).status).toBe(400);
+    expect((await rename(aliceLogin.token, "Pebble")).status).toBe(200);
+    const renamed = await jsonAs<{ name: string }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
+    expect(renamed.name).toBe("Pebble");
 
     // The union ends at birth, not via a separate endpoint: ended_at must now
     // be set, and both members must be free of any active union.
