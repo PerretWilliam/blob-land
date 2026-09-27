@@ -131,7 +131,8 @@ export function deltaFor(kind: InteractionKind, outcome: Outcome, ctx: MeetingCo
 
 /** How a meeting leaves each of them feeling: a nudge to mood, which lives in [-1, 1]. */
 export function moodShift(kind: InteractionKind, outcome: Outcome): number {
-  if (outcome === "bad") return -0.25;
+  // A real fight stays with you.
+  if (outcome === "bad") return kind === "argue" ? -0.4 : -0.25;
   if (kind === "argue" || kind === "sulk" || kind === "ignore") return outcome === "good" ? 0 : -0.15;
   return outcome === "good" ? 0.2 : 0.05;
 }

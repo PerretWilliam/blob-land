@@ -102,6 +102,15 @@ describe("stepWorld", () => {
     }
   });
 
+  it("leaves a blob cross after a fight", () => {
+    for (const segs of bySeed.values()) {
+      segs.forEach((s, i) => {
+        const next = segs[i + 1];
+        if (s.detail === "argue:bad" && next && (next.activity === "explore" || next.activity === "rest")) expect(next.expression).toBe("mad");
+      });
+    }
+  });
+
   it("never lets an axis move more than a step per meeting", () => {
     for (const m of step.meetings) for (const v of Object.values(m.delta)) expect(Math.abs(v)).toBeLessThanOrEqual(MAX_STEP);
   });

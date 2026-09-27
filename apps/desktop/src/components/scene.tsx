@@ -2,9 +2,10 @@ import { daylight, legIn, NEST, segmentAt, type Activity, type Attraction, type 
 import { Blobatar } from "@blobatar/react";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
-import { Coffee, Footprints, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
+import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ATTRACTION_LABELS, BlobGenderSign, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
+import { Button } from "@/components/ui/button";
 import { AuraFx, InteractionFx, momentAt, type Aura, type Moment } from "@/components/interaction-fx";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
@@ -75,6 +76,8 @@ export interface SceneProps {
   /** The time timelines are played back at (and the sky follows): real
    * time, or the garden's own clock, which may run faster (dev). */
   clock?: () => number;
+  /** Shows a "See relations" button on a blob's ID card. */
+  onShowRelations?: (seed: string, name: string) => void;
 }
 
 // Half the distance two partners keep between them, per ground axis.
@@ -329,7 +332,7 @@ function depthZ(tiles: number, p: GroundPoint) {
   return cellZ(i + j) + 1 + Math.round((u - i + (v - j)) * 490);
 }
 
-export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now }: SceneProps) {
+export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations }: SceneProps) {
   const tiles = layout.size;
   const [sceneRef, sceneInView] = useInView();
   const clockRef = useRef(clock);
@@ -830,6 +833,17 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                 </dd>
               </div>
             </dl>
+            {onShowRelations ? (
+              <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => {
+                  onShowRelations(blob.seed, blob.label);
+                  // The relations panel takes over from the card, on the same side.
+                  setSelected(null);
+                }}
+              >
+                <HeartHandshake />
+                See relations
+              </Button>
+            ) : null}
             {blob.onIdentityChange ? (
               <div className="mt-3 border-t pt-3">
                 <IdentityFields value={{ sex: blob.sex, attraction: blob.attraction }} onChange={blob.onIdentityChange} />

@@ -81,6 +81,8 @@ export function GardenScreen({
   const [tool, setTool] = useState<IslandTool>("grass");
   // The side panel: one at a time.
   const [panel, setPanel] = useState<"journal" | "family" | "relations" | "news" | null>(null);
+  // Whose relations the panel opens on: the player's own unless a blob's ID card asked.
+  const [relationsOf, setRelationsOf] = useState<{ seed: string; name: string } | undefined>(undefined);
   // Re-render now and then, so states (and expressions) follow the clock.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -156,7 +158,13 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={GARDEN_ISLAND} blobScale={0.55} clock={() => gardenTime(gardenClock)} />
+        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={GARDEN_ISLAND} blobScale={0.55}
+          clock={() => gardenTime(gardenClock)}
+          onShowRelations={(seed, name) => {
+            setRelationsOf({ seed, name });
+            setPanel("relations");
+          }}
+        />
       ) : (
         <Scene
           key="private"
@@ -221,6 +229,7 @@ export function GardenScreen({
               icon={<HeartHandshake />}
               active={panel === "relations"}
               onClick={() => {
+                setRelationsOf(undefined);
                 setPanel((p) => (p === "relations" ? null : "relations"));
                 setMenuOpen(false);
               }}
@@ -286,7 +295,9 @@ export function GardenScreen({
         />
       ) : null}
 
-      {panel === "relations" ? <RelationsPanel seed={account?.seed ?? null} onClose={() => setPanel(null)} /> : null}
+      {panel === "relations" ? (
+        <RelationsPanel key={relationsOf?.seed ?? "mine"} seed={account?.seed ?? null} start={relationsOf} onClose={() => setPanel(null)} />
+      ) : null}
       {panel === "news" && account ? <GardenNewsPanel token={account.token} onClose={() => setPanel(null)} /> : null}
 
       {editing && !inGarden ? (

@@ -97,6 +97,22 @@ export function awakeExpression(vitals: Vitals, rng: Rng): string {
   return pick(rng, ["idle", "happy", "idle"]);
 }
 
+/**
+ * A face that outlasts the moment: fresh from a fight a blob stays cross for
+ * a while, and anger cools off in its own time; a bad meeting leaves it down,
+ * a kiss leaves it dreamy.
+ */
+function lingering(last: Segment, rng: Rng): string | null {
+  if (last.activity === "meet" && last.detail) {
+    const [kind, outcome] = last.detail.split(":");
+    if (kind === "argue" && outcome !== "good") return "mad";
+    if (outcome === "bad") return pick(rng, ["sad", "unsure"]);
+    if (outcome === "good" && (kind === "hug" || kind === "kiss" || kind === "flirt") && rng() < 0.6) return "love";
+  }
+  if (last.expression === "mad" && last.activity !== "sleep" && rng() < 0.5) return "mad";
+  return null;
+}
+
 const span = (rng: Rng, activity: keyof typeof DURATION) => between(rng, DURATION[activity][0], DURATION[activity][1]);
 
 function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng): Exclude<Activity, "meet"> {
@@ -126,10 +142,10 @@ export function nextSolo(last: Segment, vitals: Vitals, rng: Rng): Segment {
     case "wake":
       return { ...base, end: t + span(rng, "wake"), expression: "sleepy", x: last.x, y: last.y };
     case "explore":
-      return { ...base, end: t + span(rng, "explore"), expression: awakeExpression(vitals, rng), x: between(rng, 0.03, 0.97), y: between(rng, 0.03, 0.97) };
+      return { ...base, end: t + span(rng, "explore"), expression: lingering(last, rng) ?? awakeExpression(vitals, rng), x: between(rng, 0.03, 0.97), y: between(rng, 0.03, 0.97) };
     case "rest":
       // Out of the nest corner, somewhere comfy.
-      return { ...base, end: t + span(rng, "rest"), expression: vitals.mood < -0.3 ? "sad" : "idle", x: between(rng, 0.25, 0.95), y: between(rng, 0.25, 0.95) };
+      return { ...base, end: t + span(rng, "rest"), expression: lingering(last, rng) ?? (vitals.mood < -0.3 ? "sad" : "idle"), x: between(rng, 0.25, 0.95), y: between(rng, 0.25, 0.95) };
     case "discover":
       return {
         ...base,
