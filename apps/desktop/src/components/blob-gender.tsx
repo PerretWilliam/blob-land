@@ -1,5 +1,6 @@
 import { ATTRACTIONS, SEXES, type Attraction, type Identity, type Sex } from "@blob-land/sim";
-import { useLayoutEffect, useRef, useState } from "react";
+import { blobatar } from "blobatar";
+import { useLayoutEffect, useRef } from "react";
 
 export const SEX_LABELS: Record<Sex, string> = { female: "Female", male: "Male", none: "Neither" };
 export const ATTRACTION_LABELS: Record<Attraction, string> = { women: "Women", men: "Men", any: "Anyone" };
@@ -13,18 +14,29 @@ interface Anchor {
 }
 
 // Measured once per seed and sign: a blob's silhouette never changes.
-const anchors = new Map<string, Anchor>();
+const anchors = new Map<string, Anchor | null>();
 
 /**
  * Samples the outline of the blob's body — every shape blobatar draws for
- * it — and finds the top of its head. Blobs come in ten
- * silhouettes, rotated and squashed, so the top is measured, not assumed.
+ * it — and finds the top of its head. Blobs come in ten silhouettes, rotated
+ * and squashed, so the top is measured, not assumed. Measured on a throwaway
+ * copy of the blob's SVG: the one on screen may be an <img>, or not drawn yet.
  * `offset` slides along the head (negative = to the left), for a bow worn
  * on the side.
  */
-function measure(svg: SVGSVGElement, offset: number): Anchor | null {
-  // The first filled group: animated blobatars wrap it in motion groups first.
-  const body = svg.querySelector("g[fill]");
+function measure(seed: string, offset: number): Anchor | null {
+  const box = document.createElement("div");
+  box.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+  box.innerHTML = blobatar(seed);
+  document.body.append(box);
+  try {
+    return measureBody(box.querySelector("g[fill]"), offset);
+  } finally {
+    box.remove();
+  }
+}
+
+function measureBody(body: Element | null, offset: number): Anchor | null {
   if (!body) return null;
   const points: { x: number; y: number }[] = [];
   for (const el of body.querySelectorAll<SVGGeometryElement>("path, circle, ellipse, rect")) {
@@ -47,50 +59,71 @@ function measure(svg: SVGSVGElement, offset: number): Anchor | null {
   return { x, y, tilt: Math.max(-30, Math.min(30, slope)) };
 }
 
+const blobSvgOf = (sign: SVGSVGElement | null) => sign?.parentElement?.querySelector<SVGSVGElement>("svg:not([data-gender])") ?? null;
+
+/**
+ * Makes the sign move exactly like the blob: blobatar animates groups inside
+ * its own SVG (breathing, bobbing, the hover lift), which a sibling SVG can't
+ * be part of — blobatar owns its markup and rewrites it. So the sign copies
+ * the blob's motion variables, runs the same motion classes, and lines its
+ * animation clocks up with the blob's own.
+ */
+function mirrorMotion(sign: SVGSVGElement, blob: SVGSVGElement) {
+  sign.setAttribute("style", blob.getAttribute("style") ?? "");
+  for (const cls of ["mo-root", "mo-breathe", "mo-bob"]) {
+    const [theirs, ours] = [blob.querySelector(`.${cls}`), sign.querySelector(`.${cls}`)];
+    if (!theirs || !ours) continue;
+    const clock = new Map(theirs.getAnimations().map((a) => [(a as CSSAnimation).animationName, a.startTime]));
+    for (const a of ours.getAnimations()) {
+      const start = clock.get((a as CSSAnimation).animationName);
+      if (start !== undefined && a.startTime !== start) a.startTime = start;
+    }
+  }
+}
+
 /**
  * The little sign that says a blob's sex: a bow for a girl, a bowler hat for
  * a boy, nothing for neither. Laid over the blobatar at the same size, inside
- * the body wrapper, so it rides along with every hop and wobble.
+ * the body wrapper, so it rides along with every hop and wobble — and
+ * breathes and bobs along with the blob itself (see mirrorMotion).
  */
-export function BlobGenderSign({ seed, sex, size }: { seed: string; sex: Sex; size: number }) {
+export function BlobGenderSign({ seed, sex, size, animated }: { seed: string; sex: Sex; size: number; animated: boolean }) {
   const ref = useRef<SVGSVGElement>(null);
   const key = `${seed}|${sex}`;
-  const [anchor, setAnchor] = useState(() => anchors.get(key) ?? null);
+  if (sex !== "none" && !anchors.has(key)) anchors.set(key, measure(seed, sex === "female" ? -9 : 0));
+  const anchor = anchors.get(key) ?? null;
 
+  // Every render: the blob's motion variables change with its expression.
   useLayoutEffect(() => {
-    if (sex === "none") return;
-    const cached = anchors.get(key);
-    if (cached) return setAnchor(cached);
-    // The blobatar may draw a frame or two after us: look again until it's there.
-    let frame = 0;
-    let tries = 0;
-    const look = () => {
-      const blob = ref.current?.parentElement?.querySelector<SVGSVGElement>("svg:not([data-gender])");
-      const found = blob ? measure(blob, sex === "female" ? -9 : 0) : null;
-      if (found) {
-        anchors.set(key, found);
-        setAnchor(found);
-      } else if (tries++ < 60) frame = requestAnimationFrame(look);
-    };
-    look();
-    return () => cancelAnimationFrame(frame);
-  }, [key, sex]);
+    const blob = blobSvgOf(ref.current);
+    if (animated && anchor && ref.current && blob) mirrorMotion(ref.current, blob);
+  });
 
   if (sex === "none") return null;
+  const sign = anchor ? (
+    <g transform={`translate(${anchor.x} ${anchor.y}) rotate(${anchor.tilt + (sex === "female" ? -18 : 0)})`}>
+      {sex === "female" ? <Bow /> : <Bowler />}
+    </g>
+  ) : null;
   return (
     <svg
       ref={ref}
       data-gender
       aria-hidden="true"
       viewBox="0 0 100 100"
+      width={size}
+      height={size}
       className="pointer-events-none absolute top-0 left-0 overflow-visible"
-      style={{ width: size, height: size }}
     >
-      {anchor ? (
-        <g transform={`translate(${anchor.x} ${anchor.y}) rotate(${anchor.tilt + (sex === "female" ? -18 : 0)})`}>
-          {sex === "female" ? <Bow /> : <Bowler />}
+      {animated ? (
+        <g className="mo-root mo-always">
+          <g className="mo-breathe">
+            <g className="mo-bob">{sign}</g>
+          </g>
         </g>
-      ) : null}
+      ) : (
+        sign
+      )}
     </svg>
   );
 }

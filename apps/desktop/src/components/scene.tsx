@@ -862,7 +862,8 @@ function SceneBlobView({
           // Outline on hover or keyboard focus, and kept while the camera follows it.
           // Only the drawn silhouette takes the pointer: the blobatar's box has
           // transparent margins, which made the hover fire before reaching the blob.
-          className={`pointer-events-none origin-[50%_80%] cursor-pointer outline-none will-change-transform hover:blob-outline focus-visible:blob-outline [&_img]:pointer-events-auto [&_svg_*]:pointer-events-auto ${selected ? "blob-outline" : ""}`}
+          // The outline goes on the blobatar alone: its gender sign has its own stroke.
+          className={`pointer-events-none origin-[50%_80%] cursor-pointer outline-none will-change-transform hover:[&>:first-child]:blob-outline focus-visible:[&>:first-child]:blob-outline [&_img]:pointer-events-auto [&_svg:not([data-gender])_*]:pointer-events-auto ${selected ? "[&>:first-child]:blob-outline" : ""}`}
           onClick={(e) => {
             // Don't let the scene's own click (which zooms out) undo this.
             e.stopPropagation();
@@ -880,7 +881,7 @@ function SceneBlobView({
             animate={inView && !reducedMotion ? "always" : undefined}
             expression={blob.expression}
           />
-          <BlobGenderSign seed={blob.seed} sex={blob.sex} size={size} />
+          <BlobGenderSign seed={blob.seed} sex={blob.sex} size={size} animated={inView && !reducedMotion} />
         </div>
       </div>
     </div>
