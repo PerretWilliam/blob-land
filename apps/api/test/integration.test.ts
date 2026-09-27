@@ -70,12 +70,9 @@ describe("blob-land API", () => {
     });
     expect(ping.status).toBe(200);
 
-    // Registered but not lived yet: listed, with no timeline until the world step runs.
-    const before = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
-    expect(before).toMatchObject({ sex: "none", attraction: "any", country: null, segments: [] });
-
-    await stepAll();
+    // Living from the moment it joins: listed, with a timeline already.
     const after = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
+    expect(after).toMatchObject({ sex: "none", attraction: "any", country: null });
     expect(after.segments.length).toBeGreaterThan(0);
     // Chained: each segment starts where the one before ended.
     for (let i = 1; i < after.segments.length; i++) expect(after.segments[i]!.start).toBe(after.segments[i - 1]!.end);

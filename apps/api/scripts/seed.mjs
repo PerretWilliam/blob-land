@@ -1,6 +1,5 @@
-// Fills a local garden with blobs of every sex and attraction, then runs the
-// world step once so they start living. Dev only (DEV_TOOLS=1 in .dev.vars):
-// `pnpm --filter @blob-land/api seed [count]`.
+// Fills a local garden with blobs of every sex and attraction, signed up like
+// any player (each starts living as it joins): `pnpm --filter @blob-land/api seed [count]`.
 const API = process.env.API_URL ?? "http://localhost:8787";
 const count = Number(process.argv[2] ?? 16);
 const NAMES = ["pip", "mochi", "bramble", "tofu", "juniper", "kiwi", "nimbus", "pebble", "saffron", "fig", "clover", "quill", "maple", "zuzu", "wren", "orzo"];
@@ -28,5 +27,4 @@ for (let i = 0; made < count && i < count * 3; i++) {
     throw new Error(`register failed: ${res.status} ${await res.text()}`);
   }
 }
-const tick = await fetch(`${API}/__dev/step`, { method: "POST" });
-console.log(`${made} blobs created; world step: ${tick.ok ? "ran" : `failed (${tick.status}; is DEV_TOOLS=1 in .dev.vars?)`}`);
+console.log(`${made} blobs created`);

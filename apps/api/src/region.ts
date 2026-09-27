@@ -56,6 +56,12 @@ export class Region extends DurableObject<Env> {
         for (const blob of Array.isArray(body) ? body : [body]) join(sql, blob, now, randomRng);
       });
       this.cached = null;
+      // Newcomers have no timeline until a step: live the region now rather
+      // than leave them standing still until the alarm. The join itself is
+      // done either way; the alarm catches up if this step fails.
+      await this.live(now, now + LOOKAHEAD, randomRng).catch((e) =>
+        console.error(JSON.stringify({ event: "step_failed", region: regionNumber(sql), error: String(e), stack: (e as Error).stack })),
+      );
       return c.body(null, 204);
     });
 
