@@ -8,6 +8,13 @@ updates:
       # One pull request for the minor and patch updates, one each for majors.
       minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Bumped by hand, with tauri-plugin-http in Cargo.toml: the two must match.
+      - dependency-name: "@tauri-apps/plugin-http"
+      # The API's tests run in @cloudflare/vitest-pool-workers, which needs
+      # vitest 4: take a new major once the pool supports it.
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies"]
     commit-message:
       prefix: chore
@@ -17,6 +24,9 @@ updates:
     directory: /apps/desktop/src-tauri
     schedule:
       interval: weekly
+    ignore:
+      # Bumped by hand, with @tauri-apps/plugin-http: the two must match.
+      - dependency-name: tauri-plugin-http
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
@@ -29,6 +39,10 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    groups:
+      # Every action in one pull request, majors included.
+      actions:
+        patterns: ["*"]
     labels: ["dependencies"]
     commit-message:
       prefix: ci
