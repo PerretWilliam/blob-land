@@ -53,12 +53,12 @@ function rawTarget(seed: string, k: number, salt: string): GroundPoint & { slow:
 const smoothstep = (p: number) => p * p * (3 - 2 * p);
 
 /**
- * Where the blob stands on the ground at `t` (epoch ms). Pure in (seed, t),
- * and continuous in t — each leg starts exactly where the previous one
- * ended — so reopening the app never teleports. Every stop lands on
- * `walkable` ground; the nest is assumed to be.
+ * The current leg's endpoints and progress `e` in [0, 1] (eased): where the
+ * blob came from, where it's headed, and how far along. Exposed for
+ * renderers that need to route the walk between them instead of cutting
+ * straight across (see `positionAt`, which just lerps).
  */
-export function positionAt(seed: string, t: number, walkable: Walkable = () => true): GroundPoint {
+export function legAt(seed: string, t: number, walkable: Walkable = () => true): { from: GroundPoint; to: GroundPoint; e: number } {
   const k = Math.floor(t / LEG_MS);
   const from = legTarget(seed, k - 1, walkable);
   const to = legTarget(seed, k, walkable);
@@ -66,5 +66,16 @@ export function positionAt(seed: string, t: number, walkable: Walkable = () => t
   // approach to a rest/discover spot) walk the whole leg instead.
   const walk = to.slow ? 1 : 0.6 + 0.4 * hash01(`${seed}|walk|${k}`);
   const e = smoothstep(Math.min(1, (t - k * LEG_MS) / LEG_MS / walk));
+  return { from, to, e };
+}
+
+/**
+ * Where the blob stands on the ground at `t` (epoch ms). Pure in (seed, t),
+ * and continuous in t — each leg starts exactly where the previous one
+ * ended — so reopening the app never teleports. Every stop lands on
+ * `walkable` ground; the nest is assumed to be.
+ */
+export function positionAt(seed: string, t: number, walkable: Walkable = () => true): GroundPoint {
+  const { from, to, e } = legAt(seed, t, walkable);
   return { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e };
 }

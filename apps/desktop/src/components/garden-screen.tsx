@@ -24,7 +24,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { FamilyPanel } from "@/components/family-tree";
 import { Button } from "@/components/ui/button";
-import { ACTIVITY_LABELS, ActivityIcon, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
+import { ACTIVITY_LABELS, ActivityIcon, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import type { GardenBlob } from "@/lib/api";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
 import { usePrefersReducedMotion } from "@/lib/motion";
@@ -145,8 +145,7 @@ export function GardenScreen({
 
       <nav
         aria-label="Menu"
-        className="absolute top-4 left-4 z-10 flex w-60 flex-col gap-1 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md"
-        style={menuOpen ? undefined : { width: "auto" }}
+        className="absolute top-4 left-4 z-10 flex w-max flex-col gap-1 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md"
       >
         <Button
           variant="ghost"
@@ -279,6 +278,12 @@ function JournalPanel({ seed, name, now, onClose }: { seed: string; name: string
       <p className="flex items-center gap-2 border-b px-3 py-2 text-sm">
         <ActivityIcon activity={current.activity} className="size-4" />
         {ACTIVITY_LABELS[current.activity]} since {time(current.since)}
+        {moodOf(current.expression) ? (
+          <span className="ml-auto flex items-center gap-1 text-muted-foreground">
+            <MoodIcon expression={current.expression} />
+            {moodOf(current.expression)!.label}
+          </span>
+        ) : null}
       </p>
       <ol className="overflow-y-auto p-3 text-sm">
         {entries.map((e, i) => (

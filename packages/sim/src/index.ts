@@ -5,5 +5,5 @@ export { loveChance } from "./love";
 export { childTraits, type Parent } from "./traits";
 export { dayKey, addDays, type Tz } from "./time";
 export { hash01 } from "./hash";
-export { positionAt, NEST, type GroundPoint, type Walkable } from "./position";
+export { positionAt, legAt, NEST, type GroundPoint, type Walkable } from "./position";
 export { daylight } from "./sleep";

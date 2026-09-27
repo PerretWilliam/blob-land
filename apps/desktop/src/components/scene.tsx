@@ -1,7 +1,7 @@
-import { daylight, NEST, positionAt, type Activity, type GroundPoint, type Walkable } from "@blob-land/sim";
+import { daylight, legAt, NEST, type Activity, type GroundPoint, type Walkable } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
-import type { Expression } from "blobatar/expression";
-import { Footprints, Moon, Sparkles, Coffee } from "lucide-react";
+import { happy, idle, love, sleepy, surprised, thinking, type Expression } from "blobatar/expression";
+import { Footprints, Moon, Sparkles, Coffee, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
@@ -12,8 +12,10 @@ import {
   cellAt,
   DECOR_KINDS,
   EDGES,
+  findPath,
   isSunken,
   nestCell,
+  OPPOSITE_EDGE,
   rampDirection,
   surfaceHeight,
   type DecorKind,
@@ -57,6 +59,9 @@ const GAIT_EASE_S = 0.25;
 // Below this ground speed (units/s) a blob counts as standing still: it's
 // where the position easing's long tail ends, not a real step.
 const WALK_SPEED = 0.006;
+// Above this speed a blob hops; below it waddles. 99% of a stroll stays under
+// 0.036, so only long, quick crossings (and catch-ups like a new pairing) hop.
+const HOP_SPEED = 0.045;
 // Camera: how far it zooms onto a selected blob, and how softly it moves.
 const FOCUS_ZOOM = 2;
 // Clouds zoom this fraction as much as the ground: farther away, so they move less.
@@ -164,11 +169,19 @@ function bankAt(layout: IslandLayout, i: number, j: number): "" | "-sand" | "-sn
  * run into water, including the stream along the front edge.
  */
 function linkedEdges(layout: IslandLayout, i: number, j: number, ground: "road" | "river"): string {
-  const edges = EDGES.filter(([, di, dj]) => {
+  const height = cellAt(layout, i, j)?.height ?? 0;
+  const edges = EDGES.filter(([edge, di, dj]) => {
     const [a, b] = [i + di, j + dj];
     if (ground === "river" && a === layout.size && b >= 0 && b < layout.size) return true;
-    const g = cellAt(layout, a, b)?.ground;
-    return g === ground || (ground === "river" && g === "water");
+    const neighbour = cellAt(layout, a, b);
+    if (!(neighbour?.ground === ground || (ground === "river" && neighbour?.ground === "water"))) return false;
+    const neighbourHeight = neighbour?.height ?? 0;
+    const rampEdge = rampDirection(layout, a, b);
+    // Level ground: a ramp only opens onto its flat (low) front, never its side walls.
+    if (neighbourHeight === height) return !rampEdge || rampEdge === edge;
+    // One block up: only where the ramp actually climbs up to us.
+    if (neighbourHeight === height - 1) return rampEdge === OPPOSITE_EDGE[edge];
+    return false;
   }).map(([edge]) => edge);
   return (edges.length ? edges : ["nw", "se"]).join("-");
 }
@@ -211,8 +224,32 @@ export const RAMP_THUMB = piece("ramp-nw");
  * matched in seed order. Wrong when a partner is hidden or on another page;
  * return the partner's seed from /garden if that starts to show.
  */
-function targets(blobs: SceneBlob[], t: number, walkable: Walkable): GroundPoint[] {
-  const ps = blobs.map((b) => positionAt(b.seed, t, walkable));
+/** How far along a `findPath` walk a blob has got at progress `e` in [0, 1]:
+ * arc-length along the route, not a straight-line lerp, so a walk bends
+ * around cliffs and water instead of cutting through them. */
+function alongPath(path: GroundPoint[], e: number): GroundPoint {
+  if (path.length < 2) return path[0] ?? { x: 0.5, y: 0.5 };
+  const lens = path.slice(1).map((p, k) => Math.hypot(p.x - path[k]!.x, p.y - path[k]!.y));
+  const total = lens.reduce((a, b) => a + b, 0);
+  if (total === 0) return path[path.length - 1]!;
+  let left = e * total;
+  for (let k = 0; k < lens.length; k++) {
+    const len = lens[k]!;
+    if (left <= len || k === lens.length - 1) {
+      const [a, b] = [path[k]!, path[k + 1]!];
+      const f = len === 0 ? 0 : Math.min(1, left / len);
+      return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+    }
+    left -= len;
+  }
+  return path[path.length - 1]!;
+}
+
+function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, walkable: Walkable): GroundPoint[] {
+  const ps = blobs.map((b) => {
+    const { from, to, e } = legAt(b.seed, t, walkable);
+    return alongPath(findPath(layout, from, to), e);
+  });
   const paired = blobs.map((b, i) => [b.seed, i] as const).filter(([, i]) => blobs[i]!.paired).sort();
   const clamp = (v: number) => Math.min(1 - PAIR_GAP, Math.max(PAIR_GAP, v));
   for (let j = 0; j + 1 < paired.length; j += 2) {
@@ -261,6 +298,8 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
   blobsRef.current = blobs;
   const groundRef = useRef(ground);
   groundRef.current = ground;
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
   // How high a blob's feet are, in pack px: up hills and ramps, and down into
   // water, where it wades.
   const liftAt = (p: GroundPoint) => {
@@ -303,9 +342,11 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
   // Per blob: the anchor (moved), its hopping body and shadow, and its label.
   const els = useRef(new Map<string, { el: HTMLElement; body: HTMLElement | null; shadow: HTMLElement | null }>());
   const labels = useRef(new Map<string, HTMLElement>());
-  // `phase` drives the hop; `walk` in [0, 1] is how much the blob is walking,
-  // eased so a stop settles instead of freezing mid-air; `lean` tilts it.
-  const gait = useRef(new Map<string, { phase: number; walk: number; lean: number }>());
+  // `phase` drives the gait; `walk` in [0, 1] is how much the blob is walking,
+  // eased so a stop settles instead of freezing mid-air; `hop` in [0, 1] is how
+  // much of that walk is hopping rather than waddling; `lean` tilts it.
+  type Gait = { phase: number; walk: number; hop: number; lean: number };
+  const gait = useRef(new Map<string, Gait>());
   // `lift`: how high the feet are (see liftAt), eased like x/y so stepping
   // into water or up a cliff is a quick slide rather than a jump.
   // ponytail: blobs don't path through ramps, they hop straight up cliffs;
@@ -341,13 +382,15 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
     if (label) label.style.transform = at;
   }
 
-  /** Hop, squash and lean the body; shrink the shadow while airborne. */
-  function applyGait(seed: string, g: { phase: number; walk: number; lean: number }) {
+  /** Hop (or waddle), squash and lean the body; shrink the shadow while airborne. */
+  function applyGait(seed: string, g: Gait) {
     const blob = els.current.get(seed);
     if (!blob?.body) return;
-    const lift = Math.abs(Math.sin(g.phase)) * g.walk; // 0 on the ground, 1 at the top of a hop
-    const squash = 0.09 * g.walk * (1 - Math.abs(Math.sin(g.phase))) ** 2; // flattens on landing
-    blob.body.style.transform = `translate3d(0, ${-lift * blobSizeRef.current * 0.13}px, 0) rotate(${g.lean}deg) scale(${1 + squash}, ${1 - squash})`;
+    const hop = g.walk * g.hop;
+    const lift = Math.abs(Math.sin(g.phase)) * hop; // 0 on the ground, 1 at the top of a hop
+    const squash = 0.09 * hop * (1 - Math.abs(Math.sin(g.phase))) ** 2; // flattens on landing
+    const waddle = Math.sin(g.phase) * 4 * g.walk * (1 - g.hop); // side to side, feet on the ground
+    blob.body.style.transform = `translate3d(0, ${-lift * blobSizeRef.current * 0.13}px, 0) rotate(${g.lean + waddle}deg) scale(${1 + squash}, ${1 - squash})`;
     if (blob.shadow) blob.shadow.style.transform = `translate(-50%, -50%) scale(${1 - 0.35 * lift})`;
   }
 
@@ -395,7 +438,7 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
       const kCamera = snap ? 1 : 1 - Math.exp(-dt / CAMERA_EASE_S);
       last = now;
       const list = blobsRef.current;
-      const ps = targets(list, Date.now(), walkableRef.current);
+      const ps = targets(layoutRef.current, list, Date.now(), walkableRef.current);
       list.forEach((b, i) => {
         const to = { ...ps[i]!, lift: liftRef.current(ps[i]!) };
         const prev = shown.current.get(b.seed);
@@ -409,10 +452,12 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
         const [dx, dy] = [p.x - prev.x, p.y - prev.y];
         const dist = Math.hypot(dx, dy);
         const walking = dist / dt > WALK_SPEED;
-        const g = gait.current.get(b.seed) ?? { phase: 0, walk: 0, lean: 0 };
+        const g = gait.current.get(b.seed) ?? { phase: 0, walk: 0, hop: 0, lean: 0 };
         g.walk += ((walking ? 1 : 0) - g.walk) * kGait;
+        // Only change gait while moving, so a stop ends the way it started.
+        if (walking) g.hop += ((dist / dt > HOP_SPEED ? 1 : 0) - g.hop) * kGait;
         g.lean += ((walking ? ((dx - dy) / dist) * 5 : 0) - g.lean) * kGait;
-        // Keep hopping while fading out, so the last hop lands instead of freezing.
+        // Keep the gait going while fading out, so the last hop lands instead of freezing.
         if (g.walk > 0.01) g.phase += dt * Math.PI * HOP_HZ;
         gait.current.set(b.seed, g);
         applyGait(b.seed, g);
@@ -448,7 +493,7 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
     let p = shown.current.get(seed);
     if (!p) {
       const i = blobsRef.current.findIndex((b) => b.seed === seed);
-      const g = targets(blobsRef.current, Date.now(), walkableRef.current)[i] ?? { x: 0.5, y: 0.5 };
+      const g = targets(layoutRef.current, blobsRef.current, Date.now(), walkableRef.current)[i] ?? { x: 0.5, y: 0.5 };
       p = { ...g, lift: liftRef.current(g) };
       shown.current.set(seed, p);
     }
@@ -613,12 +658,66 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
               style={{ bottom: blobSize * 0.72, transform: "translateX(-50%) scale(calc(1 / var(--camera-zoom, 1)))" }}
             >
               {blob.label}
+              <MoodIcon expression={blob.expression} />
               {blob.activity ? <ActivityIcon activity={blob.activity} /> : null}
             </p>
           </div>
         ))}
       </div>
       </div>
+
+      {/* The selected blob's ID card: everything known about it, at a glance. */}
+      {(() => {
+        const blob = blobs.find((b) => b.seed === selected);
+        if (!blob) return null;
+        const mood = moodOf(blob.expression);
+        return (
+          <aside
+            aria-label={`${blob.label}'s ID card`}
+            className="absolute right-4 bottom-4 z-10 w-64 rounded-xl border bg-background/85 p-3 shadow-lg backdrop-blur-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="flex items-center gap-2 border-b pb-2">
+              <h2 className="flex-1 truncate text-sm font-semibold">{blob.label}</h2>
+              <button type="button" aria-label="Close" className="text-muted-foreground hover:text-foreground" onClick={() => setSelected(null)}>
+                <X className="size-4" />
+              </button>
+            </header>
+            <dl className="mt-2 space-y-1.5 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">Activity</dt>
+                <dd className="flex items-center gap-1.5">
+                  {blob.activity ? (
+                    <>
+                      <ActivityIcon activity={blob.activity} />
+                      {ACTIVITY_LABELS[blob.activity]}
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">Mood</dt>
+                <dd className="flex items-center gap-1.5">
+                  <MoodIcon expression={blob.expression} />
+                  {mood?.label ?? "—"}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">Status</dt>
+                <dd>{blob.paired ? "Paired up" : "Single"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">ID</dt>
+                <dd className="truncate font-mono text-xs text-muted-foreground" title={blob.seed}>
+                  {blob.seed.slice(0, 10)}
+                </dd>
+              </div>
+            </dl>
+          </aside>
+        );
+      })()}
     </div>
   );
 }
@@ -759,4 +858,24 @@ export const ACTIVITY_LABELS: Record<Activity, string> = {
 export function ActivityIcon({ activity, className = "size-3" }: { activity: Activity; className?: string }) {
   const Icon = ACTIVITY_ICONS[activity];
   return <Icon className={className} aria-label={ACTIVITY_LABELS[activity]} role="img" />;
+}
+
+// Expressions are objects, so a mood is looked up by identity.
+const MOODS = new Map<Expression, { label: string; emoji: string }>([
+  [idle, { label: "Calm", emoji: "😌" }],
+  [happy, { label: "Happy", emoji: "😊" }],
+  [sleepy, { label: "Sleepy", emoji: "😴" }],
+  [surprised, { label: "Surprised", emoji: "😮" }],
+  [thinking, { label: "Thoughtful", emoji: "🤔" }],
+  [love, { label: "In love", emoji: "🥰" }],
+]);
+export const moodOf = (expression: Expression) => MOODS.get(expression);
+
+export function MoodIcon({ expression }: { expression: Expression }) {
+  const mood = moodOf(expression);
+  return mood ? (
+    <span role="img" aria-label={mood.label} title={mood.label}>
+      {mood.emoji}
+    </span>
+  ) : null;
 }

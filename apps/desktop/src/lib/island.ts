@@ -1,4 +1,4 @@
-import { NEST } from "@blob-land/sim";
+import { NEST, type GroundPoint } from "@blob-land/sim";
 import { exists, mkdir, readTextFile, writeTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 
 /*
@@ -162,10 +162,22 @@ export function paintCell(island: IslandLayout, n: number, tool: IslandTool): Is
   const cell = island.cells[n];
   if (!cell || n === nestCell(island.size)) return island;
   const { ground, decor, height = 0, ramp } = cell;
+  const [i, j] = [n % island.size, Math.floor(n / island.size)];
+  // A step bigger than one block would leave a cliff no ramp can climb.
+  const stepOk = (h: number) =>
+    EDGES.every(([, di, dj]) => {
+      const neighbour = cellAt(island, i + di, j + dj);
+      return !neighbour || Math.abs((neighbour.height ?? 0) - h) <= 1;
+    });
   let next: IslandCell;
   if (tool === "erase") next = { ground, height, ramp };
-  else if (tool === "raise") next = { ...cell, height: Math.min(MAX_HEIGHT, height + 1) };
-  else if (tool === "lower") next = { ...cell, height: Math.max(0, height - 1) };
+  else if (tool === "raise") {
+    const h = Math.min(MAX_HEIGHT, height + 1);
+    next = stepOk(h) ? { ...cell, height: h } : cell;
+  } else if (tool === "lower") {
+    const h = Math.max(0, height - 1);
+    next = stepOk(h) ? { ...cell, height: h } : cell;
+  }
   // A slope has nowhere to put a tree.
   else if (tool === "ramp") next = canRamp(ground) ? { ground, height, ramp: ramp ? undefined : true } : cell;
   // Repainting the ground keeps what stands there, unless the new ground can't hold it.
@@ -192,6 +204,7 @@ export const EDGES: [Edge, number, number][] = [
   ["se", 1, 0],
   ["sw", 0, 1],
 ];
+export const OPPOSITE_EDGE: Record<Edge, Edge> = { nw: "se", ne: "sw", se: "nw", sw: "ne" };
 
 export const cellAt = (island: IslandLayout, i: number, j: number): IslandCell | undefined =>
   i >= 0 && j >= 0 && i < island.size && j < island.size ? island.cells[j * island.size + i] : undefined;
@@ -216,10 +229,73 @@ export function surfaceHeight(island: IslandLayout, i: number, j: number, u: num
   return h + { nw: 1 - fu, ne: 1 - fv, se: fu, sw: fv }[dir];
 }
 
+/** Ground a blob can ever be on, standing or passing through: not water, not
+ * a river. */
+export const canPass = (ground: Ground) => ground !== "water" && ground !== "river";
+
 /** Whether a blob may stop at ground point (x, y) in [0, 1]²: not in water,
  * and not inside a tree or a rock. It may still walk across either. */
 export function canStopAt(island: IslandLayout, p: { x: number; y: number }): boolean {
   const [i, j] = [Math.floor(p.x * island.size), Math.floor(p.y * island.size)];
   const cell = cellAt(island, Math.min(island.size - 1, i), Math.min(island.size - 1, j));
-  return !cell || (cell.ground !== "water" && cell.ground !== "river" && !cell.decor);
+  return !cell || (canPass(cell.ground) && !cell.decor);
+}
+
+const cellOf = (size: number, p: GroundPoint) =>
+  [Math.min(size - 1, Math.max(0, Math.floor(p.x * size))), Math.min(size - 1, Math.max(0, Math.floor(p.y * size)))] as const;
+
+/** Whether a blob may step directly from one orthogonally adjacent cell to
+ * another: neither is water, and any height difference is bridged by a ramp
+ * climbing the right way (see `rampDirection`) — never a bare cliff. */
+export function canStep(island: IslandLayout, i1: number, j1: number, i2: number, j2: number): boolean {
+  const [a, b] = [cellAt(island, i1, j1), cellAt(island, i2, j2)];
+  if (!a || !b || !canPass(a.ground) || !canPass(b.ground)) return false;
+  const diff = (b.height ?? 0) - (a.height ?? 0);
+  if (Math.abs(diff) > 1) return false;
+  if (diff === 0) return true;
+  const edge = EDGES.find(([, di, dj]) => i1 + di === i2 && j1 + dj === j2)?.[0];
+  if (!edge) return false;
+  return diff === 1 ? rampDirection(island, i1, j1) === edge : rampDirection(island, i2, j2) === OPPOSITE_EDGE[edge];
+}
+
+/** A walk from `from` to `to` as a line of waypoints that only crosses
+ * passable ground and only changes height through a ramp: the shortest
+ * hop-by-hop route between their cells, as cell centres, snapped to the
+ * exact endpoints. Falls back to a straight line when no route exists (e.g.
+ * a moated plot with no bridge). */
+export function findPath(island: IslandLayout, from: GroundPoint, to: GroundPoint): GroundPoint[] {
+  const { size } = island;
+  const [si, sj] = cellOf(size, from);
+  const [ei, ej] = cellOf(size, to);
+  if (si === ei && sj === ej) return [from, to];
+  const key = (i: number, j: number) => j * size + i;
+  const prev = new Map<number, number>();
+  const seen = new Set<number>([key(si, sj)]);
+  const queue: [number, number][] = [[si, sj]];
+  let reached = false;
+  for (let head = 0; head < queue.length; head++) {
+    const [i, j] = queue[head]!;
+    if (i === ei && j === ej) {
+      reached = true;
+      break;
+    }
+    for (const [, di, dj] of EDGES) {
+      const [ni, nj] = [i + di, j + dj];
+      if (ni < 0 || nj < 0 || ni >= size || nj >= size || seen.has(key(ni, nj)) || !canStep(island, i, j, ni, nj)) continue;
+      seen.add(key(ni, nj));
+      prev.set(key(ni, nj), key(i, j));
+      queue.push([ni, nj]);
+    }
+  }
+  if (!reached) return [from, to];
+  const cells: [number, number][] = [[ei, ej]];
+  for (let k = key(ei, ej); k !== key(si, sj); ) {
+    k = prev.get(k)!;
+    cells.push([k % size, Math.floor(k / size)]);
+  }
+  cells.reverse();
+  const waypoints = cells.map(([i, j]) => ({ x: (i + 0.5) / size, y: (j + 0.5) / size }));
+  waypoints[0] = from;
+  waypoints[waypoints.length - 1] = to;
+  return waypoints;
 }
