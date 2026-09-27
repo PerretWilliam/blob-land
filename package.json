@@ -13,6 +13,9 @@
     "prepare": "husky"
   },
   "pnpm": {
+    "overrides": {
+      "sharp@<0.35.4": "^0.35.4"
+    },
     "onlyBuiltDependencies": [
       "esbuild",
       "workerd",

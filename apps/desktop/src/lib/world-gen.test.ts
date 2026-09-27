@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { canStep, snapToGround } from "./island";
