@@ -88,9 +88,13 @@ const TILES_IN_VIEW = 14;
 const DRAWN_CELLS = 2000;
 // Out of view, a blob's position is refreshed once every this many frames.
 const OFFSCREEN_EVERY = 20;
-// Seconds for the displayed position to close ~63% of the gap to the computed
-// one. Hides frame-to-frame steps and absorbs discrete jumps (a new pairing).
+// Seconds for the displayed position to close ~63% of a jump in the computed
+// one (a new pairing, a timeline refetched). Walking itself is drawn as is,
+// along its path: easing it would cut corners, through cliffs and water.
 const EASE_S = 0.6;
+// Faster than this (ground units per garden ms, several times any walk), the
+// computed position jumped rather than walked.
+const JUMP_SPEED = 0.3 / 1000;
 // Walk cycle: hops per second while moving, and how fast the gait fades in/out.
 const HOP_HZ = 2.4;
 const GAIT_EASE_S = 0.25;
@@ -336,6 +340,9 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   // `lift`: how high the feet are (see liftAt), eased like x/y so stepping
   // into water or up a cliff is a quick slide rather than a jump.
   const shown = useRef(new Map<string, GroundPoint & { lift: number }>());
+  // Where each blob's timeline put it last frame, and when (garden time).
+  const aimed = useRef(new Map<string, GroundPoint>());
+  const aimedAt = useRef(0);
   // Something to draw since the last frame, when nothing moves on its own.
   const dirty = useRef(true);
 
@@ -354,6 +361,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     world.blobs.get(seed)?.place(f.x, f.y, followed ? FRONT_Z : depthZ(layoutRef.current.size, p.x, p.y) + 0.5);
     const { map, blobs: seen } = inViewRef.current;
     if (map && !followed && seen.has(seed)) world.dot(seed, seed === startAt, f.x, f.y);
+    const label = labels.current.get(seed);
+    if (label) placeLabel(seed, label);
   }
 
   /** A name (and its meeting effects) over its blob's head, on screen. */
@@ -724,12 +733,22 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         const list = all.filter((b, i) => close(b) || !shown.current.has(b.seed) || (frame + i) % every === 0);
         const picked = new Set(list.map((b) => b.seed));
         for (const b of all) if (b.partner && picked.has(b.partner) && !picked.has(b.seed)) list.push(b);
-        const ps = targets(layoutRef.current, list, clockRef.current(), segmentsOfRef.current);
+        const t = clockRef.current();
+        const jump = Math.max(0, t - aimedAt.current) * JUMP_SPEED;
+        aimedAt.current = t;
+        const ps = targets(layoutRef.current, list, t, segmentsOfRef.current);
         list.forEach((b, i) => {
           const to = { ...ps[i]!, lift: liftRef.current(ps[i]!) };
+          const last = aimed.current.get(b.seed);
+          aimed.current.set(b.seed, ps[i]!);
           // Out of view (or a dot): straight there, no easing or gait to keep up.
           const prev = close(b) ? shown.current.get(b.seed) : undefined;
-          const p = prev ? { x: prev.x + (to.x - prev.x) * k, y: prev.y + (to.y - prev.y) * k, lift: prev.lift + (to.lift - prev.lift) * k } : to;
+          // Walking, the blob moves as its timeline does and only what's left
+          // of an earlier jump fades; a jump fades from where it's drawn.
+          const from = last && Math.hypot(to.x - last.x, to.y - last.y) <= jump ? last : to;
+          const p = prev
+            ? { x: to.x + (prev.x - from.x) * (1 - k), y: to.y + (prev.y - from.y) * (1 - k), lift: prev.lift + (to.lift - prev.lift) * k }
+            : to;
           shown.current.set(b.seed, p);
           applyPosition(b.seed, p);
           if (snap || !prev) return arrived(b.seed, true, now);

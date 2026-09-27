@@ -6,7 +6,8 @@
  * Opened with `#bench` on the dev server, or built into the app with
  * VITE_BENCH=1 (see scripts/bench.mjs, which also reads RAM and CPU).
  * `?size=` and `?n=` change the island and the crowd; `?idle` shows it
- * without playing the moves, to look around by hand (`?night` by night).
+ * without playing the moves, to look around by hand (`?night` by night,
+ * `?rate=20` with garden time running 20 times faster).
  */
 import { seededRng, type Segment } from "@blob-land/sim";
 import { BaseDirectory, mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -19,6 +20,8 @@ const params = new URLSearchParams(location.search);
 const SIZE = Number(params.get("size") ?? import.meta.env.VITE_BENCH_SIZE ?? 128);
 const COUNT = Number(params.get("n") ?? import.meta.env.VITE_BENCH_N ?? 450);
 const IDLE = params.has("idle");
+// Garden time's pace, like the API's TIME_SCALE in dev.
+const RATE = Number(params.get("rate") ?? 1);
 
 const HOUR = 60 * 60 * 1000;
 // Garden times the bench plays at: noon, and deep in the night (UTC, like daylight()).
@@ -123,7 +126,7 @@ export default function Bench() {
   const [blank, setBlank] = useState(!IDLE);
   const root = useRef<HTMLElement>(null);
   const t0 = useRef(performance.now());
-  const clock = () => base + (performance.now() - t0.current);
+  const clock = () => base + (performance.now() - t0.current) * RATE;
 
   useEffect(() => {
     if (started || IDLE) return;

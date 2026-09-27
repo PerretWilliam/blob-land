@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GardenScreen } from "@/components/garden-screen";
 import { JoinGardenScreen } from "@/components/join-garden-screen";
 import { PseudoScreen } from "@/components/pseudo-screen";
-import { getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
+import { gardenTime, getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { loadState, saveState, type AppState } from "@/lib/state";
@@ -66,7 +66,10 @@ export default function App() {
     known.current = { asked, step, segments: new Map(blobs.map((b) => [b.seed, b.segments])) };
     setBlobs(blobs);
     setRegions({ region, home, list, size });
-    setGardenClock({ at: now, readAt: Date.now(), rate: rate ?? 1 });
+    // Kept running as is unless it drifted: re-anchoring on every answer would
+    // move the whole garden by the request's latency (times the rate, in dev).
+    const fresh = { at: now, readAt: Date.now(), rate: rate ?? 1 };
+    setGardenClock((prev) => (prev.rate === fresh.rate && Math.abs(gardenTime(prev) - now) < 1000 * fresh.rate ? prev : fresh));
   }, []);
 
   // Catch the private blob up on the time the app was closed, and notify
