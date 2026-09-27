@@ -14,9 +14,9 @@ A child born from a union gets its own row in the `blobs` table, addressable and
 
 Blobs used to be a formula of (seed, time): the same inputs always gave the same day, which made them predictable. Now every choice — when to sleep, where to walk, who to meet, how it goes — is rolled with real randomness (Web Crypto) and stored as segments. Clients never recompute a blob's life; they play back the stored segments, each carrying its own 32-bit `rng` so the walk inside it replays identically for everyone watching. Randomness is kept believable by structure, not by determinism: allowed transitions (a blob wakes before doing anything else), minimum durations, slow-moving energy and mood, and relationship axes that move by a capped step per meeting. The one thing still derived from the seed is a blob's look, because that is its identity.
 
-## One writer for the garden: a cron world step
+## One writer per region: its own object, on its own alarm
 
-The Worker's cron trigger (every 5 minutes) is the only thing that lives the garden forward, 30 minutes ahead of now so clients always have something to play. Requests only read. A single writer means no two requests can roll the same stretch of time differently, with no locking. A garden that was asleep longer than 2 days skips the gap instead of living it.
+Each region of the garden lives whole in its own Durable Object, in that object's SQLite, and lives itself forward on its own alarm every 5 minutes, 30 minutes ahead of now so clients always have something to play. Requests only read, and an object runs one thing at a time, so no two steps can roll the same stretch of time differently, with no locking. A step is written in one transaction: if it fails, nothing of it is kept, the runtime retries it, and the next one lives the same stretch; the cron only sets again an alarm that stopped for good. A garden that was asleep longer than 2 days skips the gap instead of living it. D1 keeps only what regions share (accounts, the directory of blobs and their names), so no single database takes every region's writes, and the garden grows by adding regions.
 
 ## Relationships gate interactions
 

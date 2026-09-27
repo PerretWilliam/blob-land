@@ -7,6 +7,9 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DB"
 database_name = "blob-land"
 database_id = "REPLACE_ME" # `wrangler d1 create blob-land`, then paste the id here
+# Accounts and the blob directory: `pnpm db:apply` (locally) or
+# `wrangler d1 migrations apply blob-land --remote` before deploying.
+migrations_dir = "migrations"
 
 # Cloudflare's Rate Limiting binding, applied to /auth/* only (see src/index.ts).
 [[unsafe.bindings]]
@@ -18,7 +21,8 @@ simple = { limit = 20, period = 60 }
 # JWT_SECRET is a secret, not a var: `wrangler secret put JWT_SECRET`.
 # For local dev/tests, put it in a .dev.vars file (gitignored).
 
-# One world-step writer per region (src/region.ts): the cron fans out to them.
+# One object per region (src/region.ts): it holds the region in its own
+# SQLite and lives it forward on its own alarm.
 [[durable_objects.bindings]]
 name = "REGION"
 class_name = "Region"
@@ -27,6 +31,10 @@ class_name = "Region"
 tag = "v1"
 new_sqlite_classes = ["Region"]
 
-# The world step (src/garden.ts): the only writer of what blobs do.
+# A watchdog only: it sets again any region's alarm that stopped (index.ts).
 [triggers]
 crons = ["*/5 * * * *"]
+
+# Logs (console.error on a failed request or step) kept and searchable in the dashboard.
+[observability]
+enabled = true

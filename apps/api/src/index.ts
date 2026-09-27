@@ -1,4 +1,4 @@
-import { gardenSize, isAttraction, isCountry, isSex, type Attraction, type Segment, type Sex } from "@blob-land/sim";
+import { gardenSize, isAttraction, isCountry, isSex, REGION_CAP } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -7,10 +7,9 @@ import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
 import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
-import { advanceGarden, LOOKAHEAD, newAccountBlob } from "./garden";
-import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
-import { stepRegion } from "./region";
-import { familyTree, nameOf } from "./tree";
+import { isTaken, nameTaken } from "./names";
+import { region } from "./region";
+import { noTree } from "./tree";
 
 type Vars = { userId: string };
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -99,13 +98,29 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
   const { hash, salt } = await hashPassword(password);
   const id = crypto.randomUUID();
   const now = Date.now();
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, country, last_seen_at, created_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-    ).bind(id, pseudo, seed, hash, salt, country, now, now),
-    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env), friend),
-  ]);
+  const db = c.env.DB;
+  try {
+    await db.batch([
+      db
+        .prepare(`INSERT INTO users (id, pseudo, seed, password_hash, password_salt, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .bind(id, pseudo, seed, hash, salt, now, now),
+      placeAccount(db, id, seed, await gardenNow(c.env), friend),
+    ]);
+  } catch (e) {
+    // Someone took the name between the check and the write.
+    if (isTaken(e)) return c.json({ error: "pseudo already taken" }, 409);
+    throw e;
+  }
+  // Then the blob moves into its region. If it can't, the account is undone,
+  // so a sign-up either happens whole or can be tried again.
+  const home = (await db.prepare(`SELECT region FROM blobs WHERE seed = ?`).bind(seed).first<number>("region"))!;
+  const joined = await region(c.env, home, "/join", { method: "POST", body: JSON.stringify({ seed, ownerUserId: id, name: pseudo, country, identity: { sex, attraction } }) }).catch(
+    (e: unknown) => e,
+  );
+  if (!(joined instanceof Response && joined.ok)) {
+    await db.batch([db.prepare(`DELETE FROM blobs WHERE seed = ?`).bind(seed), db.prepare(`DELETE FROM users WHERE id = ?`).bind(id)]);
+    throw new Error(`region ${home} refused ${seed}: ${joined instanceof Response ? joined.status : String(joined)}`);
+  }
 
   const token = await sign({ sub: id, exp: Math.floor(now / 1000) + 60 * 60 * 24 * 30 }, c.env.JWT_SECRET, "HS256");
   return c.json({ token, seed }, 201);
@@ -127,121 +142,55 @@ app.post("/auth/login", rateLimitAuth, async (c) => {
   return c.json({ token, seed });
 });
 
-interface SegmentRow {
-  seed: string;
-  start: number;
-  end: number;
-  activity: Segment["activity"];
-  expression: string;
-  x: number;
-  y: number;
-  rng: number;
-  with_seed: string | null;
-  detail: string | null;
-}
-
-// How long after a breakup both still wear it, in garden time.
-const HEARTBREAK = 45 * 60 * 1000;
-// How much already-played timeline to send: enough for a smooth pick-up.
-const SEGMENT_HISTORY = 15 * 60 * 1000;
+/** Where a player's blob lives. */
+const homeOf = (db: D1Database, userId: string) => db.prepare(`SELECT region FROM blobs WHERE owner_user_id = ?`).bind(userId).first<number>("region");
+/** Where any blob lives, or null for a seed no one has. */
+const regionOf = (db: D1Database, seed: string) => db.prepare(`SELECT region FROM blobs WHERE seed = ?`).bind(seed).first<number>("region");
 
 // One region of the garden at a time (?region=, else the player's own):
-// all a client ever plays back, however big the garden gets.
+// all a client ever plays back, however big the garden gets. `since` (the
+// `step` of an earlier answer for the same region) sends only the timeline
+// written after it.
 app.get("/garden", requireAuth, async (c) => {
-  const now = await gardenNow(c.env);
-  const asked = c.req.query("region");
+  const [asked, since] = [c.req.query("region"), c.req.query("since")];
   if (asked !== undefined && !/^\d{1,9}$/.test(asked)) return c.json({ error: "region must be a non-negative integer" }, 400);
-  const home = (await c.env.DB.prepare(`SELECT region FROM blobs WHERE owner_user_id = ?`).bind(c.get("userId")).first<number>("region")) ?? 0;
-  const region = asked !== undefined ? Number(asked) : home;
+  if (since !== undefined && !/^\d{1,15}$/.test(since)) return c.json({ error: "since must be a step number from an earlier answer" }, 400);
+  const now = await gardenNow(c.env);
+  const db = c.env.DB;
   // Every region and how many live there (hidden players too: the island's
   // size must be the same for everyone), so the player can go and visit.
-  const { results: regions } = await c.env.DB.prepare(
-    `SELECT region, COUNT(*) AS blobs FROM blobs WHERE born_at <= ? GROUP BY region ORDER BY region`,
-  )
-    .bind(now)
-    .all<{ region: number; blobs: number }>();
-  // Children born in the world step's lookahead aren't here yet.
-  const { results: blobs } = await c.env.DB.prepare(
-    `SELECT b.seed, COALESCE(b.name, u.pseudo) AS pseudo, u.country, b.sex, b.attraction, b.born_at, b.adult_at
-     FROM blobs b LEFT JOIN users u ON u.id = b.owner_user_id
-     WHERE b.region = ?3 AND b.born_at <= ?1 AND (u.id IS NULL OR u.visible_in_garden = 1 OR u.id = ?2)`,
-  )
-    .bind(now, c.get("userId"), region)
-    .all<{ seed: string; pseudo: string | null; country: string | null; sex: Sex; attraction: Attraction; born_at: number; adult_at: number }>();
-  // A union started or ended in the lookahead hasn't happened yet either.
-  const { results: unions } = await c.env.DB.prepare(
-    `SELECT seed_a, seed_b FROM unions WHERE started_at <= ?1 AND (ended_at IS NULL OR ended_at > ?1)`,
-  )
-    .bind(now)
-    .all<{ seed_a: string; seed_b: string }>();
-  const partner = new Map(unions.flatMap((u) => [[u.seed_a, u.seed_b] as const, [u.seed_b, u.seed_a] as const]));
-  // Still nursing a broken heart a while after a breakup.
-  const { results: splits } = await c.env.DB.prepare(`SELECT seed_a, seed_b FROM unions WHERE ended_at > ?1 - ?2 AND ended_at <= ?1`)
-    .bind(now, HEARTBREAK)
-    .all<{ seed_a: string; seed_b: string }>();
-  const heartbroken = new Set(splits.flatMap((u) => [u.seed_a, u.seed_b]));
-  const { results: rows } = await c.env.DB.prepare(
-    `SELECT s.* FROM segments s JOIN blobs b ON b.seed = s.seed WHERE b.region = ? AND s.end > ? ORDER BY s.start`,
-  )
-    .bind(region, now - SEGMENT_HISTORY)
-    .all<SegmentRow>();
-  const segments = new Map<string, Segment[]>();
-  for (const { seed, with_seed, ...r } of rows) {
-    segments.set(seed, [...(segments.get(seed) ?? []), { ...r, with: with_seed?.split(",") ?? null }]);
-  }
-
+  const [mine, all] = await db.batch<{ region: number; blobs: number }>([
+    db.prepare(`SELECT region FROM blobs WHERE owner_user_id = ?`).bind(c.get("userId")),
+    db.prepare(`SELECT region, COUNT(*) AS blobs FROM blobs WHERE born_at <= ? GROUP BY region ORDER BY region`).bind(now),
+  ]);
+  const regions = all!.results;
+  const home = mine!.results[0]?.region ?? 0;
+  const n = asked !== undefined ? Number(asked) : home;
+  const count = regions.find((r) => r.region === n)?.blobs;
+  const head = `"now":${now},"region":${n},"home":${home},"regions":${JSON.stringify(regions)},"size":${gardenSize(count ?? 0)},"rate":${timeScale(c.env)}`;
+  // A region no one lives in yet: nothing to ask its object (and no object to wake).
+  if (count === undefined) return c.body(`{${head},"step":0,"delta":false,"blobs":[]}`, 200, { "content-type": "application/json" });
+  const query = new URLSearchParams({ viewer: c.get("userId"), ...(since !== undefined && { since }) });
+  const res = await region(c.env, n, `/garden?${query}`);
+  if (!res.ok) throw new Error(`region ${n} garden failed: ${res.status}`);
   // Timelines, not states: the client plays the stored segments back itself.
-  return c.json({
-    now,
-    region,
-    home,
-    regions,
-    // The island's side, in cells: every client draws the same one.
-    size: gardenSize(regions.find((r) => r.region === region)?.blobs ?? 0),
-    // How fast the garden's clock runs: clients play timelines back at this rate.
-    rate: timeScale(c.env),
-    blobs: blobs.map((b) => ({
-      seed: b.seed,
-      pseudo: b.pseudo,
-      country: b.country,
-      sex: b.sex,
-      attraction: b.attraction,
-      bornAt: b.born_at,
-      adultAt: b.adult_at,
-      partner: partner.get(b.seed) ?? null,
-      heartbroken: heartbroken.has(b.seed),
-      segments: segments.get(b.seed) ?? [],
-    })),
+  // The region's answer goes out as it came, behind the garden-wide fields.
+  return c.body(`{${head},${(await res.text()).slice(1)}`, 200, { "content-type": "application/json" });
+});
+
+/** Passes a player's change to their blob on to its region. */
+const member = (route: string, field = route) =>
+  app.patch(`/me/${route}`, requireAuth, async (c) => {
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    const home = await homeOf(c.env.DB, c.get("userId"));
+    if (home === null) return c.json({ error: "no blob for this account" }, 404);
+    const patch = field === "identity" ? { sex: body.sex, attraction: body.attraction } : { [field]: body[field] };
+    return region(c.env, home, "/member", { method: "PATCH", body: JSON.stringify({ owner: c.get("userId"), ...patch }) });
   });
-});
-
 // Where the player says they're from, or null to stop saying.
-app.patch("/me/country", requireAuth, async (c) => {
-  const body = await c.req.json<{ country?: unknown }>().catch(() => ({}) as { country?: unknown });
-  if (body.country !== null && !isCountry(body.country)) return c.json({ error: "country must be an ISO 3166-1 alpha-2 code, or null" }, 400);
-  await c.env.DB.prepare(`UPDATE users SET country = ? WHERE id = ?`).bind(body.country, c.get("userId")).run();
-  return c.json({ ok: true });
-});
-
-app.patch("/me/identity", requireAuth, async (c) => {
-  const body = await c.req.json<{ sex?: unknown; attraction?: unknown }>().catch(() => ({}) as { sex?: unknown; attraction?: unknown });
-  if (!isSex(body.sex) || !isAttraction(body.attraction)) {
-    return c.json({ error: "sex (female, male, none) and attraction (women, men, any) are required" }, 400);
-  }
-  await c.env.DB.prepare(`UPDATE blobs SET sex = ?, attraction = ? WHERE owner_user_id = ?`)
-    .bind(body.sex, body.attraction, c.get("userId"))
-    .run();
-  return c.json({ ok: true });
-});
-
-app.patch("/me/visibility", requireAuth, async (c) => {
-  const body = await c.req.json<{ visible?: boolean }>().catch(() => ({}) as { visible?: boolean });
-  if (typeof body.visible !== "boolean") return c.json({ error: "visible (boolean) is required" }, 400);
-  await c.env.DB.prepare(`UPDATE users SET visible_in_garden = ? WHERE id = ?`)
-    .bind(body.visible ? 1 : 0, c.get("userId"))
-    .run();
-  return c.json({ ok: true });
-});
+member("country");
+member("identity");
+member("visibility", "visible");
 
 app.patch("/me/ping", requireAuth, async (c) => {
   const now = Date.now();
@@ -253,94 +202,116 @@ app.patch("/me/ping", requireAuth, async (c) => {
 app.patch("/blobs/:seed/name", requireAuth, async (c) => {
   const seed = c.req.param("seed");
   const body = await c.req.json<{ name?: unknown }>().catch(() => ({}) as { name?: unknown });
-  const name = cleanName(body.name);
-  if (!name) return c.json({ error: `a name of 1 to ${MAX_NAME_LENGTH} characters is required` }, 400);
-
-  const parent = await c.env.DB.prepare(
-    `SELECT 1 FROM blobs b
-     JOIN unions u ON u.id = b.parent_union_id
-     JOIN blobs me ON me.owner_user_id = ?2
-     WHERE b.seed = ?1 AND (u.seed_a = me.seed OR u.seed_b = me.seed)`,
-  )
-    .bind(seed, c.get("userId"))
-    .first();
-  if (!parent) return c.json({ error: "only a parent can name this blob" }, 403);
-
-  if (await nameTaken(c.env.DB, name, seed)) return c.json({ error: "name already taken" }, 409);
-  try {
-    await c.env.DB.prepare(`UPDATE blobs SET name = ?, name_key = ? WHERE seed = ?`).bind(name, normalizeSeed(name), seed).run();
-  } catch {
-    // name_key UNIQUE: another child took it between the check and the write.
-    return c.json({ error: "name already taken" }, 409);
-  }
-  return c.json({ ok: true, name });
+  const n = await regionOf(c.env.DB, seed);
+  if (n === null) return c.json({ error: "only a parent can name this blob" }, 403);
+  return region(c.env, n, "/name", { method: "PATCH", body: JSON.stringify({ seed, name: body.name, viewer: c.get("userId") }) });
 });
 
 // How one blob gets on with everyone it has met: public, like the family tree.
 // Accounts hidden from the garden stay hidden here too.
 app.get("/blobs/:seed/relationships", async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT o.seed, ${nameOf("o")} AS name, r.status, r.friendship, r.romance, r.tension, r.kin, r.meetings, r.last_met_at AS lastMetAt
-     FROM relationships r
-     JOIN blobs o ON o.seed = CASE WHEN r.seed_a = ?1 THEN r.seed_b ELSE r.seed_a END
-     LEFT JOIN users u ON u.id = o.owner_user_id
-     WHERE (r.seed_a = ?1 OR r.seed_b = ?1) AND o.born_at <= ?2 AND (u.id IS NULL OR u.visible_in_garden = 1)`,
-  )
-    .bind(c.req.param("seed"), await gardenNow(c.env))
-    .all();
-  return c.json({ relationships: results });
+  const seed = c.req.param("seed");
+  const n = await regionOf(c.env.DB, seed);
+  if (n === null) return c.json({ relationships: [] });
+  return region(c.env, n, `/relationships/${encodeURIComponent(seed)}`);
 });
 
-// Shown only when the blob isn't an account hidden from the garden.
-const shown = (alias: string) => `NOT EXISTS (SELECT 1 FROM users WHERE id = ${alias}.owner_user_id AND visible_in_garden = 0)`;
-const JOURNAL_SIZE = 60;
-
-// The garden's news, newest first: couples forming and splitting, births, and
-// the fights everyone heard about (between blobs who matter to each other, or
-// can't stand each other: squabbles between acquaintances are everyday). Only what has happened by now — the world
-// step lives a little ahead. Fights are kept as long as interactions are (3 days).
+// The news of the player's region (or ?region=): couples, breakups, births, big fights.
 app.get("/garden/journal", requireAuth, async (c) => {
-  const now = await gardenNow(c.env);
-  const { results } = await c.env.DB.prepare(
-    `SELECT * FROM (
-       SELECT u.started_at AS at, 'couple' AS kind, a.seed AS a, ${nameOf("a")} AS aName, b.seed AS b, ${nameOf("b")} AS bName, NULL AS c, NULL AS cName
-       FROM unions u JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
-       WHERE u.started_at <= ?1 AND ${shown("a")} AND ${shown("b")}
-       UNION ALL
-       SELECT u.ended_at, 'breakup', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, NULL, NULL
-       FROM unions u JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
-       WHERE u.ended_at <= ?1 AND ${shown("a")} AND ${shown("b")}
-       UNION ALL
-       SELECT k.born_at, 'birth', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, k.seed, ${nameOf("k")}
-       FROM blobs k JOIN unions u ON u.id = k.parent_union_id JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
-       WHERE k.born_at <= ?1 AND ${shown("a")} AND ${shown("b")}
-       UNION ALL
-       SELECT i.ended_at, 'fight', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, NULL, NULL
-       FROM interactions i JOIN blobs a ON a.seed = i.seed_a JOIN blobs b ON b.seed = i.seed_b
-       JOIN relationships r ON r.seed_a = i.seed_a AND r.seed_b = i.seed_b
-       WHERE i.kind = 'argue' AND i.outcome = 'bad' AND i.ended_at <= ?1 AND ${shown("a")} AND ${shown("b")}
-         AND r.status IN ('lovers', 'ex', 'rivals', 'complicated', 'best_friends')
-     ) ORDER BY at DESC LIMIT ?2`,
-  )
-    .bind(now, JOURNAL_SIZE)
-    .all();
-  return c.json({ now, events: results });
+  const asked = c.req.query("region");
+  if (asked !== undefined && !/^\d{1,9}$/.test(asked)) return c.json({ error: "region must be a non-negative integer" }, 400);
+  const n = asked !== undefined ? Number(asked) : ((await homeOf(c.env.DB, c.get("userId"))) ?? 0);
+  if (!(await c.env.DB.prepare(`SELECT 1 FROM blobs WHERE region = ? LIMIT 1`).bind(n).first())) return c.json({ now: await gardenNow(c.env), events: [] });
+  return region(c.env, n, "/journal");
 });
 
 // Genealogy is part of the public garden layer, not the private one — no auth.
 app.get("/tree/:seed", async (c) => {
-  const tree = await familyTree(c.env.DB, c.req.param("seed"), await gardenNow(c.env));
-  return c.json(tree);
+  const seed = c.req.param("seed");
+  const n = await regionOf(c.env.DB, seed);
+  if (n === null) return c.json(noTree(seed));
+  return region(c.env, n, `/tree/${encodeURIComponent(seed)}`);
+});
+
+/**
+ * A new account's blob in the directory, in the region it'll live in. It
+ * moves in with `friend` (an account's seed) while their region has room, a
+ * little past `cap` (FRIENDS_ROOM), else into the first region with fewer
+ * than `cap`, so each fills up (and gets lively) before the next opens, or
+ * opens the next when all are full. Picked inside the insert: D1 runs writes
+ * one at a time, so two sign-ups can't both take a region's last place.
+ */
+export function placeAccount(db: D1Database, userId: string, seed: string, bornAt: number, friend: string | null, cap = REGION_CAP) {
+  return db
+    .prepare(
+      `INSERT INTO blobs (seed, owner_user_id, name_key, region, born_at) VALUES (?1, ?2, ?1, COALESCE(
+         (SELECT f.region FROM blobs f
+          WHERE f.seed = ?4 AND f.owner_user_id IS NOT NULL AND (SELECT COUNT(*) FROM blobs WHERE region = f.region) < ?5),
+         (SELECT region FROM blobs GROUP BY region HAVING COUNT(*) < ?6 ORDER BY region LIMIT 1),
+         (SELECT COALESCE(MAX(region) + 1, 0) FROM blobs)
+       ), ?3)`,
+    )
+    .bind(seed, userId, bornAt, friend, cap + FRIENDS_ROOM, cap);
+}
+// How far past REGION_CAP friends can still squeeze in with each other.
+const FRIENDS_ROOM = 50;
+
+// Local tools, only where .dev.vars sets DEV_TOOLS=1: never in production.
+const devTools = createMiddleware<{ Bindings: Env; Variables: Vars }>(async (c, next) => {
+  if (c.env.DEV_TOOLS !== "1") return c.notFound();
+  await next();
+});
+const allRegions = async (db: D1Database) => (await db.prepare(`SELECT DISTINCT region FROM blobs`).all<{ region: number }>()).results.map((r) => r.region);
+
+// Every region lives forward now, instead of on its next alarm; `ahead` ms
+// further still, to play a later step (the load test's clients coming back).
+app.post("/__dev/step", devTools, async (c) => {
+  const body = await c.req.text();
+  const regions = await allRegions(c.env.DB);
+  await Promise.all(regions.map((n) => region(c.env, n, "/step", { method: "POST", body: body || "{}" })));
+  return c.json({ regions: regions.length });
+});
+
+// `count` blobs without accounts, filling new regions: for the load test (scripts/load.mjs).
+app.post("/__dev/populate", devTools, async (c) => {
+  const { count } = await c.req.json<{ count: number }>();
+  const db = c.env.DB;
+  const now = await gardenNow(c.env);
+  const first = ((await db.prepare(`SELECT MAX(region) AS n FROM blobs`).first<number | null>("n")) ?? -1) + 1;
+  const sexes = ["female", "male", "none"] as const;
+  const attractions = ["women", "men", "any"] as const;
+  const made = Array.from({ length: count }, (_, i) => {
+    const seed = `load-${crypto.randomUUID().slice(0, 13)}`;
+    return { seed, name: seed, n: first + Math.floor(i / REGION_CAP), identity: { sex: sexes[i % 3]!, attraction: attractions[(i >> 1) % 3]! } };
+  });
+  for (let i = 0; i < made.length; i += 100) {
+    await db.batch(made.slice(i, i + 100).map((b) => db.prepare(`INSERT INTO blobs (seed, name_key, region, born_at) VALUES (?, ?, ?, ?)`).bind(b.seed, b.seed, b.n, now)));
+  }
+  const byRegion = new Map<number, typeof made>();
+  for (const b of made) byRegion.set(b.n, [...(byRegion.get(b.n) ?? []), b]);
+  for (const [n, blobs] of byRegion) {
+    const body = blobs.map((b) => ({ seed: b.seed, ownerUserId: null, name: b.name, country: null, identity: b.identity }));
+    const res = await region(c.env, n, "/join", { method: "POST", body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`region ${n} join failed: ${res.status}`);
+  }
+  return c.json({ regions: [...byRegion.keys()] });
+});
+
+// Anything that breaks is logged whole, for the dashboard's logs (wrangler.toml [observability]).
+app.onError((e, c) => {
+  console.error(JSON.stringify({ event: "request_failed", method: c.req.method, path: c.req.path, error: String(e), stack: e.stack }));
+  return c.json({ error: "internal error" }, 500);
 });
 
 export { Region } from "./region";
 
 export default {
   fetch: app.fetch,
-  // Every 5 minutes (wrangler.toml), live everyone forward: each region in its own writer.
+  // Regions live on their own alarms. Every 5 minutes (wrangler.toml), this
+  // only makes sure each has one: an alarm whose retries all failed is gone,
+  // and this sets it again.
   async scheduled(_controller, env) {
-    const now = await gardenNow(env);
-    const until = now + LOOKAHEAD;
-    await advanceGarden(env.DB, now, undefined, until, (region) => stepRegion(env, region, now, until));
+    const results = await Promise.allSettled((await allRegions(env.DB)).map((n) => region(env, n, "/wake", { method: "POST" })));
+    for (const r of results) if (r.status === "rejected") console.error(JSON.stringify({ event: "wake_failed", error: String(r.reason) }));
   },
 } satisfies ExportedHandler<Env>;

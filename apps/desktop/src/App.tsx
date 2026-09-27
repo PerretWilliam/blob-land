@@ -1,4 +1,4 @@
-import { notable, type Identity } from "@blob-land/sim";
+import { notable, type Identity, type Segment } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,6 +13,8 @@ import { loadState, saveState, type AppState } from "@/lib/state";
 const PING_INTERVAL_MS = 60_000;
 // A sped-up dev garden is lived only minutes ahead of now, in real time: refresh often.
 const FAST_GARDEN_REFRESH_MS = 10_000;
+// Played timeline kept per blob, in garden time: what the API sends in a full answer.
+const SEGMENT_HISTORY_MS = 15 * 60_000;
 // How often the private blob's life is lived a bit further and saved.
 const LIFE_TICK_MS = 60_000;
 
@@ -43,11 +45,25 @@ export default function App() {
 
   const visitingRef = useRef(visiting);
   visitingRef.current = visiting;
-  const refreshGarden = useCallback(async (token: string) => {
+  // What the last answer held, so the next asks only for what's new since.
+  const known = useRef<{ asked: number | undefined; step: number; segments: Map<string, Segment[]> } | null>(null);
+  const refreshGarden = useCallback(async (token: string): Promise<void> => {
     const asked = visitingRef.current ?? undefined;
-    const { blobs, now, rate, region, home, regions: list, size } = await getGarden(token, asked);
+    const last = known.current?.asked === asked ? known.current : null;
+    const { blobs: sent, now, rate, region, home, regions: list, size, step, delta } = await getGarden(token, asked, last?.step);
     // The player moved on to another island while this one was loading.
     if ((visitingRef.current ?? undefined) !== asked) return;
+    let blobs = sent;
+    if (delta && last) {
+      // Someone new (born, joined, back from hiding): the timeline they've
+      // already lived isn't in an answer about what's new, so ask for all.
+      if (sent.some((b) => !last.segments.has(b.seed))) {
+        known.current = null;
+        return refreshGarden(token);
+      }
+      blobs = sent.map((b) => ({ ...b, segments: [...last.segments.get(b.seed)!.filter((s) => s.end > now - SEGMENT_HISTORY_MS), ...b.segments] }));
+    }
+    known.current = { asked, step, segments: new Map(blobs.map((b) => [b.seed, b.segments])) };
     setBlobs(blobs);
     setRegions({ region, home, list, size });
     setGardenClock({ at: now, readAt: Date.now(), rate: rate ?? 1 });

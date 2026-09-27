@@ -41,6 +41,10 @@ export interface GardenResponse {
   regions: GardenRegion[];
   /** The region's island side, in cells (see gardenIsland). */
   size: number;
+  /** How many steps the region has lived: pass it back as `since` to get only what's new. */
+  step: number;
+  /** An answer to `since`: every blob, but only the timeline written since then. */
+  delta: boolean;
   blobs: GardenBlob[];
 }
 
@@ -99,9 +103,12 @@ export function login(pseudo: string, password: string): Promise<AuthResponse> {
   return request("/auth/login", { method: "POST", body: JSON.stringify({ pseudo, password }) });
 }
 
-/** One region of the garden: `region`, or the player's own. */
-export function getGarden(token: string, region?: number): Promise<GardenResponse> {
-  return request(region === undefined ? "/garden" : `/garden?region=${region}`, { headers: authHeader(token) });
+/** One region of the garden: `region`, or the player's own; `since`, a `step` from an earlier answer about it. */
+export function getGarden(token: string, region?: number, since?: number): Promise<GardenResponse> {
+  const query = new URLSearchParams();
+  if (region !== undefined) query.set("region", String(region));
+  if (since !== undefined) query.set("since", String(since));
+  return request(`/garden${query.size ? `?${query}` : ""}`, { headers: authHeader(token) });
 }
 
 export function setVisibility(token: string, visible: boolean): Promise<{ ok: true }> {

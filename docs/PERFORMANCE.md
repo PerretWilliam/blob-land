@@ -107,3 +107,28 @@ app, WebKit and the bench's own frame counter — already costs 17–20 % CPU an
 window costs here, and need re-setting against that floor; what's left to win
 is in the world's share (texture atlases for the GPU process, fewer live
 sprites far from the camera), to be measured after the API work.
+
+## The API — 2026-09-27, regions in their own objects
+
+`pnpm --filter @blob-land/api load 10000 20 500` against `wrangler dev`
+(local workerd, `TIME_SCALE=1`), 10 000 blobs in 24 regions of 450:
+
+| | Result |
+|---|---|
+| One step of every region (450 blobs each, 30 min lived) | 0.8 s in all, ~35 ms a region |
+| `/garden` whole, one client | p50 5 ms, p95 8 ms, 288 KB |
+| `/garden` whole, 20 clients at once | 246 answers/s, p50 81 ms (queued: local workerd runs one request at a time) |
+| `/garden?since=` after one step, 20 clients | 561 answers/s, p50 33 ms, 111 KB |
+
+- Under the 50 ms target by a wide margin for one request; the 20-client
+  numbers are one local process doing everything in turn, ~4 ms of work an
+  answer. On Cloudflare each region is its own object and requests spread
+  over Worker instances.
+- A region builds its answer once per step and sends the same string to all
+  its players; `since` answers for the last steps are kept too.
+- A step is one SQLite transaction in its region's object: a failed step keeps
+  nothing, is retried by the runtime, and the cron sets a lost alarm again.
+- The local runtime (wrangler 3, workerd 2025-07) keeps memory from every
+  request it serves, even a bare "hello" Worker (~10 KB each), and dies near
+  1.5 GB: the load test sends a fixed number of requests, not a duration.
+  Numbers from Cloudflare's network need a deployed API (not yet: no D1 id).

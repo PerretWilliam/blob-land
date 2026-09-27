@@ -3,7 +3,7 @@ interface ParentInfo {
   pseudo: string;
 }
 
-interface ChildRow {
+type ChildRow = {
   seed: string;
   name: string | null;
   born_at: number;
@@ -12,7 +12,7 @@ interface ChildRow {
   parent_b: string;
   pseudo_a: string;
   pseudo_b: string;
-}
+};
 
 export interface FamilyTree {
   seed: string;
@@ -30,29 +30,26 @@ export interface FamilyTree {
 // now that children pair too, but not ten deep any time soon.
 const MAX_DEPTH = 10;
 
-// A blob's display name: a child's own, or its account's pseudo.
-const NAME = `COALESCE(%.name, (SELECT pseudo FROM users WHERE id = %.owner_user_id))`;
-export const nameOf = (alias: string) => NAME.replaceAll("%", alias);
-
-/** Walks the genealogy from `seed` down through `unions`/`blobs` via a
- * recursive CTE, plus the direct parents if `seed` is itself a child. */
-export async function familyTree(db: D1Database, seed: string, now: number): Promise<FamilyTree> {
-  const parentRow = await db
-    .prepare(
-      `SELECT pa.seed AS seed_a, ${nameOf("pa")} AS pseudo_a, pb.seed AS seed_b, ${nameOf("pb")} AS pseudo_b
+/** Walks the genealogy from `seed` down through its region's unions and
+ * blobs via a recursive CTE, plus the direct parents if `seed` is itself a
+ * child. A family never spans regions: children are born into their parents'. */
+export function familyTree(sql: SqlStorage, seed: string, now: number): FamilyTree {
+  const parentRow = sql
+    .exec<{ seed_a: string; pseudo_a: string; seed_b: string; pseudo_b: string }>(
+      `SELECT pa.seed AS seed_a, pa.name AS pseudo_a, pb.seed AS seed_b, pb.name AS pseudo_b
        FROM blobs b
        JOIN unions u ON u.id = b.parent_union_id
        JOIN blobs pa ON pa.seed = u.seed_a
        JOIN blobs pb ON pb.seed = u.seed_b
        WHERE b.seed = ?`,
+      seed,
     )
-    .bind(seed)
-    .first<{ seed_a: string; pseudo_a: string; seed_b: string; pseudo_b: string }>();
+    .toArray()[0];
 
-  const { results } = await db
-    .prepare(
+  const results = sql
+    .exec<ChildRow>(
       `WITH RECURSIVE tree(seed, depth) AS (
-         SELECT ?, 0
+         SELECT ?1, 0
          UNION ALL
          SELECT b.seed, t.depth + 1
          FROM tree t
@@ -61,7 +58,7 @@ export async function familyTree(db: D1Database, seed: string, now: number): Pro
          WHERE t.depth < ${MAX_DEPTH}
        )
        SELECT b.seed, b.name, b.born_at, t.depth, pa.seed AS parent_a, pb.seed AS parent_b,
-              ${nameOf("pa")} AS pseudo_a, ${nameOf("pb")} AS pseudo_b
+              pa.name AS pseudo_a, pb.name AS pseudo_b
        FROM tree t
        JOIN blobs b ON b.seed = t.seed
        JOIN unions u ON u.id = b.parent_union_id
@@ -69,26 +66,23 @@ export async function familyTree(db: D1Database, seed: string, now: number): Pro
        JOIN blobs pb ON pb.seed = u.seed_b
        WHERE t.depth > 0 AND b.born_at <= ?2
        ORDER BY t.depth, b.born_at`,
+      seed,
+      now,
     )
-    .bind(seed, now)
-    .all<ChildRow>();
+    .toArray();
 
-  const self = await db
-    .prepare(
-      `SELECT ${nameOf("b")} AS name FROM blobs b WHERE seed = ?`,
-    )
-    .bind(seed)
-    .first<{ name: string | null }>();
+  const self = sql.exec<{ name: string }>(`SELECT name FROM blobs WHERE seed = ?`, seed).toArray()[0];
 
-  const partner = await db
-    .prepare(
-      `SELECT o.seed, ${nameOf("o")} AS pseudo
+  const partner = sql
+    .exec<{ seed: string; pseudo: string }>(
+      `SELECT o.seed, o.name AS pseudo
        FROM unions u
        JOIN blobs o ON o.seed = CASE WHEN u.seed_a = ?1 THEN u.seed_b ELSE u.seed_a END
        WHERE (u.seed_a = ?1 OR u.seed_b = ?1) AND u.started_at <= ?2 AND (u.ended_at IS NULL OR u.ended_at > ?2)`,
+      seed,
+      now,
     )
-    .bind(seed, now)
-    .first<ParentInfo>();
+    .toArray()[0];
 
   return {
     seed,
@@ -109,3 +103,6 @@ export async function familyTree(db: D1Database, seed: string, now: number): Pro
     })),
   };
 }
+
+/** The tree of a seed no region knows. */
+export const noTree = (seed: string): FamilyTree => ({ seed, name: null, partner: null, parents: null, children: [] });
