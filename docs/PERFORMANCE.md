@@ -92,6 +92,18 @@ still being laid out in its worker when it's sampled.
   of allocations took): it now runs in a worker, whose memory goes with it,
   and the island code and path search allocate nothing in their hot loops.
 
-Still over target on RAM (×2.5) and CPU at rest. Next levers, measured before
-taken: drawing close-ups at a lower resolution than the screen's, textures
-packed into atlases, and a lighter frame loop when nothing on screen changes.
+Still over target on RAM (×2.5) and CPU at rest. Two levers, measured
+(same bench, 2026-09-27) and left out:
+
+- **Canvas at 1× instead of the screen's 2×**: CPU and RAM within noise of 2×
+  (close up 26 % CPU, 669 MB; GPU process −10 MB). Pixels aren't the cost.
+- **Idle animation at 30 fps close up**: 24 % CPU instead of 26 %, and blobs
+  visibly less smooth. Not worth it.
+
+The floor explains why: the bench's *blank page* — no world at all, just the
+app, WebKit and the bench's own frame counter — already costs 17–20 % CPU and
+~515 MB (app ~140, page ~220, GPU ~155). The world adds ~10 points of CPU and
+~250 MB on top. So the 5 % and 300 MB targets are below what an empty Tauri
+window costs here, and need re-setting against that floor; what's left to win
+is in the world's share (texture atlases for the GPU process, fewer live
+sprites far from the camera), to be measured after the API work.
