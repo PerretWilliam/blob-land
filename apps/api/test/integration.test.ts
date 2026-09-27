@@ -229,11 +229,13 @@ describe("blob-land API", () => {
       ),
     );
 
-    // Live the garden forward a day at a time until a child is born.
+    // Live the garden forward a day at a time until a child is born. Joining
+    // lives the garden with real randomness (see /join), so the days this takes
+    // vary from run to run: leave plenty.
     const rng = seededRng(7);
     const start = Date.now();
     let childSeed: string | undefined;
-    for (let d = 1; d <= 60 && !childSeed; d++) {
+    for (let d = 1; d <= 180 && !childSeed; d++) {
       await stepAll(start + d * DAY, rng, start + d * DAY);
       // Theirs: the tests share one garden, where other couples may have children too.
       childSeed = await inRegion(

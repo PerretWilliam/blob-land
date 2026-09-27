@@ -1,7 +1,11 @@
-import type { Env } from "../src/env";
+import type { Env as WorkerEnv } from "../src/env";
 
-declare module "cloudflare:test" {
-  interface ProvidedEnv extends Env {
-    TEST_MIGRATIONS: D1Migration[];
+// What the tests' `env` holds: the Worker's own bindings, plus the migrations
+// vitest.config.ts hands over.
+declare global {
+  namespace Cloudflare {
+    interface Env extends WorkerEnv {
+      TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];
+    }
   }
 }
