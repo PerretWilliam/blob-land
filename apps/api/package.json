@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --test-scheduled",
-    "dev:cron": "node -e \"setInterval(() => fetch('http://localhost:8787/__scheduled').catch(() => {}), 60000)\"",
+    "dev:cron": "node -e \"setInterval(() => fetch('http://localhost:8787/__scheduled').catch(() => {}), 10000)\"",
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

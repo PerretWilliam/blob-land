@@ -1,5 +1,6 @@
 import type { Identity } from "@blob-land/sim";
 import { useState } from "react";
+import { CountryField } from "@/components/country-field";
 import { Button } from "@/components/ui/button";
 import { checkPseudo, login, register, type AuthResponse } from "@/lib/api";
 
@@ -15,6 +16,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
   const [mode, setMode] = useState<"register" | "login">("register");
   const [pseudo, setPseudo] = useState(localPseudo);
   const [password, setPassword] = useState("");
+  const [country, setCountry] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -25,7 +27,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
     setSuggestions([]);
     setPending(true);
     try {
-      const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity));
+      const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity, country));
       onJoined(pseudo, response);
     } catch (err) {
       // Tauri plugins reject with plain strings, not Errors.
@@ -65,6 +67,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
+        {mode === "register" ? <CountryField value={country} onChange={setCountry} /> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {suggestions.length > 0 ? (
           <div className="flex flex-wrap gap-2">

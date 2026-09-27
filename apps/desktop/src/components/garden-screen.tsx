@@ -14,6 +14,7 @@ import {
   Plus,
   Menu,
   Network,
+  Newspaper,
   Pencil,
   RotateCcw,
   Trees,
@@ -23,10 +24,11 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { FamilyPanel } from "@/components/family-tree";
+import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { RelationsPanel } from "@/components/relations-panel";
 import { Button } from "@/components/ui/button";
 import { ACTIVITY_LABELS, ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
-import type { GardenBlob } from "@/lib/api";
+import { gardenTime, type GardenBlob, type GardenClock } from "@/lib/api";
 import type { LocalLife } from "@/lib/life";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
 import { usePrefersReducedMotion } from "@/lib/motion";
@@ -37,8 +39,11 @@ export interface GardenScreenProps {
   /** The private blob's own, locally lived timeline and identity. */
   life: LocalLife;
   onIdentityChange: (identity: Identity) => void;
+  onCountryChange: (country: string | null) => void;
   account: { pseudo: string; seed: string; token: string } | null;
   blobs: GardenBlob[];
+  /** The garden's time, which may run faster than the private blob's (dev). */
+  gardenClock: GardenClock;
   visible: boolean;
   onToggleVisibility: () => void;
   onJoinGarden: () => void;
@@ -51,6 +56,8 @@ const PAGE_SIZE = 50;
 // How often activities and faces are re-read off the timelines: segments last
 // minutes, so a few seconds of lag is invisible.
 const STATE_TICK_MS = 5_000;
+// How long a newborn sparkles, in garden time.
+const NEWBORN_MS = 30 * 60 * 1000;
 // The shared garden is never edited: everyone sees the same default island.
 const GARDEN_ISLAND = defaultIsland(7);
 
@@ -59,8 +66,10 @@ export function GardenScreen({
   localSeed,
   life,
   onIdentityChange,
+  onCountryChange,
   account,
   blobs,
+  gardenClock,
   visible,
   onToggleVisibility,
   onJoinGarden,
@@ -73,18 +82,21 @@ export function GardenScreen({
   const [editing, setEditing] = useState(false);
   const [tool, setTool] = useState<IslandTool>("grass");
   // The side panel: one at a time.
-  const [panel, setPanel] = useState<"journal" | "family" | "relations" | null>(null);
+  const [panel, setPanel] = useState<"journal" | "family" | "relations" | "news" | null>(null);
+  // Whose relations the panel opens on: the player's own unless a blob's ID card asked.
+  const [relationsOf, setRelationsOf] = useState<{ seed: string; name: string } | undefined>(undefined);
   // Re-render now and then, so states (and expressions) follow the clock.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), STATE_TICK_MS);
+    const id = setInterval(() => setNow(Date.now()), Math.max(500, STATE_TICK_MS / gardenClock.rate));
     return () => clearInterval(id);
-  }, []);
+  }, [gardenClock.rate]);
+  const gardenNow = gardenTime(gardenClock);
   const nameOf = (seed: string) => blobs.find((b) => b.seed === seed)?.pseudo ?? "a blob";
   // A garden blob as the scene draws it: its face and activity right now, off its timeline.
   const fromGarden = (blob: GardenBlob, label = blob.pseudo ?? "a new blob"): SceneBlob => {
-    const { expression, activity } = blobStateAt(blob.segments, now);
-    const withSeed = segmentAt(blob.segments, now)?.seg.with;
+    const { expression, activity } = blobStateAt(blob.segments, gardenNow);
+    const withSeed = segmentAt(blob.segments, gardenNow)?.seg.with;
     return {
       seed: blob.seed,
       label,
@@ -96,8 +108,11 @@ export function GardenScreen({
       partner: blob.partner,
       meetingWith: activity === "meet" && withSeed?.length ? listNames(withSeed.map(nameOf)) : undefined,
       partnerLabel: blob.partner ? nameOf(blob.partner) : undefined,
-      young: now < blob.adultAt,
-      ...(blob.seed === account?.seed ? { onIdentityChange } : {}),
+      young: gardenNow < blob.adultAt,
+      // Children only: an account's blob is born grown up.
+      aura: blob.heartbroken ? "heartbroken" : blob.adultAt > blob.bornAt && gardenNow - blob.bornAt < NEWBORN_MS ? "newborn" : undefined,
+      country: blob.country,
+      ...(blob.seed === account?.seed ? { onIdentityChange, onCountryChange } : {}),
     };
   };
   const reducedMotion = usePrefersReducedMotion();
@@ -146,7 +161,13 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={GARDEN_ISLAND} blobScale={0.55} />
+        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={GARDEN_ISLAND} blobScale={0.55}
+          clock={() => gardenTime(gardenClock)}
+          onShowRelations={(seed, name) => {
+            setRelationsOf({ seed, name });
+            setPanel("relations");
+          }}
+        />
       ) : (
         <Scene
           key="private"
@@ -211,12 +232,25 @@ export function GardenScreen({
               icon={<HeartHandshake />}
               active={panel === "relations"}
               onClick={() => {
+                setRelationsOf(undefined);
                 setPanel((p) => (p === "relations" ? null : "relations"));
                 setMenuOpen(false);
               }}
             >
               Relations
             </MenuItem>
+            {account ? (
+              <MenuItem
+                icon={<Newspaper />}
+                active={panel === "news"}
+                onClick={() => {
+                  setPanel((p) => (p === "news" ? null : "news"));
+                  setMenuOpen(false);
+                }}
+              >
+                Garden news
+              </MenuItem>
+            ) : null}
 
             <div className="my-1 h-px bg-border" aria-hidden="true" />
 
@@ -264,7 +298,10 @@ export function GardenScreen({
         />
       ) : null}
 
-      {panel === "relations" ? <RelationsPanel seed={account?.seed ?? null} onClose={() => setPanel(null)} /> : null}
+      {panel === "relations" ? (
+        <RelationsPanel key={relationsOf?.seed ?? "mine"} seed={account?.seed ?? null} start={relationsOf} onClose={() => setPanel(null)} />
+      ) : null}
+      {panel === "news" && account ? <GardenNewsPanel token={account.token} onClose={() => setPanel(null)} /> : null}
 
       {editing && !inGarden ? (
         <div className="absolute bottom-4 left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md">

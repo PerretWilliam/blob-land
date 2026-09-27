@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compatible, randomPersonality, type Identity } from "./identity";
-import { allowedFor, INTERACTIONS, MAX_STEP, pickInteraction, type MeetingContext } from "./interactions";
-import { DURATION, firstSegment, NEXT, SLEEP_HOURS, type Segment } from "./life";
+import { allowedFor, feeling, INTERACTIONS, MAX_STEP, moodShift, pickInteraction, type MeetingContext } from "./interactions";
+import { DURATION, firstSegment, NEXT, nextSolo, SLEEP_HOURS, sleepPressure, type Segment } from "./life";
 import { applyDelta, newRelationship, relationStatus, type Relationship } from "./relationship";
 import { randomRng, seededRng, type Rng } from "./rng";
 import { GROUP_MAX, stepWorld, type World, type WorldBlob } from "./world";
@@ -102,6 +102,43 @@ describe("stepWorld", () => {
     }
   });
 
+  it("leaves a blob cross after a fight", () => {
+    for (const segs of bySeed.values()) {
+      segs.forEach((s, i) => {
+        const next = segs[i + 1];
+        if (s.detail === "argue:bad" && next && (next.activity === "explore" || next.activity === "rest")) expect(next.expression).toBe("mad");
+      });
+    }
+  });
+
+  it("keeps night owls up and early birds in bed on their own clocks", () => {
+    const evening = Date.UTC(2026, 8, 26, 22);
+    const tired = { energy: 0.4, mood: 0 };
+    expect(sleepPressure(tired, evening, 1)).toBeLessThan(sleepPressure(tired, evening, 0));
+    // Both fall asleep at 22:00; the night owl sleeps in.
+    const bed: Segment = { ...firstSegment(evening, seededRng(1)), activity: "explore" };
+    const wakeAt = (chronotype: number) => {
+      const rng = seededRng(3);
+      let seg = bed;
+      for (let i = 0; i < 50 && seg.activity !== "sleep"; i++) seg = nextSolo(seg, { energy: 0.1, mood: 0 }, rng, chronotype);
+      return seg.end;
+    };
+    expect(wakeAt(1)).toBeGreaterThan(wakeAt(0) + 2 * HOUR);
+  });
+
+  it("carries a meeting's mood into what comes next, most of the time", () => {
+    let [after, kept] = [0, 0];
+    for (const segs of bySeed.values()) {
+      segs.forEach((s, i) => {
+        const next = segs[i + 1];
+        if (s.activity !== "meet" || !next || (next.activity !== "explore" && next.activity !== "rest")) return;
+        after++;
+        if (next.expression === s.expression || (s.detail?.endsWith(":bad") && ["sad", "unsure", "mad"].includes(next.expression))) kept++;
+      });
+    }
+    expect(kept / after).toBeGreaterThan(0.6);
+  });
+
   it("never lets an axis move more than a step per meeting", () => {
     for (const m of step.meetings) for (const v of Object.values(m.delta)) expect(Math.abs(v)).toBeLessThanOrEqual(MAX_STEP);
   });
@@ -162,6 +199,18 @@ describe("relationships", () => {
     ...over,
   });
 
+  it("shows on a blob's face, and in its mood, who it's with", () => {
+    expect(feeling("chat", "good", "lovers")).toBe("love");
+    expect(feeling("chat", "meh", "crush")).toBe("shy");
+    expect(feeling("play", "good", "rivals")).toBe("unsure");
+    expect(feeling("argue", "bad", "lovers")).toBe("mad");
+    expect(feeling("play", "good", "friends")).toBe("happy");
+    expect(moodShift("play", "good", "best_friends")).toBeGreaterThan(moodShift("play", "good", "acquaintances"));
+    expect(moodShift("play", "good", "acquaintances")).toBeGreaterThan(0);
+    expect(moodShift("chat", "good", "rivals")).toBe(0);
+    expect(moodShift("chat", "bad")).toBeLessThan(0);
+  });
+
   it("only picks what the relationship allows, however good the mood", () => {
     const rng = seededRng(1);
     for (const status of ["rivals", "ex", "complicated", "strangers"] as const) {
@@ -186,7 +235,8 @@ describe("relationships", () => {
     rel = { ...rel, status: relationStatus(rel, false) };
     const seen = new Set<string>();
     for (let i = 0; i < 100; i++) {
-      rel = applyDelta(rel, { friendship: i % 2 ? 2 : -2, romance: 0, tension: 0 }, i, false);
+      // Gains shrink as friendship grows (applyDelta), so +3/-1 hovers in place, just under best friends.
+      rel = applyDelta(rel, { friendship: i % 2 ? 3 : -1, romance: 0, tension: 0 }, i, false);
       seen.add(rel.status);
     }
     expect(seen.size).toBe(1);

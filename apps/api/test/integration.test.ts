@@ -2,6 +2,7 @@ import { seededRng } from "@blob-land/sim";
 import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import schemaSql from "../schema.sql?raw";
+import { gardenNow } from "../src/clock";
 import { advanceGarden } from "../src/garden";
 
 beforeAll(async () => {
@@ -21,7 +22,7 @@ async function jsonAs<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function register(pseudo: string, identity: { sex?: string; attraction?: string } = {}) {
+async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string } = {}) {
   const res = await SELF.fetch("https://api.test/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -44,7 +45,7 @@ async function login(pseudo: string) {
 const DAY = 24 * 60 * 60 * 1000;
 
 interface GardenBody {
-  blobs: { seed: string; pseudo: string | null; sex: string; attraction: string; partner: string | null; segments: { start: number; end: number }[] }[];
+  blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; partner: string | null; segments: { start: number; end: number }[] }[];
 }
 
 async function garden(token: string): Promise<GardenBody> {
@@ -66,7 +67,7 @@ describe("blob-land API", () => {
 
     // Registered but not lived yet: listed, with no timeline until the world step runs.
     const before = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
-    expect(before).toMatchObject({ sex: "none", attraction: "any", segments: [] });
+    expect(before).toMatchObject({ sex: "none", attraction: "any", country: null, segments: [] });
 
     await advanceGarden(env.DB, Date.now());
     const after = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
@@ -158,6 +159,14 @@ describe("blob-land API", () => {
     // /tree hides blobs born "in the future" (the step lives ahead of now); ask as of then.
     await env.DB.prepare(`UPDATE blobs SET born_at = ? WHERE seed = ?`).bind(Date.now() - 1000, childSeed).run();
 
+    // The garden's news tells of the couple and the birth, once they've happened.
+    await env.DB.prepare(`UPDATE unions SET started_at = ?`).bind(Date.now() - 2000).run();
+    const journal = await jsonAs<{ events: { kind: string; c: string | null }[] }>(
+      await SELF.fetch("https://api.test/garden/journal", { headers: { Authorization: `Bearer ${alice.token}` } }),
+    );
+    expect(journal.events.map((e) => e.kind)).toEqual(expect.arrayContaining(["couple", "birth"]));
+    expect(journal.events.find((e) => e.kind === "birth")!.c).toBe(childSeed);
+
     const tree = await SELF.fetch(`https://api.test/tree/${encodeURIComponent(alice.seed)}`);
     expect(tree.status).toBe(200);
     const treeBody = await jsonAs<{ children: { seed: string; name: string; parents: { seed: string }[] }[] }>(tree);
@@ -193,5 +202,43 @@ describe("blob-land API", () => {
     expect((await rename(alice.token, "Pebble")).status).toBe(200);
     const renamed = await jsonAs<{ name: string }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
     expect(renamed.name).toBe("Pebble");
+  });
+});
+
+describe("countries", () => {
+  it("takes an optional country, shows it in the garden, and lets it be changed or dropped", async () => {
+    const { token, seed } = await register("voyager", { country: "FR" });
+    const country = async () => (await garden(token)).blobs.find((b) => b.seed === seed)!.country;
+    expect(await country()).toBe("FR");
+
+    const set = (value: unknown) =>
+      SELF.fetch("https://api.test/me/country", {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ country: value }),
+      });
+    expect((await set("JP")).status).toBe(200);
+    expect(await country()).toBe("JP");
+    expect((await set(null)).status).toBe(200);
+    expect(await country()).toBeNull();
+    expect((await set("Neverland")).status).toBe(400);
+
+    const bad = await SELF.fetch("https://api.test/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pseudo: "nowhere", password: PASSWORD, country: "XX" }),
+    });
+    expect(bad.status).toBe(400);
+  });
+});
+
+describe("the garden clock", () => {
+  it("is real time by default, and runs TIME_SCALE times faster when set", async () => {
+    expect(Math.abs((await gardenNow(env)) - Date.now())).toBeLessThan(50);
+    const fast = { ...env, TIME_SCALE: "60" };
+    const [a, real] = [await gardenNow(fast), Date.now()];
+    await new Promise((r) => setTimeout(r, 100));
+    const b = await gardenNow(fast);
+    expect(b - a).toBeGreaterThanOrEqual((Date.now() - real) * 60 * 0.8);
   });
 });

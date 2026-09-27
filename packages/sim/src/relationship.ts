@@ -66,10 +66,10 @@ export function decay(rel: Relationship, now: number, together: boolean): Relati
   const dt = now - rel.lastMetAt;
   return {
     ...rel,
-    tension: relax(rel.tension, 0, dt, 7 * 24 * HOUR),
+    tension: relax(rel.tension, 0, dt, 9 * 24 * HOUR),
     friendship: rel.friendship > 20 ? relax(rel.friendship, 20, dt, 20 * 24 * HOUR) : rel.friendship,
     // Even a couple's spark needs tending, just more slowly.
-    romance: relax(rel.romance, 0, dt, (together ? 25 : 10) * 24 * HOUR),
+    romance: relax(rel.romance, 0, dt, (together ? 18 : 20) * 24 * HOUR),
   };
 }
 
@@ -109,10 +109,12 @@ export interface Delta {
 /** Applies one meeting's delta and re-reads the status. Exes who become real
  * friends again stop being "the ex". */
 export function applyDelta(rel: Relationship, d: Delta, at: number, together: boolean): Relationship {
+  // Warmth grows slower the warmer it already is: best friends and couples are earned.
+  const grow = (v: number, by: number) => clamp(v + (by > 0 ? by * (1 - v / 110) : by));
   const next: Relationship = {
     ...rel,
-    friendship: clamp(rel.friendship + d.friendship),
-    romance: clamp(rel.romance + d.romance),
+    friendship: grow(rel.friendship, d.friendship),
+    romance: grow(rel.romance, d.romance),
     tension: clamp(rel.tension + d.tension),
     meetings: rel.meetings + 1,
     lastMetAt: at,
@@ -122,7 +124,7 @@ export function applyDelta(rel: Relationship, d: Delta, at: number, together: bo
 }
 
 /** Ready to become a couple: in love, not fighting, and actually friends. */
-export const readyForUnion = (rel: Relationship) => rel.romance >= 65 && rel.tension < 40 && rel.friendship >= 30;
+export const readyForUnion = (rel: Relationship) => rel.romance >= 60 && rel.tension < 40 && rel.friendship >= 30;
 
 /** A couple that can't go on: too much fighting, or the spark is gone. */
-export const readyToBreakUp = (rel: Relationship) => rel.tension >= 70 || rel.romance < 35;
+export const readyToBreakUp = (rel: Relationship) => rel.tension >= 70 || rel.romance < 40;

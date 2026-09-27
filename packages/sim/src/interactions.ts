@@ -26,12 +26,12 @@ type Weights = Partial<Record<InteractionKind, number>>;
  * kiss — whatever the dice say.
  */
 const BY_STATUS: Record<RelationStatus, Weights> = {
-  strangers: { chat: 5, play: 2, ignore: 2, gift: 0.5, flirt: 0.8 },
-  acquaintances: { chat: 5, play: 3, ignore: 1, gift: 1, argue: 0.5, flirt: 1 },
-  friends: { chat: 4, play: 4, dance: 2, hug: 2, gift: 1, argue: 1.5, flirt: 1.2 },
-  best_friends: { chat: 4, play: 4, dance: 3, hug: 3, gift: 1.5, argue: 1.2, flirt: 1.2 },
+  strangers: { chat: 5, play: 2, ignore: 2, gift: 0.5, flirt: 1 },
+  acquaintances: { chat: 5, play: 3, ignore: 1, gift: 1, argue: 1, flirt: 2.5 },
+  friends: { chat: 4, play: 4, dance: 2, hug: 2, gift: 1, argue: 1.5, flirt: 3.5 },
+  best_friends: { chat: 4, play: 4, dance: 3, hug: 3, gift: 1.5, argue: 1.2, flirt: 3 },
   crush: { chat: 2, flirt: 5, gift: 2, dance: 2, hug: 1, play: 1, argue: 0.8 },
-  lovers: { hug: 4, kiss: 4, dance: 3, gift: 2, chat: 2, play: 2, argue: 1.2 },
+  lovers: { hug: 4, kiss: 4, dance: 3, gift: 2, chat: 2, play: 2, argue: 1.6, sulk: 0.4 },
   complicated: { chat: 2, argue: 3, make_up: 2, sulk: 2, ignore: 1 },
   rivals: { argue: 4, sulk: 2, ignore: 3, make_up: 0.5 },
   ex: { ignore: 4, sulk: 2, argue: 2, chat: 1, make_up: 0.5 },
@@ -103,7 +103,7 @@ const DELTAS: Record<InteractionKind, readonly [Triple, Triple, Triple]> = {
   dance: [[3, 2, -2], [1, 0, 0], [0, -1, 2]],
   hug: [[3, 2, -4], [1, 0, -1], [0, -1, 2]],
   gift: [[3, 3, -3], [1, 1, 0], [0, -1, 2]],
-  flirt: [[1, 7, 0], [0, 3, 0], [0, -3, 3]],
+  flirt: [[1, 7, 0], [0, 4, 0], [0, -3, 3]],
   kiss: [[1, 6, -2], [0, 2, 0], [0, -3, 3]],
   argue: [[0, 0, -3], [-2, -1, 5], [-5, -3, 8]],
   make_up: [[4, 2, -8], [1, 0, -3], [-1, 0, 3]],
@@ -122,18 +122,34 @@ export function deltaFor(kind: InteractionKind, outcome: Outcome, ctx: MeetingCo
   // Chemistry colours everything: friction stings more between blobs who grate.
   const chem = ctx.rel.chemistry;
   return {
-    friendship: cap(f * jitter() * (f > 0 ? 1 + 0.5 * chem : 1 - 0.5 * chem)),
+    friendship: cap(f * jitter() * (f > 0 ? 1 + chem : 1 - 0.5 * chem)),
     // Without mutual attraction romance can only fade, and without chemistry it barely grows.
     romance: cap(ctx.canRomance ? r * jitter() * (0.5 + ctx.romance) * (r > 0 ? 1 + chem : 1) : Math.min(0, r)),
     tension: cap(t * jitter() * (0.6 + 0.8 * ctx.temper) * (t > 0 ? 1 - chem : 1 + 0.5 * chem)),
   };
 }
 
-/** How a meeting leaves each of them feeling: a nudge to mood, which lives in [-1, 1]. */
-export function moodShift(kind: InteractionKind, outcome: Outcome): number {
-  if (outcome === "bad") return -0.25;
+/** How a meeting leaves one of them feeling: a nudge to mood, which lives in
+ * [-1, 1]. Who it was with counts: a good time with a sweetheart or a best
+ * friend lifts more, and even a nice moment with a rival doesn't. */
+export function moodShift(kind: InteractionKind, outcome: Outcome, status: RelationStatus = "acquaintances"): number {
+  // A real fight stays with you.
+  if (outcome === "bad") return kind === "argue" ? -0.4 : -0.25;
   if (kind === "argue" || kind === "sulk" || kind === "ignore") return outcome === "good" ? 0 : -0.15;
-  return outcome === "good" ? 0.2 : 0.05;
+  if (status === "rivals" || status === "ex") return outcome === "good" ? 0 : -0.1;
+  const close = status === "lovers" || status === "crush" || status === "best_friends" ? 1.5 : 1;
+  return (outcome === "good" ? 0.2 : 0.05) * close;
+}
+
+/** The face one of them wears: the moment, coloured by who it's with. A blob
+ * in love is starry-eyed chatting with its sweetheart; a crush makes it shy;
+ * even a pleasant moment with a rival or an ex stays awkward. */
+export function feeling(kind: InteractionKind, outcome: Outcome, status: RelationStatus): string {
+  if (kind === "argue" || outcome === "bad") return interactionExpression(kind, outcome);
+  if (status === "lovers") return "love";
+  if (status === "crush") return outcome === "good" ? "love" : "shy";
+  if (status === "rivals" || status === "ex") return kind === "ignore" ? "smug" : "unsure";
+  return interactionExpression(kind, outcome);
 }
 
 /** The blobatar expression both wear while it happens. */

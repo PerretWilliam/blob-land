@@ -1,10 +1,11 @@
-import { isAttraction, isSex, type Attraction, type Segment, type Sex } from "@blob-land/sim";
+import { isAttraction, isCountry, isSex, type Attraction, type Segment, type Sex } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
+import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
 import { advanceGarden, newAccountBlob } from "./garden";
 import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
@@ -70,7 +71,7 @@ app.get("/pseudo/:p", async (c) => {
   return c.json({ seed, available: false, suggestions });
 });
 
-type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attraction?: unknown };
+type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attraction?: unknown; country?: unknown };
 
 app.post("/auth/register", rateLimitAuth, async (c) => {
   const body = await c.req.json<RegisterBody>().catch(() => ({}) as RegisterBody);
@@ -82,6 +83,9 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
   // Optional: a blob with no sex, drawn to anyone, unless the player says otherwise.
   const [sex, attraction] = [body.sex ?? "none", body.attraction ?? "any"];
   if (!isSex(sex) || !isAttraction(attraction)) return c.json({ error: "sex must be female, male or none; attraction women, men or any" }, 400);
+  // Optional too: no country is fine, for those who'd rather stay anonymous.
+  const country = body.country ?? null;
+  if (country !== null && !isCountry(country)) return c.json({ error: "country must be an ISO 3166-1 alpha-2 code, or null" }, 400);
 
   const seed = normalizeSeed(pseudo);
   if (await nameTaken(c.env.DB, pseudo)) return c.json({ error: "pseudo already taken" }, 409);
@@ -91,10 +95,10 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
   const now = Date.now();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, last_seen_at, created_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-    ).bind(id, pseudo, seed, hash, salt, now, now),
-    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, now),
+      `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, country, last_seen_at, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+    ).bind(id, pseudo, seed, hash, salt, country, now, now),
+    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env)),
   ]);
 
   const token = await sign({ sub: id, exp: Math.floor(now / 1000) + 60 * 60 * 24 * 30 }, c.env.JWT_SECRET, "HS256");
@@ -130,19 +134,21 @@ interface SegmentRow {
   detail: string | null;
 }
 
+// How long after a breakup both still wear it, in garden time.
+const HEARTBREAK = 45 * 60 * 1000;
 // How much already-played timeline to send: enough for a smooth pick-up.
 const SEGMENT_HISTORY = 15 * 60 * 1000;
 
 app.get("/garden", requireAuth, async (c) => {
-  const now = Date.now();
+  const now = await gardenNow(c.env);
   // Children born in the world step's lookahead aren't here yet.
   const { results: blobs } = await c.env.DB.prepare(
-    `SELECT b.seed, COALESCE(b.name, u.pseudo) AS pseudo, b.sex, b.attraction, b.born_at, b.adult_at
+    `SELECT b.seed, COALESCE(b.name, u.pseudo) AS pseudo, u.country, b.sex, b.attraction, b.born_at, b.adult_at
      FROM blobs b LEFT JOIN users u ON u.id = b.owner_user_id
      WHERE b.born_at <= ?1 AND (u.id IS NULL OR u.visible_in_garden = 1 OR u.id = ?2)`,
   )
     .bind(now, c.get("userId"))
-    .all<{ seed: string; pseudo: string | null; sex: Sex; attraction: Attraction; born_at: number; adult_at: number }>();
+    .all<{ seed: string; pseudo: string | null; country: string | null; sex: Sex; attraction: Attraction; born_at: number; adult_at: number }>();
   // A union started or ended in the lookahead hasn't happened yet either.
   const { results: unions } = await c.env.DB.prepare(
     `SELECT seed_a, seed_b FROM unions WHERE started_at <= ?1 AND (ended_at IS NULL OR ended_at > ?1)`,
@@ -150,6 +156,11 @@ app.get("/garden", requireAuth, async (c) => {
     .bind(now)
     .all<{ seed_a: string; seed_b: string }>();
   const partner = new Map(unions.flatMap((u) => [[u.seed_a, u.seed_b] as const, [u.seed_b, u.seed_a] as const]));
+  // Still nursing a broken heart a while after a breakup.
+  const { results: splits } = await c.env.DB.prepare(`SELECT seed_a, seed_b FROM unions WHERE ended_at > ?1 - ?2 AND ended_at <= ?1`)
+    .bind(now, HEARTBREAK)
+    .all<{ seed_a: string; seed_b: string }>();
+  const heartbroken = new Set(splits.flatMap((u) => [u.seed_a, u.seed_b]));
   const { results: rows } = await c.env.DB.prepare(`SELECT * FROM segments WHERE end > ? ORDER BY start`)
     .bind(now - SEGMENT_HISTORY)
     .all<SegmentRow>();
@@ -161,17 +172,29 @@ app.get("/garden", requireAuth, async (c) => {
   // Timelines, not states: the client plays the stored segments back itself.
   return c.json({
     now,
+    // How fast the garden's clock runs: clients play timelines back at this rate.
+    rate: timeScale(c.env),
     blobs: blobs.map((b) => ({
       seed: b.seed,
       pseudo: b.pseudo,
+      country: b.country,
       sex: b.sex,
       attraction: b.attraction,
       bornAt: b.born_at,
       adultAt: b.adult_at,
       partner: partner.get(b.seed) ?? null,
+      heartbroken: heartbroken.has(b.seed),
       segments: segments.get(b.seed) ?? [],
     })),
   });
+});
+
+// Where the player says they're from, or null to stop saying.
+app.patch("/me/country", requireAuth, async (c) => {
+  const body = await c.req.json<{ country?: unknown }>().catch(() => ({}) as { country?: unknown });
+  if (body.country !== null && !isCountry(body.country)) return c.json({ error: "country must be an ISO 3166-1 alpha-2 code, or null" }, 400);
+  await c.env.DB.prepare(`UPDATE users SET country = ? WHERE id = ?`).bind(body.country, c.get("userId")).run();
+  return c.json({ ok: true });
 });
 
 app.patch("/me/identity", requireAuth, async (c) => {
@@ -237,14 +260,50 @@ app.get("/blobs/:seed/relationships", async (c) => {
      LEFT JOIN users u ON u.id = o.owner_user_id
      WHERE (r.seed_a = ?1 OR r.seed_b = ?1) AND o.born_at <= ?2 AND (u.id IS NULL OR u.visible_in_garden = 1)`,
   )
-    .bind(c.req.param("seed"), Date.now())
+    .bind(c.req.param("seed"), await gardenNow(c.env))
     .all();
   return c.json({ relationships: results });
 });
 
+// Shown only when the blob isn't an account hidden from the garden.
+const shown = (alias: string) => `NOT EXISTS (SELECT 1 FROM users WHERE id = ${alias}.owner_user_id AND visible_in_garden = 0)`;
+const JOURNAL_SIZE = 60;
+
+// The garden's news, newest first: couples forming and splitting, births, and
+// the fights everyone heard about (between blobs who matter to each other, or
+// can't stand each other: squabbles between acquaintances are everyday). Only what has happened by now — the world
+// step lives a little ahead. Fights are kept as long as interactions are (3 days).
+app.get("/garden/journal", requireAuth, async (c) => {
+  const now = await gardenNow(c.env);
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM (
+       SELECT u.started_at AS at, 'couple' AS kind, a.seed AS a, ${nameOf("a")} AS aName, b.seed AS b, ${nameOf("b")} AS bName, NULL AS c, NULL AS cName
+       FROM unions u JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
+       WHERE u.started_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+       UNION ALL
+       SELECT u.ended_at, 'breakup', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, NULL, NULL
+       FROM unions u JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
+       WHERE u.ended_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+       UNION ALL
+       SELECT k.born_at, 'birth', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, k.seed, ${nameOf("k")}
+       FROM blobs k JOIN unions u ON u.id = k.parent_union_id JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
+       WHERE k.born_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+       UNION ALL
+       SELECT i.ended_at, 'fight', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, NULL, NULL
+       FROM interactions i JOIN blobs a ON a.seed = i.seed_a JOIN blobs b ON b.seed = i.seed_b
+       JOIN relationships r ON r.seed_a = i.seed_a AND r.seed_b = i.seed_b
+       WHERE i.kind = 'argue' AND i.outcome = 'bad' AND i.ended_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+         AND r.status IN ('lovers', 'ex', 'rivals', 'complicated', 'best_friends')
+     ) ORDER BY at DESC LIMIT ?2`,
+  )
+    .bind(now, JOURNAL_SIZE)
+    .all();
+  return c.json({ now, events: results });
+});
+
 // Genealogy is part of the public garden layer, not the private one — no auth.
 app.get("/tree/:seed", async (c) => {
-  const tree = await familyTree(c.env.DB, c.req.param("seed"));
+  const tree = await familyTree(c.env.DB, c.req.param("seed"), await gardenNow(c.env));
   return c.json(tree);
 });
 
@@ -252,6 +311,6 @@ export default {
   fetch: app.fetch,
   // The only writer of the world: every 5 minutes (wrangler.toml), live everyone forward.
   scheduled(_controller, env, ctx) {
-    ctx.waitUntil(advanceGarden(env.DB, Date.now()));
+    ctx.waitUntil(gardenNow(env).then((now) => advanceGarden(env.DB, now)));
   },
 } satisfies ExportedHandler<Env>;

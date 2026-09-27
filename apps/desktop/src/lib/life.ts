@@ -29,10 +29,12 @@ export function newLife(identity: Identity, now: number): LocalLife {
  * segments, oldest first.
  */
 export function advanceLife(seed: string, life: LocalLife, now: number): { life: LocalLife; lived: Segment[] } {
+  // Lives saved before blobs had a chronotype get one now, kept from then on.
+  const personality = { ...life.personality, chronotype: life.personality.chronotype ?? randomRng() };
   const blob = {
     seed,
     identity: life.identity,
-    personality: life.personality,
+    personality,
     bornAt: 0,
     adultAt: 0,
     parents: null,
@@ -43,5 +45,5 @@ export function advanceLife(seed: string, life: LocalLife, now: number): { life:
   const step = stepWorld({ blobs: new Map([[seed, blob]]), relationships: new Map(), unions: [] }, now + LOOKAHEAD, randomRng, MAX_CATCH_UP);
   const lived = step.segments.map(({ seed: _, ...segment }) => segment);
   const segments = [...life.segments, ...lived].filter((s) => s.end > now - KEEP);
-  return { life: { ...life, vitals: blob.vitals, segments }, lived };
+  return { life: { ...life, personality, vitals: blob.vitals, segments }, lived };
 }

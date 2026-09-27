@@ -5,12 +5,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GardenScreen } from "@/components/garden-screen";
 import { JoinGardenScreen } from "@/components/join-garden-screen";
 import { PseudoScreen } from "@/components/pseudo-screen";
-import { getGarden, ping, setIdentity, setVisibility, type AuthResponse, type GardenBlob } from "@/lib/api";
+import { getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock } from "@/lib/api";
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { loadState, saveState, type AppState } from "@/lib/state";
 
 const PING_INTERVAL_MS = 60_000;
+// A sped-up dev garden is lived only minutes ahead of now, in real time: refresh often.
+const FAST_GARDEN_REFRESH_MS = 10_000;
 // How often the private blob's life is lived a bit further and saved.
 const LIFE_TICK_MS = 60_000;
 
@@ -19,6 +21,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [joining, setJoining] = useState(false);
   const [blobs, setBlobs] = useState<GardenBlob[]>([]);
+  const [gardenClock, setGardenClock] = useState<GardenClock>(() => ({ at: Date.now(), readAt: Date.now(), rate: 1 }));
   const [island, setIsland] = useState<IslandLayout>(() => defaultIsland(ISLAND_SIZE));
   const saveIslandTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -36,8 +39,9 @@ export default function App() {
   }
 
   const refreshGarden = useCallback(async (token: string) => {
-    const { blobs } = await getGarden(token);
+    const { blobs, now, rate } = await getGarden(token);
     setBlobs(blobs);
+    setGardenClock({ at: now, readAt: Date.now(), rate: rate ?? 1 });
   }, []);
 
   // Catch the private blob up on the time the app was closed, and notify
@@ -76,19 +80,21 @@ export default function App() {
     return () => clearInterval(id);
   }, [appState?.localSeed]);
 
+  const fast = gardenClock.rate > 1;
   // Presence ping + garden refresh while the app is active — only once an
   // account exists, since /garden and /me/ping both require a token.
   useEffect(() => {
     const token = appState?.account?.token;
     if (!token) return;
-    void refreshGarden(token);
+    // The API may still be starting: the next tick retries.
+    refreshGarden(token).catch(() => {});
     const id = setInterval(() => {
       ping(token)
         .then(() => refreshGarden(token))
         .catch(() => {});
-    }, PING_INTERVAL_MS);
+    }, fast ? FAST_GARDEN_REFRESH_MS : PING_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [appState?.account?.token, refreshGarden]);
+  }, [appState?.account?.token, refreshGarden, fast]);
 
   function handlePseudoChosen(pseudo: string, identity: Identity) {
     const now = Date.now();
@@ -114,6 +120,13 @@ export default function App() {
   }
 
   // One identity for both: the private blob and its garden sprout.
+  async function handleCountryChange(country: string | null) {
+    const account = appState?.account;
+    if (!account) return;
+    await setCountry(account.token, country);
+    setBlobs((list) => list.map((b) => (b.seed === account.seed ? { ...b, country } : b)));
+  }
+
   async function handleIdentityChange(identity: Identity) {
     if (!appState) return;
     const { account } = appState;
@@ -155,8 +168,10 @@ export default function App() {
       localSeed={appState.localSeed}
       life={appState.life}
       onIdentityChange={handleIdentityChange}
+      onCountryChange={handleCountryChange}
       account={appState.account}
       blobs={blobs}
+      gardenClock={gardenClock}
       visible={appState.settings.visible}
       onToggleVisibility={handleToggleVisibility}
       onJoinGarden={() => setJoining(true)}

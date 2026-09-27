@@ -1,10 +1,13 @@
-import { daylight, legIn, NEST, segmentAt, type Activity, type Attraction, type GroundPoint, type Identity, type Segment, type Sex } from "@blob-land/sim";
+import { daylight, flagOf, legIn, NEST, segmentAt, type Activity, type Attraction, type GroundPoint, type Identity, type Segment, type Sex } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
-import { Coffee, Footprints, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
+import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ATTRACTION_LABELS, BlobGenderSign, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
+import { Button } from "@/components/ui/button";
+import { CountryField, countryName } from "@/components/country-field";
+import { AuraFx, InteractionFx, momentAt, type Aura, type Moment } from "@/components/interaction-fx";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
 import DECOR_WIDTHS from "@/assets/iso/widths.json";
@@ -44,8 +47,14 @@ export interface SceneBlob {
   partnerLabel?: string;
   /** Still a child. */
   young?: boolean;
+  /** Something that just happened to it, shown over its head for a while. */
+  aura?: Aura;
   /** Set on the player's own blob: lets them change who it is from its ID card. */
   onIdentityChange?: (identity: Identity) => void;
+  /** Where its player is from (ISO code), if they share it: a flag by its name. */
+  country?: string | null;
+  /** Set on the player's own garden blob: lets them pick or drop their country. */
+  onCountryChange?: (country: string | null) => void;
 }
 
 /** A stored expression name as blobatar's expression object. */
@@ -69,6 +78,11 @@ export interface SceneProps {
   /** Blob size as a fraction of one tile's width, so blobs keep their
    * proportions to the ground at any window size. */
   blobScale?: number;
+  /** The time timelines are played back at (and the sky follows): real
+   * time, or the garden's own clock, which may run faster (dev). */
+  clock?: () => number;
+  /** Shows a "See relations" button on a blob's ID card. */
+  onShowRelations?: (seed: string, name: string) => void;
 }
 
 // Half the distance two partners keep between them, per ground axis.
@@ -270,11 +284,13 @@ const FREE = new Set<Activity>(["explore", "rest", "discover"]);
  */
 function targets(layout: IslandLayout, blobs: SceneBlob[], t: number): GroundPoint[] {
   const snap = (p: GroundPoint) => snapToGround(layout, p);
+  const segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]));
   const ps = blobs.map((b) => {
     const at = segmentAt(b.segments, t, snap);
     if (!at) return { x: 0.5, y: 0.5 };
     if (t >= at.seg.end) return snap({ x: at.seg.x, y: at.seg.y });
-    const { from, to, e } = legIn(at.seg, at.from, t, snap);
+    const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, t, segmentsOf, snap) : null;
+    const { from, to, e } = legIn(at.seg, at.from, t, spot ? () => spot : snap);
     return alongPath(findPath(layout, from, to), e);
   });
   const index = new Map(blobs.map((b, i) => [b.seed, i]));
@@ -292,6 +308,21 @@ function targets(layout: IslandLayout, blobs: SceneBlob[], t: number): GroundPoi
   return ps;
 }
 
+/**
+ * Where a blob stands in a meeting: the spot the sim gave it, moved along
+ * with the whole gathering if its middle isn't somewhere blobs can stand (a
+ * tree, water). Snapping each blob on its own would scatter them.
+ *
+ * ponytail: the walk into the next segment starts from the unmoved spot, a
+ * small hop when a gathering had to move; carry the offset over if it shows.
+ */
+function meetingSpot(seg: Segment, t: number, segmentsOf: Map<string, Segment[]>, snap: (p: GroundPoint) => GroundPoint): GroundPoint {
+  const spots = [seg, ...(seg.with ?? []).flatMap((s) => segmentAt(segmentsOf.get(s) ?? [], t)?.seg ?? [])].filter((x) => x.end === seg.end);
+  const mid = { x: spots.reduce((a, x) => a + x.x, 0) / spots.length, y: spots.reduce((a, x) => a + x.y, 0) / spots.length };
+  const moved = snap(mid);
+  return { x: moved.x + seg.x - mid.x, y: moved.y + seg.y - mid.y };
+}
+
 /*
  * Depth order. Everything on cell diagonal d = i + j sits in its own band
  * [10 + 1000d, 10 + 1000(d+1)): the blocks raised above the base level at the
@@ -306,14 +337,14 @@ function depthZ(tiles: number, p: GroundPoint) {
   return cellZ(i + j) + 1 + Math.round((u - i + (v - j)) * 490);
 }
 
-export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6 }: SceneProps) {
+export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations }: SceneProps) {
   const tiles = layout.size;
   const [sceneRef, sceneInView] = useInView();
-  const [light, setLight] = useState(() => daylight(Date.now()));
-  useEffect(() => {
-    const id = setInterval(() => setLight(daylight(Date.now())), 60_000);
-    return () => clearInterval(id);
-  }, []);
+  const clockRef = useRef(clock);
+  clockRef.current = clock;
+  // Read on each render: the screen re-renders on its own tick.
+  const now = clock();
+  const light = daylight(now);
 
   const lift = Math.max(0, ...layout.cells.map((c) => (c.height ?? 0) + (c.ramp ? 1 : 0)));
   const island = islandGeometry(tiles, lift);
@@ -400,7 +431,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const blob = els.current.get(seed);
     if (blob) {
       blob.el.style.transform = at;
-      blob.el.style.zIndex = String(depthZ(tiles, p));
+      // The one being followed comes to the front, even from behind a crowd (names stay above).
+      blob.el.style.zIndex = String(seed === selectedRef.current ? 199_999 : depthZ(tiles, p));
     }
     const label = labels.current.get(seed);
     if (label) label.style.transform = at;
@@ -416,6 +448,38 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const waddle = Math.sin(g.phase) * 4 * g.walk * (1 - g.hop); // side to side, feet on the ground
     blob.body.style.transform = `translate3d(0, ${-lift * blobSizeRef.current * 0.13}px, 0) rotate(${g.lean + waddle}deg) scale(${1 + squash}, ${1 - squash})`;
     if (blob.shadow) blob.shadow.style.transform = `translate(-50%, -50%) scale(${1 - 0.35 * lift})`;
+  }
+
+  /**
+   * Blobs overlap. Clicking where several stand selects the one clicked, and
+   * clicking again there goes to the next one behind it, round and round.
+   */
+  function pick(seed: string, at?: { x: number; y: number }) {
+    if (at) {
+      const stack = [
+        ...new Set(document.elementsFromPoint(at.x, at.y).flatMap((el) => el.closest<HTMLElement>("[data-body]")?.dataset.seed ?? [])),
+      ];
+      const i = stack.indexOf(selectedRef.current ?? "");
+      if (i >= 0 && stack.length > 1) return setSelected(stack[(i + 1) % stack.length]!);
+    }
+    setSelected(seed);
+  }
+
+  /*
+   * Flags whether a blob has stopped walking, which starts its meeting
+   * effects (see index.css). On arrival at a new meeting, its effects' clocks
+   * are set to the page's time origin, so everyone at the meeting is in step:
+   * speakers take turns instead of talking over each other.
+   */
+  function arrived(seed: string, still: boolean) {
+    for (const el of [els.current.get(seed)?.el, labels.current.get(seed)]) {
+      if (!el) continue;
+      el.dataset.still = still ? "1" : "0";
+      const key = el.dataset.fxKey ?? "";
+      if (!still || el.dataset.synced === key) continue;
+      el.dataset.synced = key;
+      for (const a of el.getAnimations({ subtree: true })) if ((a as CSSAnimation).animationName?.startsWith("fx-")) a.startTime = 0;
+    }
   }
 
   /*
@@ -462,7 +526,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       const kCamera = snap ? 1 : 1 - Math.exp(-dt / CAMERA_EASE_S);
       last = now;
       const list = blobsRef.current;
-      const ps = targets(layoutRef.current, list, Date.now());
+      const ps = targets(layoutRef.current, list, clockRef.current());
       list.forEach((b, i) => {
         const to = { ...ps[i]!, lift: liftRef.current(ps[i]!) };
         const prev = shown.current.get(b.seed);
@@ -471,7 +535,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           : to;
         shown.current.set(b.seed, p);
         applyPosition(b.seed, p);
-        if (snap || !prev) return;
+        if (snap || !prev) return arrived(b.seed, true);
         // Screen-space direction: +x on screen is ground (x - y).
         const [dx, dy] = [p.x - prev.x, p.y - prev.y];
         const dist = Math.hypot(dx, dy);
@@ -485,6 +549,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         if (g.walk > 0.01) g.phase += dt * Math.PI * HOP_HZ;
         gait.current.set(b.seed, g);
         applyGait(b.seed, g);
+        arrived(b.seed, g.walk < 0.15);
       });
       applyCamera(kCamera);
     };
@@ -517,7 +582,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     let p = shown.current.get(seed);
     if (!p) {
       const i = blobsRef.current.findIndex((b) => b.seed === seed);
-      const g = targets(layoutRef.current, blobsRef.current, Date.now())[i] ?? { x: 0.5, y: 0.5 };
+      const g = targets(layoutRef.current, blobsRef.current, clockRef.current())[i] ?? { x: 0.5, y: 0.5 };
       p = { ...g, lift: liftRef.current(g) };
       shown.current.set(seed, p);
     }
@@ -552,6 +617,10 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     i: n % island.cols,
     j: Math.floor(n / island.cols),
   })).sort((a, b) => a.i + a.j - (b.i + b.j));
+
+  // Meetings as of this render.
+  const segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]));
+  const moments = new Map(blobs.map((b) => [b.seed, momentAt(b.seed, b.segments, now, (seed) => segmentsOf.get(seed))]));
 
   const nestMid = (NEST.min + NEST.max) / 2;
   const nestW = (NEST.max - NEST.min) * tiles * 2 * HALF_W + 40;
@@ -660,33 +729,56 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           <SceneBlobView
             key={blob.seed}
             blob={blob}
+            moment={moments.get(blob.seed) ?? null}
             size={blob.young ? Math.round(blobSize * 0.7) : blobSize}
             reducedMotion={reducedMotion}
             selected={blob.seed === selected}
-            onSelect={() => setSelected(blob.seed)}
+            onSelect={(at) => pick(blob.seed, at)}
             placeRef={(node) => place(blob.seed, node)}
           />
         ))}
 
-        {/* Names float above everything — blobs, trees, the edit grid — and
-            don't hop, so they stay readable. Placed by the same loop. */}
-        {blobs.map((blob) => (
+        {/* Names — and meeting effects — float above everything (blobs,
+            trees, the edit grid) and don't hop, so they stay readable.
+            Placed by the same loop. */}
+        {blobs.map((blob) => {
+          const moment = moments.get(blob.seed);
+          const size = blob.young ? Math.round(blobSize * 0.7) : blobSize;
+          return (
           <div
             key={blob.seed}
             ref={(node) => placeLabel(blob.seed, node)}
             className="pointer-events-none absolute top-0 left-0 will-change-transform"
             style={{ zIndex: 200_000 }}
+            data-fx-key={moment?.key}
           >
+            {moment ? (
+              <InteractionFx moment={moment} size={size} bottom={blobSize * 0.84 + 14} />
+            ) : blob.aura ? (
+              <AuraFx aura={blob.aura} size={size} bottom={blobSize * 0.84 + 14} />
+            ) : null}
+            {/* Clicking a name selects its blob, even one hidden behind another.
+                Mouse only: keyboard users reach the blob itself. */}
             <p
-              className="absolute flex origin-bottom items-center gap-1 whitespace-nowrap rounded-full bg-black/35 px-2 py-0.5 text-xs font-medium text-white"
+              className="pointer-events-auto absolute flex origin-bottom cursor-pointer items-center gap-1 whitespace-nowrap rounded-full bg-black/35 px-2 py-0.5 text-xs font-medium text-white transition-colors hover:bg-black/60"
               style={{ bottom: blobSize * 0.84, transform: "translateX(-50%) scale(calc(1 / var(--camera-zoom, 1)))" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelected(blob.seed);
+              }}
             >
+              {blob.country ? (
+                <span role="img" aria-label={countryName(blob.country)} title={countryName(blob.country)}>
+                  {flagOf(blob.country)}
+                </span>
+              ) : null}
               {blob.label}
               <MoodIcon expression={blob.expression} />
               {blob.activity ? <ActivityIcon activity={blob.activity} /> : null}
             </p>
           </div>
-        ))}
+          );
+        })}
       </div>
       </div>
 
@@ -728,6 +820,14 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                   {mood?.label ?? "—"}
                 </dd>
               </div>
+              {blob.country ? (
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-muted-foreground">Country</dt>
+                  <dd className="truncate">
+                    {flagOf(blob.country)} {countryName(blob.country)}
+                  </dd>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-muted-foreground">Sex</dt>
                 <dd>{SEX_LABELS[blob.sex]}</dd>
@@ -751,9 +851,25 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                 </dd>
               </div>
             </dl>
+            {onShowRelations ? (
+              <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => {
+                  onShowRelations(blob.seed, blob.label);
+                  // The relations panel takes over from the card, on the same side.
+                  setSelected(null);
+                }}
+              >
+                <HeartHandshake />
+                See relations
+              </Button>
+            ) : null}
             {blob.onIdentityChange ? (
               <div className="mt-3 border-t pt-3">
                 <IdentityFields value={{ sex: blob.sex, attraction: blob.attraction }} onChange={blob.onIdentityChange} />
+                {blob.onCountryChange ? (
+                  <div className="mt-3">
+                    <CountryField value={blob.country ?? null} onChange={blob.onCountryChange} />
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </aside>
@@ -823,6 +939,7 @@ function EditGrid({
 
 function SceneBlobView({
   blob,
+  moment,
   size,
   reducedMotion,
   selected,
@@ -830,10 +947,12 @@ function SceneBlobView({
   placeRef,
 }: {
   blob: SceneBlob;
+  moment: Moment | null;
   size: number;
   reducedMotion: boolean;
   selected: boolean;
-  onSelect: () => void;
+  /** `at`: where it was clicked, to reach the blobs standing behind it. */
+  onSelect: (at?: { x: number; y: number }) => void;
   placeRef: (node: HTMLElement | null) => void;
 }) {
   // R4: each blob still only animates while it is on screen.
@@ -846,6 +965,7 @@ function SceneBlobView({
         inViewRef(node);
       }}
       className="absolute top-0 left-0 will-change-transform"
+      data-fx-key={moment?.key}
     >
       <span
         aria-hidden="true"
@@ -855,8 +975,11 @@ function SceneBlobView({
       />
       <div className="absolute -translate-x-1/2" style={{ bottom: -size * 0.2, width: size }}>
         {/* The walk cycle transforms this wrapper, never the blobatar itself. */}
+        {/* The meeting moves it too (index.css), stacked under the walk cycle. */}
         <div
           data-body
+          data-move={moment?.kind}
+          style={moment ? ({ "--face": moment.face, "--turn": moment.turn, "--count": moment.count } as CSSProperties) : undefined}
           role="button"
           tabIndex={0}
           aria-label={`Follow ${blob.label}`}
@@ -866,10 +989,11 @@ function SceneBlobView({
           // transparent margins, which made the hover fire before reaching the blob.
           // The outline goes on the blobatar alone: its gender sign has its own stroke.
           className={`pointer-events-none origin-[50%_80%] cursor-pointer outline-none will-change-transform hover:[&>:first-child]:blob-outline focus-visible:[&>:first-child]:blob-outline [&_img]:pointer-events-auto [&_svg:not([data-gender])_*]:pointer-events-auto ${selected ? "[&>:first-child]:blob-outline" : ""}`}
+          data-seed={blob.seed}
           onClick={(e) => {
             // Don't let the scene's own click (which zooms out) undo this.
             e.stopPropagation();
-            onSelect();
+            onSelect({ x: e.clientX, y: e.clientY });
           }}
           onKeyDown={(e) => {
             if (e.key !== "Enter" && e.key !== " ") return;

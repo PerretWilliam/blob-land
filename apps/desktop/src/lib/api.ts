@@ -13,6 +13,8 @@ export interface AuthResponse {
 export interface GardenBlob {
   seed: string;
   pseudo: string | null;
+  /** The player's country (ISO 3166-1 alpha-2), if they share it. Children have none. */
+  country: string | null;
   sex: Sex;
   attraction: Attraction;
   bornAt: number;
@@ -20,14 +22,29 @@ export interface GardenBlob {
   adultAt: number;
   /** Who it's in a couple with, if anyone. */
   partner: string | null;
+  /** Broke up a little while ago. */
+  heartbroken: boolean;
   /** Its stored timeline around now, sorted: the scene plays it back. */
   segments: Segment[];
 }
 
 export interface GardenResponse {
+  /** The garden's time when it answered. */
   now: number;
+  /** How fast the garden's clock runs: 1, or more in a sped-up local dev garden. */
+  rate: number;
   blobs: GardenBlob[];
 }
+
+/** The garden's clock, as last read from the server. */
+export interface GardenClock {
+  at: number;
+  /** Local time when `at` was read. */
+  readAt: number;
+  rate: number;
+}
+
+export const gardenTime = (clock: GardenClock) => clock.at + (Date.now() - clock.readAt) * clock.rate;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -52,8 +69,12 @@ export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
   return request(`/pseudo/${encodeURIComponent(pseudo)}`);
 }
 
-export function register(pseudo: string, password: string, identity: Identity): Promise<AuthResponse> {
-  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity }) });
+export function register(pseudo: string, password: string, identity: Identity, country: string | null = null): Promise<AuthResponse> {
+  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country }) });
+}
+
+export function setCountry(token: string, country: string | null): Promise<{ ok: true }> {
+  return request("/me/country", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ country }) });
 }
 
 export function setIdentity(token: string, identity: Identity): Promise<{ ok: true }> {
@@ -133,4 +154,21 @@ export interface Relation {
 
 export function getRelationships(seed: string): Promise<{ relationships: Relation[] }> {
   return request(`/blobs/${encodeURIComponent(seed)}/relationships`);
+}
+
+/** GET /garden/journal — the garden's news, newest first. */
+export interface GardenEvent {
+  at: number;
+  kind: "couple" | "breakup" | "birth" | "fight";
+  a: string;
+  aName: string | null;
+  b: string;
+  bName: string | null;
+  /** The newborn, for a birth. */
+  c: string | null;
+  cName: string | null;
+}
+
+export function getGardenJournal(token: string): Promise<{ now: number; events: GardenEvent[] }> {
+  return request("/garden/journal", { headers: authHeader(token) });
 }
