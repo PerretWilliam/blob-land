@@ -1,4 +1,4 @@
-import { hash01 } from "@blob-land/sim";
+import { pick, randomRng, type Rng } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 
 export const MAX_NAME_LENGTH = 24;
@@ -38,22 +38,21 @@ const ONSETS = ["b", "d", "f", "g", "l", "m", "n", "p", "r", "s", "t", "v", "z",
 const VOWELS = ["a", "e", "i", "o", "u", "ou", "ai"];
 const ENDINGS = ["", "", "n", "l", "x", "po", "bo", "lin", "mi"];
 
-/** A soft, pronounceable name for a newborn, deterministic in (seed, attempt). */
-function babyName(seed: string, attempt: number): string {
-  const pick = <T>(list: readonly T[], key: string) => list[Math.floor(hash01(`${seed}|name|${attempt}|${key}`) * list.length)]!;
-  const syllables = 2 + (hash01(`${seed}|name|${attempt}|len`) < 0.3 ? 1 : 0);
+/** A soft, pronounceable name for a newborn. */
+function babyName(rng: Rng): string {
+  const syllables = 2 + (rng() < 0.3 ? 1 : 0);
   let name = "";
-  for (let i = 0; i < syllables; i++) name += pick(ONSETS, `o${i}`) + pick(VOWELS, `v${i}`);
-  name += pick(ENDINGS, "end");
+  for (let i = 0; i < syllables; i++) name += pick(rng, ONSETS) + pick(rng, VOWELS);
+  name += pick(rng, ENDINGS);
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-/** The first generated name nobody holds yet. After enough misses, numbered. */
-export async function freeBabyName(db: D1Database, seed: string): Promise<string> {
+/** The first rolled name nobody holds yet. After enough misses, numbered. */
+export async function freeBabyName(db: D1Database, rng: Rng = randomRng): Promise<string> {
   for (let attempt = 0; attempt < 20; attempt++) {
-    const name = babyName(seed, attempt);
+    const name = babyName(rng);
     if (!(await nameTaken(db, name))) return name;
   }
-  const base = babyName(seed, 0);
+  const base = babyName(rng);
   for (let n = 2; ; n++) if (!(await nameTaken(db, `${base}${n}`))) return `${base}${n}`;
 }

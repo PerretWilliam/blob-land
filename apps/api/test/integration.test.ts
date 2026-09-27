@@ -1,8 +1,8 @@
-import { dayKey, hash01, loveChance } from "@blob-land/sim";
+import { seededRng } from "@blob-land/sim";
 import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import schemaSql from "../schema.sql?raw";
-import { resolvePendingBirths } from "../src/garden";
+import { advanceGarden } from "../src/garden";
 
 beforeAll(async () => {
   // Strip `-- comment` text first: a comment can itself contain a `;` (see
@@ -21,11 +21,11 @@ async function jsonAs<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function register(pseudo: string) {
+async function register(pseudo: string, identity: { sex?: string; attraction?: string } = {}) {
   const res = await SELF.fetch("https://api.test/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pseudo, password: PASSWORD }),
+    body: JSON.stringify({ pseudo, password: PASSWORD, ...identity }),
   });
   expect(res.status).toBe(201);
   return jsonAs<{ token: string; seed: string }>(res);
@@ -41,17 +41,16 @@ async function login(pseudo: string) {
   return jsonAs<{ token: string; seed: string }>(res);
 }
 
-// The pairing roll (see src/garden.ts) is deterministic per (pseudoA,
-// pseudoB, day) — instead of hoping two fixed pseudos happen to fall in love
-// today, search for a partner pseudo that deterministically does.
-function findLovingPartner(fixedPseudo: string, day: string): string {
-  for (let i = 0; i < 500; i++) {
-    const candidate = `partner-${i}`;
-    const chance = loveChance(fixedPseudo, candidate, day);
-    const roll = hash01(`${fixedPseudo}|${candidate}|${day}|pair-roll`);
-    if (roll < chance) return candidate;
-  }
-  throw new Error("no loving partner found in search range");
+const DAY = 24 * 60 * 60 * 1000;
+
+interface GardenBody {
+  blobs: { seed: string; pseudo: string | null; sex: string; attraction: string; partner: string | null; segments: { start: number; end: number }[] }[];
+}
+
+async function garden(token: string): Promise<GardenBody> {
+  const res = await SELF.fetch("https://api.test/garden", { headers: { authorization: `Bearer ${token}` } });
+  expect(res.status).toBe(200);
+  return jsonAs<GardenBody>(res);
 }
 
 describe("blob-land API", () => {
@@ -65,12 +64,38 @@ describe("blob-land API", () => {
     });
     expect(ping.status).toBe(200);
 
-    const garden = await SELF.fetch("https://api.test/garden", {
-      headers: { authorization: `Bearer ${token}` },
+    // Registered but not lived yet: listed, with no timeline until the world step runs.
+    const before = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
+    expect(before).toMatchObject({ sex: "none", attraction: "any", segments: [] });
+
+    await advanceGarden(env.DB, Date.now());
+    const after = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
+    expect(after.segments.length).toBeGreaterThan(0);
+    // Chained: each segment starts where the one before ended.
+    for (let i = 1; i < after.segments.length; i++) expect(after.segments[i]!.start).toBe(after.segments[i - 1]!.end);
+    expect(after.segments.at(-1)!.end).toBeGreaterThan(Date.now());
+  });
+
+  it("takes a sex and attraction at sign-up, and lets the player change them", async () => {
+    const bad = await SELF.fetch("https://api.test/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pseudo: "oddone", password: PASSWORD, sex: "robot" }),
     });
-    expect(garden.status).toBe(200);
-    const body = await jsonAs<{ blobs: { pseudo: string | null }[] }>(garden);
-    expect(body.blobs.some((b) => b.pseudo === "wanderer")).toBe(true);
+    expect(bad.status).toBe(400);
+
+    const { token } = await register("roxanne", { sex: "female", attraction: "women" });
+    expect((await garden(token)).blobs.find((b) => b.pseudo === "roxanne")).toMatchObject({ sex: "female", attraction: "women" });
+
+    const patch = (body: object) =>
+      SELF.fetch("https://api.test/me/identity", {
+        method: "PATCH",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+    expect((await patch({ sex: "male" })).status).toBe(400);
+    expect((await patch({ sex: "male", attraction: "any" })).status).toBe(200);
+    expect((await garden(token)).blobs.find((b) => b.pseudo === "roxanne")).toMatchObject({ sex: "male", attraction: "any" });
   });
 
   it("reports pseudo availability, and offers suggestions once taken", async () => {
@@ -98,48 +123,47 @@ describe("blob-land API", () => {
     expect(await jsonAs<{ available: boolean }>(variant)).toMatchObject({ available: false });
   });
 
-  it("pairs two present users into a union and exposes their child via /tree/:seed once born", async () => {
-    const now = Date.now();
-    const day = dayKey(now);
-    const partnerPseudo = findLovingPartner("alice", day);
+  it("lets two blobs fall for each other, have a child, and exposes it via /tree/:seed", async () => {
+    const alice = await register("alice", { sex: "female", attraction: "men" });
+    const bob = await register("bob", { sex: "male", attraction: "women" });
+    // Head start: they already adore each other, so this doesn't take a simulated year.
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO relationships (seed_a, seed_b, friendship, romance, tension, chemistry, status, meetings, last_met_at)
+       VALUES (?, ?, 80, 90, 0, 1, 'crush', 10, ?)`,
+    )
+      .bind(alice.seed, bob.seed, Date.now())
+      .run();
 
-    const alice = await register("alice");
-    await register(partnerPseudo);
-    const aliceLogin = await login("alice");
+    // Live the garden forward a day at a time until a child is born.
+    const rng = seededRng(7);
+    const start = Date.now();
+    let childSeed: string | undefined;
+    for (let d = 1; d <= 60 && !childSeed; d++) {
+      await advanceGarden(env.DB, start + d * DAY, rng, start + d * DAY);
+      childSeed = (await env.DB.prepare(`SELECT seed FROM blobs WHERE parent_union_id IS NOT NULL LIMIT 1`).first<{ seed: string }>())?.seed;
+    }
+    expect(childSeed).toBeDefined();
 
-    // Both were just registered (last_seen_at = now, free of any union), so
-    // /garden's lazy resolution should pair them.
-    const garden = await SELF.fetch("https://api.test/garden", {
-      headers: { authorization: `Bearer ${aliceLogin.token}` },
-    });
-    expect(garden.status).toBe(200);
-    const gardenBody = await jsonAs<{
-      blobs: { pseudo: string | null; paired: boolean }[];
-    }>(garden);
-    const bothBlobs = gardenBody.blobs.filter((b) => b.pseudo === "alice" || b.pseudo === partnerPseudo);
-    expect(bothBlobs).toHaveLength(2);
-    expect(bothBlobs.every((b) => b.paired)).toBe(true);
+    const union = await env.DB.prepare(`SELECT seed_a, seed_b FROM unions LIMIT 1`).first<{ seed_a: string; seed_b: string }>();
+    expect([union!.seed_a, union!.seed_b].sort()).toEqual([alice.seed, bob.seed].sort());
+    const kin = await env.DB.prepare(`SELECT kin FROM relationships WHERE (seed_a = ?1 OR seed_b = ?1) AND kin = 'parent'`).bind(childSeed).all();
+    expect(kin.results).toHaveLength(2);
 
-    // Force time past the union's 1-7 day birth delay instead of waiting for
-    // real time to pass.
-    await resolvePendingBirths(env.DB, now + 8 * 24 * 60 * 60 * 1000);
+    // /tree hides blobs born "in the future" (the step lives ahead of now); ask as of then.
+    await env.DB.prepare(`UPDATE blobs SET born_at = ? WHERE seed = ?`).bind(Date.now() - 1000, childSeed).run();
 
     const tree = await SELF.fetch(`https://api.test/tree/${encodeURIComponent(alice.seed)}`);
     expect(tree.status).toBe(200);
-    const treeBody = await jsonAs<{ children: { seed: string }[] }>(tree);
+    const treeBody = await jsonAs<{ children: { seed: string; name: string; parents: { seed: string }[] }[] }>(tree);
     expect(treeBody.children).toHaveLength(1);
+    const child = treeBody.children[0]!;
+    expect(child.parents.map((p) => p.seed).sort()).toEqual([alice.seed, bob.seed].sort());
 
-    const childTree = await SELF.fetch(`https://api.test/tree/${encodeURIComponent(treeBody.children[0]!.seed)}`);
-    const childTreeBody = await jsonAs<{ parents: { seed: string }[] | null }>(childTree);
-    expect(childTreeBody.parents).not.toBeNull();
-    expect(childTreeBody.parents!.map((p) => p.seed).sort()).toEqual([alice.seed, partnerPseudo].sort());
+    const childTree = await jsonAs<{ parents: { seed: string }[] | null }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
+    expect(childTree.parents!.map((p) => p.seed).sort()).toEqual([alice.seed, bob.seed].sort());
 
-    // The child is born with a generated name, in the namespace pseudos use.
-    const child = (await jsonAs<{ children: { seed: string; name: string; parents: { seed: string }[] }[]; partner: unknown }>(
-      await SELF.fetch(`https://api.test/tree/${encodeURIComponent(alice.seed)}`),
-    )).children[0]!;
-    expect(child.name).toMatch(/^[A-Z][a-z]+$/);
-    expect(child.parents.map((p) => p.seed).sort()).toEqual([alice.seed, partnerPseudo].sort());
+    // Born with a rolled name, in the namespace pseudos use.
+    expect(child.name).toMatch(/^[A-Z][a-z]+\d*$/);
     const nameCheck = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent(child.name.toLowerCase())}`);
     expect(await jsonAs<{ available: boolean }>(nameCheck)).toMatchObject({ available: false });
     const squatter = await SELF.fetch("https://api.test/auth/register", {
@@ -158,27 +182,10 @@ describe("blob-land API", () => {
       });
     const stranger = await register("stranger");
     expect((await rename(stranger.token, "Pebble")).status).toBe(403);
-    expect((await rename(aliceLogin.token, partnerPseudo)).status).toBe(409);
-    expect((await rename(aliceLogin.token, "  ")).status).toBe(400);
-    expect((await rename(aliceLogin.token, "Pebble")).status).toBe(200);
+    expect((await rename(alice.token, "bob")).status).toBe(409);
+    expect((await rename(alice.token, "  ")).status).toBe(400);
+    expect((await rename(alice.token, "Pebble")).status).toBe(200);
     const renamed = await jsonAs<{ name: string }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
     expect(renamed.name).toBe("Pebble");
-
-    // The union ends at birth, not via a separate endpoint: ended_at must now
-    // be set, and both members must be free of any active union.
-    const union = await env.DB.prepare(`SELECT ended_at FROM unions WHERE child_traits IS NOT NULL`).first<{
-      ended_at: number | null;
-    }>();
-    expect(union?.ended_at).not.toBeNull();
-
-    const activeUnions = await env.DB.prepare(
-      `SELECT id FROM unions
-       WHERE ended_at IS NULL
-         AND (user_a IN (SELECT id FROM users WHERE pseudo IN ('alice', ?))
-           OR user_b IN (SELECT id FROM users WHERE pseudo IN ('alice', ?)))`,
-    )
-      .bind(partnerPseudo, partnerPseudo)
-      .all();
-    expect(activeUnions.results).toHaveLength(0);
   });
 });
