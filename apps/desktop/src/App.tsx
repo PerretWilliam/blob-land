@@ -116,7 +116,12 @@ export default function App() {
   // One identity for both: the private blob and its garden sprout.
   async function handleIdentityChange(identity: Identity) {
     if (!appState) return;
-    if (appState.account) await setIdentity(appState.account.token, identity);
+    const { account } = appState;
+    if (account) {
+      await setIdentity(account.token, identity);
+      // The garden list only refreshes with the next ping: show the change now.
+      setBlobs((list) => list.map((b) => (b.seed === account.seed ? { ...b, ...identity } : b)));
+    }
     const next = { ...appState, life: { ...appState.life, identity } };
     setAppState(next);
     void saveState(next);
