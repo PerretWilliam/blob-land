@@ -164,7 +164,8 @@
   opacity: 0;
 }
 /* Only on the animated parts: transform-origin also applies to SVG's transform attribute. */
-.fx [class^="fx-"] {
+.fx [class^="fx-"],
+[data-aura] [class^="fx-"] {
   transform-box: fill-box;
   transform-origin: center;
 }
@@ -353,6 +354,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .fx *,
+  [data-aura] *,
   [data-move] {
     animation: none !important;
   }

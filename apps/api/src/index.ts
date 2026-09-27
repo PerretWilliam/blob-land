@@ -131,6 +131,8 @@ interface SegmentRow {
   detail: string | null;
 }
 
+// How long after a breakup both still wear it, in garden time.
+const HEARTBREAK = 45 * 60 * 1000;
 // How much already-played timeline to send: enough for a smooth pick-up.
 const SEGMENT_HISTORY = 15 * 60 * 1000;
 
@@ -151,6 +153,11 @@ app.get("/garden", requireAuth, async (c) => {
     .bind(now)
     .all<{ seed_a: string; seed_b: string }>();
   const partner = new Map(unions.flatMap((u) => [[u.seed_a, u.seed_b] as const, [u.seed_b, u.seed_a] as const]));
+  // Still nursing a broken heart a while after a breakup.
+  const { results: splits } = await c.env.DB.prepare(`SELECT seed_a, seed_b FROM unions WHERE ended_at > ?1 - ?2 AND ended_at <= ?1`)
+    .bind(now, HEARTBREAK)
+    .all<{ seed_a: string; seed_b: string }>();
+  const heartbroken = new Set(splits.flatMap((u) => [u.seed_a, u.seed_b]));
   const { results: rows } = await c.env.DB.prepare(`SELECT * FROM segments WHERE end > ? ORDER BY start`)
     .bind(now - SEGMENT_HISTORY)
     .all<SegmentRow>();
@@ -172,6 +179,7 @@ app.get("/garden", requireAuth, async (c) => {
       bornAt: b.born_at,
       adultAt: b.adult_at,
       partner: partner.get(b.seed) ?? null,
+      heartbroken: heartbroken.has(b.seed),
       segments: segments.get(b.seed) ?? [],
     })),
   });

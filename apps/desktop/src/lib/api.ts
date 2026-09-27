@@ -20,6 +20,8 @@ export interface GardenBlob {
   adultAt: number;
   /** Who it's in a couple with, if anyone. */
   partner: string | null;
+  /** Broke up a little while ago. */
+  heartbroken: boolean;
   /** Its stored timeline around now, sorted: the scene plays it back. */
   segments: Segment[];
 }

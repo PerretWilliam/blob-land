@@ -243,7 +243,8 @@ function art(kind: InteractionKind, outcome: Outcome): ReactNode {
  * once the blob has arrived (the scene flags that on the anchor with
  * `data-still`), and speakers take turns (`--turn` of `--count`).
  */
-export function InteractionFx({ moment, size }: { moment: Moment; size: number }) {
+/** `size`: the blob's; `bottom`: how high above its feet the show floats (over its name). */
+export function InteractionFx({ moment, size, bottom }: { moment: Moment; size: number; bottom: number }) {
   // One ball, one gift, one heart between them: shown by the first of them only.
   const shared = SHARED.has(moment.kind) || (moment.outcome === "bad" && ROMANTIC.has(moment.kind));
   if (shared && moment.turn !== 0) return null;
@@ -251,8 +252,8 @@ export function InteractionFx({ moment, size }: { moment: Moment; size: number }
     "--turn": moment.turn,
     "--count": moment.count,
     width: size * 0.7,
-    // Above the name tag, leaning toward the others.
-    bottom: size * 0.98,
+    // Leaning toward the others.
+    bottom,
     left: moment.face * size * 0.28,
   } as CSSProperties;
   return (
@@ -260,6 +261,31 @@ export function InteractionFx({ moment, size }: { moment: Moment; size: number }
       <svg viewBox="0 0 40 36" className="block w-full overflow-visible">
         {/* Everything is drawn for a blob facing right; mirrored for the left. */}
         <g transform={moment.face === 1 ? undefined : "translate(40 0) scale(-1 1)"}>{art(moment.kind, moment.outcome)}</g>
+      </svg>
+    </div>
+  );
+}
+
+export type Aura = "newborn" | "heartbroken";
+
+/** A while after something big: a newborn sparkles, a blob just dumped carries a broken heart. */
+export function AuraFx({ aura, size, bottom }: { aura: Aura; size: number; bottom: number }) {
+  return (
+    <div aria-hidden="true" data-aura={aura} className="pointer-events-none absolute -translate-x-1/2" style={{ width: size * 0.7, bottom }}>
+      <svg viewBox="0 0 40 36" className="block w-full overflow-visible">
+        {aura === "newborn" ? (
+          <>
+            <Sparkle x={8} y={22} delay={0} />
+            <Sparkle x={20} y={10} delay={0.4} fill="#ffb3d1" />
+            <Sparkle x={32} y={22} delay={0.8} fill="#7ee0ff" />
+            <Heart x={20} y={30} s={0.8} delay={0.2} />
+          </>
+        ) : (
+          <>
+            <BrokenHeart />
+            <SweatDrop />
+          </>
+        )}
       </svg>
     </div>
   );

@@ -55,6 +55,8 @@ const PAGE_SIZE = 50;
 // How often activities and faces are re-read off the timelines: segments last
 // minutes, so a few seconds of lag is invisible.
 const STATE_TICK_MS = 5_000;
+// How long a newborn sparkles, in garden time.
+const NEWBORN_MS = 30 * 60 * 1000;
 // The shared garden is never edited: everyone sees the same default island.
 const GARDEN_ISLAND = defaultIsland(7);
 
@@ -103,6 +105,8 @@ export function GardenScreen({
       meetingWith: activity === "meet" && withSeed?.length ? listNames(withSeed.map(nameOf)) : undefined,
       partnerLabel: blob.partner ? nameOf(blob.partner) : undefined,
       young: gardenNow < blob.adultAt,
+      // Children only: an account's blob is born grown up.
+      aura: blob.heartbroken ? "heartbroken" : blob.adultAt > blob.bornAt && gardenNow - blob.bornAt < NEWBORN_MS ? "newborn" : undefined,
       ...(blob.seed === account?.seed ? { onIdentityChange } : {}),
     };
   };

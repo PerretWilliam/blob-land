@@ -5,7 +5,7 @@ import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thin
 import { Coffee, Footprints, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ATTRACTION_LABELS, BlobGenderSign, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
-import { InteractionFx, momentAt, type Moment } from "@/components/interaction-fx";
+import { AuraFx, InteractionFx, momentAt, type Aura, type Moment } from "@/components/interaction-fx";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
 import DECOR_WIDTHS from "@/assets/iso/widths.json";
@@ -45,6 +45,8 @@ export interface SceneBlob {
   partnerLabel?: string;
   /** Still a child. */
   young?: boolean;
+  /** Something that just happened to it, shown over its head for a while. */
+  aura?: Aura;
   /** Set on the player's own blob: lets them change who it is from its ID card. */
   onIdentityChange?: (identity: Identity) => void;
 }
@@ -421,7 +423,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const blob = els.current.get(seed);
     if (blob) {
       blob.el.style.transform = at;
-      blob.el.style.zIndex = String(depthZ(tiles, p));
+      // The one being followed comes to the front, even from behind a crowd (names stay above).
+      blob.el.style.zIndex = String(seed === selectedRef.current ? 199_999 : depthZ(tiles, p));
     }
     const label = labels.current.get(seed);
     if (label) label.style.transform = at;
@@ -437,6 +440,21 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const waddle = Math.sin(g.phase) * 4 * g.walk * (1 - g.hop); // side to side, feet on the ground
     blob.body.style.transform = `translate3d(0, ${-lift * blobSizeRef.current * 0.13}px, 0) rotate(${g.lean + waddle}deg) scale(${1 + squash}, ${1 - squash})`;
     if (blob.shadow) blob.shadow.style.transform = `translate(-50%, -50%) scale(${1 - 0.35 * lift})`;
+  }
+
+  /**
+   * Blobs overlap. Clicking where several stand selects the one clicked, and
+   * clicking again there goes to the next one behind it, round and round.
+   */
+  function pick(seed: string, at?: { x: number; y: number }) {
+    if (at) {
+      const stack = [
+        ...new Set(document.elementsFromPoint(at.x, at.y).flatMap((el) => el.closest<HTMLElement>("[data-body]")?.dataset.seed ?? [])),
+      ];
+      const i = stack.indexOf(selectedRef.current ?? "");
+      if (i >= 0 && stack.length > 1) return setSelected(stack[(i + 1) % stack.length]!);
+    }
+    setSelected(seed);
   }
 
   /*
@@ -707,7 +725,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
             size={blob.young ? Math.round(blobSize * 0.7) : blobSize}
             reducedMotion={reducedMotion}
             selected={blob.seed === selected}
-            onSelect={() => setSelected(blob.seed)}
+            onSelect={(at) => pick(blob.seed, at)}
             placeRef={(node) => place(blob.seed, node)}
           />
         ))}
@@ -726,10 +744,20 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
             style={{ zIndex: 200_000 }}
             data-fx-key={moment?.key}
           >
-            {moment ? <InteractionFx moment={moment} size={size} /> : null}
+            {moment ? (
+              <InteractionFx moment={moment} size={size} bottom={blobSize * 0.84 + 14} />
+            ) : blob.aura ? (
+              <AuraFx aura={blob.aura} size={size} bottom={blobSize * 0.84 + 14} />
+            ) : null}
+            {/* Clicking a name selects its blob, even one hidden behind another.
+                Mouse only: keyboard users reach the blob itself. */}
             <p
-              className="absolute flex origin-bottom items-center gap-1 whitespace-nowrap rounded-full bg-black/35 px-2 py-0.5 text-xs font-medium text-white"
+              className="pointer-events-auto absolute flex origin-bottom cursor-pointer items-center gap-1 whitespace-nowrap rounded-full bg-black/35 px-2 py-0.5 text-xs font-medium text-white transition-colors hover:bg-black/60"
               style={{ bottom: blobSize * 0.84, transform: "translateX(-50%) scale(calc(1 / var(--camera-zoom, 1)))" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelected(blob.seed);
+              }}
             >
               {blob.label}
               <MoodIcon expression={blob.expression} />
@@ -886,7 +914,8 @@ function SceneBlobView({
   size: number;
   reducedMotion: boolean;
   selected: boolean;
-  onSelect: () => void;
+  /** `at`: where it was clicked, to reach the blobs standing behind it. */
+  onSelect: (at?: { x: number; y: number }) => void;
   placeRef: (node: HTMLElement | null) => void;
 }) {
   // R4: each blob still only animates while it is on screen.
@@ -923,10 +952,11 @@ function SceneBlobView({
           // transparent margins, which made the hover fire before reaching the blob.
           // The outline goes on the blobatar alone: its gender sign has its own stroke.
           className={`pointer-events-none origin-[50%_80%] cursor-pointer outline-none will-change-transform hover:[&>:first-child]:blob-outline focus-visible:[&>:first-child]:blob-outline [&_img]:pointer-events-auto [&_svg:not([data-gender])_*]:pointer-events-auto ${selected ? "[&>:first-child]:blob-outline" : ""}`}
+          data-seed={blob.seed}
           onClick={(e) => {
             // Don't let the scene's own click (which zooms out) undo this.
             e.stopPropagation();
-            onSelect();
+            onSelect({ x: e.clientX, y: e.clientY });
           }}
           onKeyDown={(e) => {
             if (e.key !== "Enter" && e.key !== " ") return;
