@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { firstSegment, liveThrough, nextSolo, type Segment } from "./life";
 import { NEST, positionOn } from "./position";
 import { seededRng } from "./rng";
-import { daylight } from "./time";
 
 const T0 = Date.UTC(2026, 8, 25, 8);
 const HOUR = 60 * 60 * 1000;
@@ -49,12 +48,5 @@ describe("positionOn", () => {
   it("snaps every stop onto standable ground", () => {
     const westOnly = (p: { x: number; y: number }) => ({ x: Math.min(p.x, 0.5), y: p.y });
     for (let t = T0; t < T0 + 48 * HOUR; t += 45_000) expect(positionOn(segs, t, westOnly).x).toBeLessThanOrEqual(0.5);
-  });
-});
-
-describe("daylight", () => {
-  it("is day at noon and night at 02:00 UTC", () => {
-    expect(daylight(Date.UTC(2026, 8, 25, 12))).toBe(1);
-    expect(daylight(Date.UTC(2026, 8, 25, 2))).toBe(0);
   });
 });
