@@ -91,12 +91,14 @@ export function gardenIsland(size: number): IslandLayout {
   const neighbours = (i: number, j: number) => EDGES.map(([, di, dj]) => [i + di, j + dj] as const);
 
   // No cliff taller than one block: carve every cell down to one above its lowest neighbour.
+  // (The loops below run over every cell many times: no temporary arrays in them.)
   for (let changed = true; changed; ) {
     changed = false;
     for (let j = 0; j < size; j++)
       for (let i = 0; i < size; i++) {
         const c = at(i, j)!;
-        const low = Math.min(...neighbours(i, j).map(([a, b]) => at(a, b)?.height ?? 0));
+        let low = Infinity;
+        for (const e of EDGES) low = Math.min(low, at(i + e[1], j + e[2])?.height ?? 0);
         if ((c.height ?? 0) > low + 1) {
           c.height = low + 1;
           changed = true;
@@ -168,33 +170,46 @@ export function gardenIsland(size: number): IslandLayout {
   // Ramps: keep adding one where a reachable cell meets an unreachable one a
   // block up or down, until everything that can be reached is.
   const home = Math.floor(half) * size + Math.floor(half);
+  // Asked for again after every ramp: one pair of buffers for every walk, not a new one each time.
+  const seen = new Uint8Array(size * size);
+  const queue = new Int32Array(size * size);
   const reachable = () => {
-    const seen = new Uint8Array(size * size);
-    const queue = [home];
+    seen.fill(0);
+    let tail = 0;
+    queue[tail++] = home;
     seen[home] = 1;
-    for (let head = 0; head < queue.length; head++) {
+    for (let head = 0; head < tail; head++) {
       const n = queue[head]!;
-      const [i, j] = [n % size, Math.floor(n / size)];
-      for (const [a, b] of neighbours(i, j)) {
+      const i = n % size;
+      const j = (n - i) / size;
+      for (const e of EDGES) {
+        const a = i + e[1];
+        const b = j + e[2];
         const m = b * size + a;
         if (a < 0 || b < 0 || a >= size || b >= size || seen[m] || !canStep(layout, i, j, a, b)) continue;
         seen[m] = 1;
-        queue.push(m);
+        queue[tail++] = m;
       }
     }
     return seen;
   };
   for (let guard = 0; guard < size * 4; guard++) {
-    const seen = reachable();
+    reachable();
     const candidates: number[] = [];
     for (let n = 0; n < size * size; n++) {
       const c = cells[n]!;
       if (c.ramp || !canRamp(c.ground)) continue;
-      const [i, j] = [n % size, Math.floor(n / size)];
+      const i = n % size;
+      const j = (n - i) / size;
       const h = c.height ?? 0;
       // The ramp would climb to the first neighbour one block up (see rampDirection).
-      const up = neighbours(i, j).find(([a, b]) => (at(a, b)?.height ?? 0) === h + 1);
-      if (up && at(...up)!.ground !== "river" && seen[up[1] * size + up[0]] !== seen[n]) candidates.push(n);
+      for (const e of EDGES) {
+        const [a, b] = [i + e[1], j + e[2]];
+        const up = at(a, b);
+        if ((up?.height ?? 0) !== h + 1) continue;
+        if (up!.ground !== "river" && seen[b * size + a] !== seen[n]) candidates.push(n);
+        break;
+      }
     }
     if (!candidates.length) break;
     cells[pick(candidates)]!.ramp = true;
@@ -202,7 +217,7 @@ export function gardenIsland(size: number): IslandLayout {
 
   // Decor, by ground, with woods where the forest noise is high. A cell no
   // one can reach gets something standing on it so nobody is sent there.
-  const seen = reachable();
+  reachable();
   for (let n = 0; n < size * size; n++) {
     const c = cells[n]!;
     if (c.ramp || c.ground === "water" || c.ground === "river" || c.ground === "road") continue;
@@ -250,3 +265,4 @@ export function gardenIsland(size: number): IslandLayout {
   for (const { i, j } of nests) for (const c of clearing(i, j) ?? []) delete c.decor;
   return { size, cells, nests: nests.map(({ i, j }) => ({ x: i / size, y: j / size, r: 1 / size })) };
 }
+

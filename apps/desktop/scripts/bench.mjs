@@ -63,9 +63,10 @@ const samples = [];
 let last = null;
 const timer = setInterval(() => {
   const ours = processes().filter((p) => p.pid === app.pid || (isWebKit(p) && !before.has(p.pid)));
-  const now = { at: Date.now(), rssMB: ours.reduce((s, p) => s + p.rss, 0) / 1024, cpuS: ours.reduce((s, p) => s + p.cpu, 0) };
+  const mb = (match) => ours.filter((p) => p.comm.includes(match)).reduce((s, p) => s + p.rss, 0) / 1024;
+  const now = { at: Date.now(), rssMB: ours.reduce((s, p) => s + p.rss, 0) / 1024, webMB: mb("WebContent"), gpuMB: mb("WebKit.GPU"), cpuS: ours.reduce((s, p) => s + p.cpu, 0) };
   // CPU %, from the CPU time used since the last sample (100 = one core).
-  if (last) samples.push({ at: now.at, rssMB: now.rssMB, cpu: (100 * (now.cpuS - last.cpuS) * 1000) / (now.at - last.at) });
+  if (last) samples.push({ at: now.at, rssMB: now.rssMB, webMB: now.webMB, gpuMB: now.gpuMB, cpu: (100 * (now.cpuS - last.cpuS) * 1000) / (now.at - last.at) });
   last = now;
 }, EVERY_MS);
 
@@ -92,8 +93,14 @@ const rows = report.results.map((r) => {
     "p95 ms": r.p95Ms,
     "max ms": r.maxMs,
     "jank %": r.jank,
+    "move ms": r.tickMs,
+    "draw ms": r.renderMs,
+    "drawn %": r.drawnPct,
     "CPU %": during.length ? round(during.reduce((s, x) => s + x.cpu, 0) / during.length) : null,
     "RAM MB": during.length ? Math.round(Math.max(...during.map((s) => s.rssMB))) : null,
+    // Of which the page (JS, DOM, images) and WebKit's GPU process (WebGL, compositing).
+    "page MB": during.length ? Math.round(Math.max(...during.map((s) => s.webMB))) : null,
+    "GPU MB": during.length ? Math.round(Math.max(...during.map((s) => s.gpuMB))) : null,
   };
 });
 console.log(`\n${report.size}×${report.size} island, ${report.blobs} blobs — peak RAM ${Math.round(Math.max(...samples.map((s) => s.rssMB)))} MB`);

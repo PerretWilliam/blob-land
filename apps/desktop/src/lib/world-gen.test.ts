@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { canStep, snapToGround } from "./island";
 import { MAX_GARDEN, MIN_GARDEN } from "@blob-land/sim";
@@ -59,4 +60,12 @@ describe("gardenIsland", () => {
       expect(bridges.every((c) => c.ground === "river")).toBe(true);
     });
   }
+
+  // Every client lays the garden out itself and they have to agree: an island
+  // that changes shape is a change for everyone at once, never a side effect.
+  it("lays out exactly the island it always has", () => {
+    const hash = (size: number) => createHash("sha1").update(JSON.stringify(gardenIsland(size))).digest("hex");
+    expect(hash(40)).toBe("4414d6226f63b727f4733dd4927f11e534925506");
+    expect(hash(128)).toBe("1f1f93ca3f2bb2a33411d50e1018256bfcae3214");
+  });
 });

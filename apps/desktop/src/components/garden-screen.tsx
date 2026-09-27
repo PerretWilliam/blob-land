@@ -22,7 +22,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { FamilyPanel } from "@/components/family-tree";
 import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { RelationsPanel } from "@/components/relations-panel";
@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { ACTIVITY_LABELS, ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import type { LocalLife } from "@/lib/life";
-import { gardenIsland } from "@/lib/world-gen";
+import { useGardenIsland } from "@/lib/use-garden-island";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
 import { usePrefersReducedMotion } from "@/lib/motion";
 
@@ -126,7 +126,7 @@ export function GardenScreen({
   // island, sized by the server for how many live there.
   const gardenSide = regions?.size ?? gardenSize(blobs.length);
   const atHome = !regions || regions.region === regions.home;
-  const gardenLayout = useMemo(() => gardenIsland(gardenSide), [gardenSide]);
+  const gardenLayout = useGardenIsland(inGarden ? gardenSide : null);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -163,7 +163,7 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={atHome ? account.seed : undefined}
+        gardenLayout && <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={atHome ? account.seed : undefined}
           clock={() => gardenTime(gardenClock)}
           onShowRelations={(seed, name) => {
             setRelationsOf({ seed, name });

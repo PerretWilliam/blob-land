@@ -5,17 +5,20 @@
  *
  * Opened with `#bench` on the dev server, or built into the app with
  * VITE_BENCH=1 (see scripts/bench.mjs, which also reads RAM and CPU).
- * `?size=` and `?n=` change the island and the crowd.
+ * `?size=` and `?n=` change the island and the crowd; `?idle` shows it
+ * without playing the moves, to look around by hand (`?night` by night).
  */
 import { seededRng, type Segment } from "@blob-land/sim";
 import { BaseDirectory, mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
 import { useEffect, useRef, useState } from "react";
 import { expressionNamed, Scene, type SceneBlob } from "@/components/scene";
-import { gardenIsland } from "@/lib/world-gen";
+import { useGardenIsland } from "@/lib/use-garden-island";
 
 const params = new URLSearchParams(location.search);
-const SIZE = Number(params.get("size") ?? 128);
-const COUNT = Number(params.get("n") ?? 450);
+// Also settable when building the bench app (VITE_BENCH_SIZE, VITE_BENCH_N), which has no URL to pass them in.
+const SIZE = Number(params.get("size") ?? import.meta.env.VITE_BENCH_SIZE ?? 128);
+const COUNT = Number(params.get("n") ?? import.meta.env.VITE_BENCH_N ?? 450);
+const IDLE = params.has("idle");
 
 const HOUR = 60 * 60 * 1000;
 // Garden times the bench plays at: noon, and deep in the night (UTC, like daylight()).
@@ -57,7 +60,15 @@ interface Result {
   maxMs: number;
   /** Share of frames over 20 ms: the ones that show as stutter. */
   jank: number;
+  /** The scene's own work per frame: moving everyone (ms), drawing (ms), and how many frames it drew. */
+  tickMs: number;
+  renderMs: number;
+  drawnPct: number;
 }
+
+// Filled in by the scene's frame loop while it exists.
+const profile = { tickMs: 0, renderMs: 0, ticks: 0, renders: 0 };
+(window as { sceneProfile?: typeof profile }).sceneProfile = profile;
 
 /** In the app, the report is left in its data folder for scripts/bench.mjs to pick up. */
 async function save(report: object) {
@@ -97,20 +108,25 @@ async function sample(name: string, ms: number, act?: (elapsed: number, n: numbe
     p95Ms: round(sorted[Math.floor(sorted.length * 0.95)]!),
     maxMs: round(sorted[sorted.length - 1]!),
     jank: round((100 * gaps.filter((g) => g > 20).length) / gaps.length),
+    tickMs: round(profile.tickMs / (profile.renders || 1)),
+    renderMs: round(profile.renderMs / (profile.renders || 1)),
+    drawnPct: Math.round((100 * profile.renders) / (profile.ticks || 1)),
   };
 }
 
 export default function Bench() {
   const [blobs] = useState(crowd);
-  const [layout] = useState(() => gardenIsland(SIZE));
-  const [base, setBase] = useState(NOON);
+  const layout = useGardenIsland(SIZE);
+  const [base, setBase] = useState(params.has("night") ? NIGHT : NOON);
   const [results, setResults] = useState<Result[] | null>(null);
+  // The page without the garden first: what the webview costs on its own.
+  const [blank, setBlank] = useState(!IDLE);
   const root = useRef<HTMLElement>(null);
   const t0 = useRef(performance.now());
   const clock = () => base + (performance.now() - t0.current);
 
   useEffect(() => {
-    if (started) return;
+    if (started || IDLE) return;
     started = true;
     const scene = () => root.current!.firstElementChild as HTMLElement;
     const centre = () => {
@@ -131,6 +147,9 @@ export default function Bench() {
     };
     const run = async () => {
       const out: Result[] = [];
+      await wait(1000);
+      out.push(await sample("blank page", 3000));
+      setBlank(false);
       await wait(3000); // Sprites load, the camera settles.
       wheel(4000);
       await wait(1500);
@@ -156,8 +175,8 @@ export default function Bench() {
         const r = el.getBoundingClientRect();
         return Math.hypot(r.x - c.x, r.y - c.y);
       };
-      const near = [...document.querySelectorAll<HTMLElement>("[data-body]")].sort((a, b) => distance(a) - distance(b))[0];
-      out.push(await sample("follow a blob", 4000, (_e, n) => n === 0 && near?.click()));
+      const near = [...document.querySelectorAll<HTMLElement>("[data-label]")].sort((a, b) => distance(a) - distance(b))[0];
+      out.push(await sample("follow a blob", 4000, (_e, n) => n === 0 && near?.querySelector("p")?.click()));
       out.push(await sample("let go", 3000, (_e, n) => n === 0 && scene().click()));
       out.push(await pan("fast pan"));
       setBase(NIGHT);
@@ -176,7 +195,7 @@ export default function Bench() {
 
   return (
     <main ref={root} className="fixed inset-0">
-      <Scene key={base} blobs={blobs} reducedMotion={false} layout={layout} blobScale={0.55} startAt="bench-0" clock={clock} />
+      {blank || !layout ? null : <Scene key={base} blobs={blobs} reducedMotion={false} layout={layout} blobScale={0.55} startAt="bench-0" clock={clock} />}
       {results ? (
         <table className="absolute top-4 left-4 z-20 rounded-lg bg-background/90 text-xs shadow-lg [&_td]:px-2 [&_th]:px-2">
           <thead>

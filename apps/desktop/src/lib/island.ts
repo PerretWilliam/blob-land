@@ -309,13 +309,16 @@ const cellOf = (size: number, p: GroundPoint) =>
 /** Whether a blob may step directly from one orthogonally adjacent cell to
  * another: neither is water (bar a bridge), and any height difference is bridged by a ramp
  * climbing the right way (see `rampDirection`) — never a bare cliff. */
+// Called millions of times while an island is laid out and routed: no temporary arrays in here.
 export function canStep(island: IslandLayout, i1: number, j1: number, i2: number, j2: number): boolean {
-  const [a, b] = [cellAt(island, i1, j1), cellAt(island, i2, j2)];
+  const a = cellAt(island, i1, j1);
+  const b = cellAt(island, i2, j2);
   if (!a || !b || !(canPass(a.ground) || a.bridge) || !(canPass(b.ground) || b.bridge)) return false;
   const diff = (b.height ?? 0) - (a.height ?? 0);
   if (Math.abs(diff) > 1) return false;
   if (diff === 0) return true;
-  const edge = EDGES.find(([, di, dj]) => i1 + di === i2 && j1 + dj === j2)?.[0];
+  let edge: Edge | undefined;
+  for (const e of EDGES) if (i1 + e[1] === i2 && j1 + e[2] === j2) edge = e[0];
   if (!edge) return false;
   return diff === 1 ? rampDirection(island, i1, j1) === edge : rampDirection(island, i2, j2) === OPPOSITE_EDGE[edge];
 }
@@ -333,49 +336,60 @@ export function findPath(island: IslandLayout, from: GroundPoint, to: GroundPoin
   // The scene asks every frame for the same few walks: route each pair of cells once.
   let cache = pathCache.get(island);
   if (!cache) pathCache.set(island, (cache = new Map()));
-  const cacheKey = `${si},${sj},${ei},${ej}`;
+  const cacheKey = ((sj * size + si) * size + ej) * size + ei;
   let route = cache.get(cacheKey);
   if (route === undefined) {
     if (cache.size > 5000) cache.clear();
-    route = routeCells(island, si, sj, ei, ej);
+    route = routeCells(island, sj * size + si, ej * size + ei);
     cache.set(cacheKey, route);
   }
   if (!route) return [from, to];
-  const waypoints = route.map(([i, j]) => ({ x: (i + 0.5) / size, y: (j + 0.5) / size }));
+  const waypoints = Array.from(route, (n) => ({ x: ((n % size) + 0.5) / size, y: (Math.floor(n / size) + 0.5) / size }));
   waypoints[0] = from;
   waypoints[waypoints.length - 1] = to;
   return waypoints;
 }
 
-const pathCache = new WeakMap<IslandLayout, Map<string, [number, number][] | null>>();
+// Routes as cell indices (j * size + i), keyed by both ends.
+const pathCache = new WeakMap<IslandLayout, Map<number, Int32Array | null>>();
+// One set of buffers for every search: a route is asked for often, on a big
+// map, and allocating per search is what kept the webview's memory high.
+let search = { prev: new Int32Array(0), seen: new Uint32Array(0), queue: new Int32Array(0), mark: 0 };
 
-/** The cells of the shortest hop-by-hop route, both ends included, or null. */
-function routeCells(island: IslandLayout, si: number, sj: number, ei: number, ej: number): [number, number][] | null {
+/** The cells of the shortest hop-by-hop route from cell `start` to `end`, both included, or null. */
+function routeCells(island: IslandLayout, start: number, end: number): Int32Array | null {
   const { size } = island;
-  const key = (i: number, j: number) => j * size + i;
-  const prev = new Map<number, number>();
-  const seen = new Set<number>([key(si, sj)]);
-  const queue: [number, number][] = [[si, sj]];
+  const cells = size * size;
+  if (search.prev.length < cells) search = { prev: new Int32Array(cells), seen: new Uint32Array(cells), queue: new Int32Array(cells), mark: 0 };
+  const { prev, seen, queue } = search;
+  // A new mark per search: no clearing `seen` between them.
+  const mark = ++search.mark;
+  seen[start] = mark;
+  let tail = 0;
+  queue[tail++] = start;
   let reached = false;
-  for (let head = 0; head < queue.length; head++) {
-    const [i, j] = queue[head]!;
-    if (i === ei && j === ej) {
+  for (let head = 0; head < tail; head++) {
+    const n = queue[head]!;
+    if (n === end) {
       reached = true;
       break;
     }
-    for (const [, di, dj] of EDGES) {
-      const [ni, nj] = [i + di, j + dj];
-      if (ni < 0 || nj < 0 || ni >= size || nj >= size || seen.has(key(ni, nj)) || !canStep(island, i, j, ni, nj)) continue;
-      seen.add(key(ni, nj));
-      prev.set(key(ni, nj), key(i, j));
-      queue.push([ni, nj]);
+    const i = n % size;
+    const j = (n - i) / size;
+    for (const e of EDGES) {
+      const ni = i + e[1];
+      const nj = j + e[2];
+      const m = nj * size + ni;
+      if (ni < 0 || nj < 0 || ni >= size || nj >= size || seen[m] === mark || !canStep(island, i, j, ni, nj)) continue;
+      seen[m] = mark;
+      prev[m] = n;
+      queue[tail++] = m;
     }
   }
   if (!reached) return null;
-  const cells: [number, number][] = [[ei, ej]];
-  for (let k = key(ei, ej); k !== key(si, sj); ) {
-    k = prev.get(k)!;
-    cells.push([k % size, Math.floor(k / size)]);
-  }
-  return cells.reverse();
+  let length = 1;
+  for (let k = end; k !== start; k = prev[k]!) length++;
+  const route = new Int32Array(length);
+  for (let k = end, at = length - 1; at >= 0; k = prev[k]!, at--) route[at] = k;
+  return route;
 }
