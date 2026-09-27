@@ -9,7 +9,8 @@
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "db:apply": "wrangler d1 execute blob-land --local --file=schema.sql"
+    "db:apply": "wrangler d1 execute blob-land --local --file=schema.sql",
+    "seed": "node scripts/seed.mjs"
   },
   "dependencies": {
     "@blob-land/sim": "workspace:*",
