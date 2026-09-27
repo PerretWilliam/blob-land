@@ -1,4 +1,4 @@
-import { activityLog, type Identity } from "@blob-land/sim";
+import { activityLog, segmentAt, type Identity } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
@@ -8,6 +8,7 @@ import {
   Eraser,
   Eye,
   EyeOff,
+  HeartHandshake,
   Home,
   Minus,
   Plus,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { FamilyPanel } from "@/components/family-tree";
+import { RelationsPanel } from "@/components/relations-panel";
 import { Button } from "@/components/ui/button";
 import { ACTIVITY_LABELS, ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import type { GardenBlob } from "@/lib/api";
@@ -71,7 +73,7 @@ export function GardenScreen({
   const [editing, setEditing] = useState(false);
   const [tool, setTool] = useState<IslandTool>("grass");
   // The side panel: one at a time.
-  const [panel, setPanel] = useState<"journal" | "family" | null>(null);
+  const [panel, setPanel] = useState<"journal" | "family" | "relations" | null>(null);
   // Re-render now and then, so states (and expressions) follow the clock.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -82,6 +84,7 @@ export function GardenScreen({
   // A garden blob as the scene draws it: its face and activity right now, off its timeline.
   const fromGarden = (blob: GardenBlob, label = blob.pseudo ?? "a new blob"): SceneBlob => {
     const { expression, activity } = blobStateAt(blob.segments, now);
+    const withSeed = segmentAt(blob.segments, now)?.seg.with;
     return {
       seed: blob.seed,
       label,
@@ -91,6 +94,7 @@ export function GardenScreen({
       sex: blob.sex,
       attraction: blob.attraction,
       partner: blob.partner,
+      meetingWith: activity === "meet" && withSeed ? nameOf(withSeed) : undefined,
       partnerLabel: blob.partner ? nameOf(blob.partner) : undefined,
       young: now < blob.adultAt,
       ...(blob.seed === account?.seed ? { onIdentityChange } : {}),
@@ -203,6 +207,16 @@ export function GardenScreen({
             >
               Family tree
             </MenuItem>
+            <MenuItem
+              icon={<HeartHandshake />}
+              active={panel === "relations"}
+              onClick={() => {
+                setPanel((p) => (p === "relations" ? null : "relations"));
+                setMenuOpen(false);
+              }}
+            >
+              Relations
+            </MenuItem>
 
             <div className="my-1 h-px bg-border" aria-hidden="true" />
 
@@ -249,6 +263,8 @@ export function GardenScreen({
           onClose={() => setPanel(null)}
         />
       ) : null}
+
+      {panel === "relations" ? <RelationsPanel seed={account?.seed ?? null} onClose={() => setPanel(null)} /> : null}
 
       {editing && !inGarden ? (
         <div className="absolute bottom-4 left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md">

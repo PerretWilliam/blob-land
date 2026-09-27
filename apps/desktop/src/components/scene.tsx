@@ -36,6 +36,8 @@ export interface SceneBlob {
   activity?: Activity;
   sex: Sex;
   attraction: Attraction;
+  /** Who it's meeting right now, by name, while its activity is "meet". */
+  meetingWith?: string;
   /** Its other half, if it's in a couple: they wander together when both are free. */
   partner?: string | null;
   /** Its partner's display name, for the ID card. */
@@ -712,7 +714,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                   {blob.activity ? (
                     <>
                       <ActivityIcon activity={blob.activity} />
-                      {ACTIVITY_LABELS[blob.activity]}
+                      {blob.meetingWith ? `With ${blob.meetingWith}` : ACTIVITY_LABELS[blob.activity]}
                     </>
                   ) : (
                     "—"

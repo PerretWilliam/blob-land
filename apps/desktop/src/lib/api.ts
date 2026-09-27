@@ -1,4 +1,4 @@
-import type { Attraction, Identity, Segment, Sex } from "@blob-land/sim";
+import type { Attraction, Identity, Kin, RelationStatus, Segment, Sex } from "@blob-land/sim";
 import { fetch } from "@tauri-apps/plugin-http";
 
 // plugin-http issues the request from the Rust side, not the webview, so it
@@ -115,4 +115,22 @@ export function renameChild(token: string, seed: string, name: string): Promise<
     headers: authHeader(token),
     body: JSON.stringify({ name }),
   });
+}
+
+/** GET /blobs/:seed/relationships — public, like the family tree. */
+export interface Relation {
+  seed: string;
+  name: string | null;
+  status: RelationStatus;
+  /** Each in [0, 100]. */
+  friendship: number;
+  romance: number;
+  tension: number;
+  kin: Kin | null;
+  meetings: number;
+  lastMetAt: number | null;
+}
+
+export function getRelationships(seed: string): Promise<{ relationships: Relation[] }> {
+  return request(`/blobs/${encodeURIComponent(seed)}/relationships`);
 }
