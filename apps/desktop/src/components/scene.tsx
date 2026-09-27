@@ -1,4 +1,4 @@
-import { daylight, legIn, NEST, segmentAt, type Activity, type Attraction, type GroundPoint, type Identity, type Segment, type Sex } from "@blob-land/sim";
+import { daylight, flagOf, legIn, NEST, segmentAt, type Activity, type Attraction, type GroundPoint, type Identity, type Segment, type Sex } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
@@ -6,6 +6,7 @@ import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X }
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ATTRACTION_LABELS, BlobGenderSign, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
 import { Button } from "@/components/ui/button";
+import { CountryField, countryName } from "@/components/country-field";
 import { AuraFx, InteractionFx, momentAt, type Aura, type Moment } from "@/components/interaction-fx";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
@@ -50,6 +51,10 @@ export interface SceneBlob {
   aura?: Aura;
   /** Set on the player's own blob: lets them change who it is from its ID card. */
   onIdentityChange?: (identity: Identity) => void;
+  /** Where its player is from (ISO code), if they share it: a flag by its name. */
+  country?: string | null;
+  /** Set on the player's own garden blob: lets them pick or drop their country. */
+  onCountryChange?: (country: string | null) => void;
 }
 
 /** A stored expression name as blobatar's expression object. */
@@ -762,6 +767,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                 setSelected(blob.seed);
               }}
             >
+              {blob.country ? (
+                <span role="img" aria-label={countryName(blob.country)} title={countryName(blob.country)}>
+                  {flagOf(blob.country)}
+                </span>
+              ) : null}
               {blob.label}
               <MoodIcon expression={blob.expression} />
               {blob.activity ? <ActivityIcon activity={blob.activity} /> : null}
@@ -810,6 +820,14 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                   {mood?.label ?? "—"}
                 </dd>
               </div>
+              {blob.country ? (
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-muted-foreground">Country</dt>
+                  <dd className="truncate">
+                    {flagOf(blob.country)} {countryName(blob.country)}
+                  </dd>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-muted-foreground">Sex</dt>
                 <dd>{SEX_LABELS[blob.sex]}</dd>
@@ -847,6 +865,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
             {blob.onIdentityChange ? (
               <div className="mt-3 border-t pt-3">
                 <IdentityFields value={{ sex: blob.sex, attraction: blob.attraction }} onChange={blob.onIdentityChange} />
+                {blob.onCountryChange ? (
+                  <div className="mt-3">
+                    <CountryField value={blob.country ?? null} onChange={blob.onCountryChange} />
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </aside>

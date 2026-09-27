@@ -9,6 +9,7 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
   visible_in_garden INTEGER NOT NULL DEFAULT 1,
+  country TEXT, -- ISO 3166-1 alpha-2, shown as a flag; NULL stays anonymous
   last_seen_at INTEGER NOT NULL, -- epoch ms
   created_at INTEGER NOT NULL
 );

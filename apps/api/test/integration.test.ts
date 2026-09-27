@@ -22,7 +22,7 @@ async function jsonAs<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function register(pseudo: string, identity: { sex?: string; attraction?: string } = {}) {
+async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string } = {}) {
   const res = await SELF.fetch("https://api.test/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -45,7 +45,7 @@ async function login(pseudo: string) {
 const DAY = 24 * 60 * 60 * 1000;
 
 interface GardenBody {
-  blobs: { seed: string; pseudo: string | null; sex: string; attraction: string; partner: string | null; segments: { start: number; end: number }[] }[];
+  blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; partner: string | null; segments: { start: number; end: number }[] }[];
 }
 
 async function garden(token: string): Promise<GardenBody> {
@@ -67,7 +67,7 @@ describe("blob-land API", () => {
 
     // Registered but not lived yet: listed, with no timeline until the world step runs.
     const before = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
-    expect(before).toMatchObject({ sex: "none", attraction: "any", segments: [] });
+    expect(before).toMatchObject({ sex: "none", attraction: "any", country: null, segments: [] });
 
     await advanceGarden(env.DB, Date.now());
     const after = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
@@ -202,6 +202,33 @@ describe("blob-land API", () => {
     expect((await rename(alice.token, "Pebble")).status).toBe(200);
     const renamed = await jsonAs<{ name: string }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
     expect(renamed.name).toBe("Pebble");
+  });
+});
+
+describe("countries", () => {
+  it("takes an optional country, shows it in the garden, and lets it be changed or dropped", async () => {
+    const { token, seed } = await register("voyager", { country: "FR" });
+    const country = async () => (await garden(token)).blobs.find((b) => b.seed === seed)!.country;
+    expect(await country()).toBe("FR");
+
+    const set = (value: unknown) =>
+      SELF.fetch("https://api.test/me/country", {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ country: value }),
+      });
+    expect((await set("JP")).status).toBe(200);
+    expect(await country()).toBe("JP");
+    expect((await set(null)).status).toBe(200);
+    expect(await country()).toBeNull();
+    expect((await set("Neverland")).status).toBe(400);
+
+    const bad = await SELF.fetch("https://api.test/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pseudo: "nowhere", password: PASSWORD, country: "XX" }),
+    });
+    expect(bad.status).toBe(400);
   });
 });
 

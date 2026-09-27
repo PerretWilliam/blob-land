@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GardenScreen } from "@/components/garden-screen";
 import { JoinGardenScreen } from "@/components/join-garden-screen";
 import { PseudoScreen } from "@/components/pseudo-screen";
-import { getGarden, ping, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock } from "@/lib/api";
+import { getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock } from "@/lib/api";
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { loadState, saveState, type AppState } from "@/lib/state";
@@ -120,6 +120,13 @@ export default function App() {
   }
 
   // One identity for both: the private blob and its garden sprout.
+  async function handleCountryChange(country: string | null) {
+    const account = appState?.account;
+    if (!account) return;
+    await setCountry(account.token, country);
+    setBlobs((list) => list.map((b) => (b.seed === account.seed ? { ...b, country } : b)));
+  }
+
   async function handleIdentityChange(identity: Identity) {
     if (!appState) return;
     const { account } = appState;
@@ -161,6 +168,7 @@ export default function App() {
       localSeed={appState.localSeed}
       life={appState.life}
       onIdentityChange={handleIdentityChange}
+      onCountryChange={handleCountryChange}
       account={appState.account}
       blobs={blobs}
       gardenClock={gardenClock}

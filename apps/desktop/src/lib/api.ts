@@ -13,6 +13,8 @@ export interface AuthResponse {
 export interface GardenBlob {
   seed: string;
   pseudo: string | null;
+  /** The player's country (ISO 3166-1 alpha-2), if they share it. Children have none. */
+  country: string | null;
   sex: Sex;
   attraction: Attraction;
   bornAt: number;
@@ -67,8 +69,12 @@ export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
   return request(`/pseudo/${encodeURIComponent(pseudo)}`);
 }
 
-export function register(pseudo: string, password: string, identity: Identity): Promise<AuthResponse> {
-  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity }) });
+export function register(pseudo: string, password: string, identity: Identity, country: string | null = null): Promise<AuthResponse> {
+  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country }) });
+}
+
+export function setCountry(token: string, country: string | null): Promise<{ ok: true }> {
+  return request("/me/country", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ country }) });
 }
 
 export function setIdentity(token: string, identity: Identity): Promise<{ ok: true }> {

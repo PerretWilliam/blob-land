@@ -39,6 +39,7 @@ export interface GardenScreenProps {
   /** The private blob's own, locally lived timeline and identity. */
   life: LocalLife;
   onIdentityChange: (identity: Identity) => void;
+  onCountryChange: (country: string | null) => void;
   account: { pseudo: string; seed: string; token: string } | null;
   blobs: GardenBlob[];
   /** The garden's time, which may run faster than the private blob's (dev). */
@@ -65,6 +66,7 @@ export function GardenScreen({
   localSeed,
   life,
   onIdentityChange,
+  onCountryChange,
   account,
   blobs,
   gardenClock,
@@ -109,7 +111,8 @@ export function GardenScreen({
       young: gardenNow < blob.adultAt,
       // Children only: an account's blob is born grown up.
       aura: blob.heartbroken ? "heartbroken" : blob.adultAt > blob.bornAt && gardenNow - blob.bornAt < NEWBORN_MS ? "newborn" : undefined,
-      ...(blob.seed === account?.seed ? { onIdentityChange } : {}),
+      country: blob.country,
+      ...(blob.seed === account?.seed ? { onIdentityChange, onCountryChange } : {}),
     };
   };
   const reducedMotion = usePrefersReducedMotion();

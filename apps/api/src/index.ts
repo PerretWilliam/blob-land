@@ -1,4 +1,4 @@
-import { isAttraction, isSex, type Attraction, type Segment, type Sex } from "@blob-land/sim";
+import { isAttraction, isCountry, isSex, type Attraction, type Segment, type Sex } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -71,7 +71,7 @@ app.get("/pseudo/:p", async (c) => {
   return c.json({ seed, available: false, suggestions });
 });
 
-type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attraction?: unknown };
+type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attraction?: unknown; country?: unknown };
 
 app.post("/auth/register", rateLimitAuth, async (c) => {
   const body = await c.req.json<RegisterBody>().catch(() => ({}) as RegisterBody);
@@ -83,6 +83,9 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
   // Optional: a blob with no sex, drawn to anyone, unless the player says otherwise.
   const [sex, attraction] = [body.sex ?? "none", body.attraction ?? "any"];
   if (!isSex(sex) || !isAttraction(attraction)) return c.json({ error: "sex must be female, male or none; attraction women, men or any" }, 400);
+  // Optional too: no country is fine, for those who'd rather stay anonymous.
+  const country = body.country ?? null;
+  if (country !== null && !isCountry(country)) return c.json({ error: "country must be an ISO 3166-1 alpha-2 code, or null" }, 400);
 
   const seed = normalizeSeed(pseudo);
   if (await nameTaken(c.env.DB, pseudo)) return c.json({ error: "pseudo already taken" }, 409);
@@ -92,9 +95,9 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
   const now = Date.now();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, last_seen_at, created_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-    ).bind(id, pseudo, seed, hash, salt, now, now),
+      `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, country, last_seen_at, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+    ).bind(id, pseudo, seed, hash, salt, country, now, now),
     newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env)),
   ]);
 
@@ -140,12 +143,12 @@ app.get("/garden", requireAuth, async (c) => {
   const now = await gardenNow(c.env);
   // Children born in the world step's lookahead aren't here yet.
   const { results: blobs } = await c.env.DB.prepare(
-    `SELECT b.seed, COALESCE(b.name, u.pseudo) AS pseudo, b.sex, b.attraction, b.born_at, b.adult_at
+    `SELECT b.seed, COALESCE(b.name, u.pseudo) AS pseudo, u.country, b.sex, b.attraction, b.born_at, b.adult_at
      FROM blobs b LEFT JOIN users u ON u.id = b.owner_user_id
      WHERE b.born_at <= ?1 AND (u.id IS NULL OR u.visible_in_garden = 1 OR u.id = ?2)`,
   )
     .bind(now, c.get("userId"))
-    .all<{ seed: string; pseudo: string | null; sex: Sex; attraction: Attraction; born_at: number; adult_at: number }>();
+    .all<{ seed: string; pseudo: string | null; country: string | null; sex: Sex; attraction: Attraction; born_at: number; adult_at: number }>();
   // A union started or ended in the lookahead hasn't happened yet either.
   const { results: unions } = await c.env.DB.prepare(
     `SELECT seed_a, seed_b FROM unions WHERE started_at <= ?1 AND (ended_at IS NULL OR ended_at > ?1)`,
@@ -174,6 +177,7 @@ app.get("/garden", requireAuth, async (c) => {
     blobs: blobs.map((b) => ({
       seed: b.seed,
       pseudo: b.pseudo,
+      country: b.country,
       sex: b.sex,
       attraction: b.attraction,
       bornAt: b.born_at,
@@ -183,6 +187,14 @@ app.get("/garden", requireAuth, async (c) => {
       segments: segments.get(b.seed) ?? [],
     })),
   });
+});
+
+// Where the player says they're from, or null to stop saying.
+app.patch("/me/country", requireAuth, async (c) => {
+  const body = await c.req.json<{ country?: unknown }>().catch(() => ({}) as { country?: unknown });
+  if (body.country !== null && !isCountry(body.country)) return c.json({ error: "country must be an ISO 3166-1 alpha-2 code, or null" }, 400);
+  await c.env.DB.prepare(`UPDATE users SET country = ? WHERE id = ?`).bind(body.country, c.get("userId")).run();
+  return c.json({ ok: true });
 });
 
 app.patch("/me/identity", requireAuth, async (c) => {
