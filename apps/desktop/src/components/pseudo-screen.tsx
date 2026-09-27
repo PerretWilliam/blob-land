@@ -1,4 +1,4 @@
-import type { Identity } from "@blob-land/sim";
+import { MAX_NAME_LENGTH, type Identity } from "@blob-land/sim";
 import { useState } from "react";
 import { IdentityFields } from "@/components/blob-gender";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ export function PseudoScreen({ onChosen }: PseudoScreenProps) {
         <input
           className="rounded-md border bg-transparent px-3 py-2 text-sm"
           placeholder="pseudo"
+          maxLength={MAX_NAME_LENGTH}
           value={pseudo}
           onChange={(e) => setPseudo(e.target.value)}
           autoFocus

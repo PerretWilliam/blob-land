@@ -65,12 +65,21 @@ const PAD = 8;
  */
 const TEX_PER_PACK = 1;
 // The whole island baked into one picture for the zoomed-out map: its longest side, in px.
-const BAKE_PX = 4096;
+const BAKE_PX = 6144;
 // On-screen size of a map dot, in CSS px: everyone's, and the player's own.
 const DOT_PX = 7;
 const HOME_DOT_PX = 12;
 // Grounds are grouped in square chunks of this many cells a side, mounted as they come into view.
 export const CHUNK = 8;
+/*
+ * On a big map, past this many cells in view, the scene shows the map
+ * instead: the island baked in one picture, with blobs as dots, which is all
+ * you can make out from that far anyway.
+ */
+export const MAP_CELLS = 8000;
+// Names and meeting effects are HTML, costly by the hundred and unreadable from
+// far off: past this many cells in view, blobs go on without them.
+export const NAME_CELLS = 2500;
 // Sprites reach this far past the grid points they hang off (trees, stacks), in pack px.
 const CHUNK_PAD = 420;
 
@@ -271,6 +280,8 @@ function terrainOf(layout: IslandLayout, island: IslandGeometry): Map<string, Ch
 // Textures outlive a world: the garden and the island share them, and
 // switching between the two shouldn't load them again.
 const textures = new Map<string, Promise<Texture>>();
+// The same, once loaded: what's here can be drawn in this very frame.
+const loadedTextures = new Map<string, Texture>();
 /** A sprite file, for drawing `w` pack px wide (at its full size if not given). */
 function textureOf(src: string, w?: number): Promise<Texture> {
   let texture = textures.get(src);
@@ -298,11 +309,16 @@ function textureOf(src: string, w?: number): Promise<Texture> {
       if ("close" in img) img.close();
       const bitmap = await createImageBitmap(canvas);
       return new Texture({ source: new ImageSource({ resource: bitmap, autoGenerateMipmaps: true }) });
-    })().catch((error: unknown) => {
-      // One broken sprite shouldn't keep the whole island from showing.
-      console.error(`Couldn't load the sprite ${src}`, error);
-      return Texture.EMPTY;
-    });
+    })()
+      .catch((error: unknown) => {
+        // One broken sprite shouldn't keep the whole island from showing.
+        console.error(`Couldn't load the sprite ${src}`, error);
+        return Texture.EMPTY;
+      })
+      .then((loaded) => {
+        loadedTextures.set(src, loaded);
+        return loaded;
+      });
     textures.set(src, texture);
   }
   return texture;
@@ -720,6 +736,8 @@ export class World {
     this.bake = null;
     this.chunks = chunks;
     this.island = island;
+    // Baked now, with every texture at hand, so the map shows at once when asked for.
+    this.bakeIsland();
     // The nests, flat on the ground over exactly the squares blobs sleep in.
     this.nests.clear();
     const tiles = layout.size;
@@ -742,7 +760,7 @@ export class World {
         .quadraticCurveTo(...pt(80, 44), ...pt(104, 30))
         .stroke({ color: 0x000000, width: 3 * s, cap: "round" });
     }
-    for (const key of keys) if (chunks.has(key)) void this.mount(key);
+    for (const key of keys) if (chunks.has(key)) this.mount(key);
     if (this.map) this.setMap(true);
   }
 
@@ -750,17 +768,24 @@ export class World {
   showChunks(keys: Iterable<string>) {
     const want = new Set(keys);
     for (const key of [...this.mounted.keys()]) if (!want.has(key)) this.unmount(key);
-    for (const key of want) if (!this.mounted.has(key)) void this.mount(key);
+    for (const key of want) if (!this.mounted.has(key)) this.mount(key);
   }
 
-  private async mount(key: string) {
+  /** Shows a chunk: in this frame when its textures are loaded (the usual case), else once they are. */
+  private mount(key: string) {
     const chunk = this.chunks.get(key);
     if (!chunk) return;
     const sprites: Sprite[] = [];
     this.mounted.set(key, sprites);
-    const loaded = await Promise.all(chunk.items.map((item) => textureOf(item.src)));
-    // Dropped (or the terrain replaced) while loading.
-    if (this.mounted.get(key) !== sprites) return;
+    const ready = chunk.items.map((item) => loadedTextures.get(item.src));
+    if (ready.every((t) => t !== undefined)) return this.place(chunk, sprites, ready as Texture[]);
+    void Promise.all(chunk.items.map((item) => textureOf(item.src))).then((loaded) => {
+      // Dropped (or the terrain replaced) while loading.
+      if (this.mounted.get(key) === sprites) this.place(chunk, sprites, loaded);
+    });
+  }
+
+  private place(chunk: Chunk, sprites: Sprite[], loaded: Texture[]) {
     chunk.items.forEach((item, k) => {
       const sprite = terrainSprite(item, loaded[k]!);
       if (item.z === 0) {
@@ -784,31 +809,29 @@ export class World {
   setMap(map: boolean) {
     this.map = map;
     this.dots.visible = map;
-    if (map && !this.bake) this.bakeIsland();
     if (this.bake) this.bake.visible = map;
   }
 
+  /** The whole island in one picture, for the map. Only big islands have a map. */
   private bakeIsland() {
     const island = this.island;
-    if (!island) return;
+    if (!island || this.chunks.size * CHUNK * CHUNK <= MAP_CELLS) return;
     const scale = Math.min(BAKE_PX / island.w, BAKE_PX / island.h);
     const target = RenderTexture.create({ width: Math.round(island.w * scale), height: Math.round(island.h * scale), autoGenerateMipmaps: true });
     const items = [...this.chunks.values()].flatMap((c) => c.items).sort((a, b) => a.z - b.z || a.seq - b.seq);
     const bake = new Sprite(target);
     bake.scale.set(1 / scale);
+    bake.visible = this.map;
     this.bake = bake;
     this.camera.addChildAt(bake, 0);
     // Every texture was loaded with the terrain.
-    void Promise.all(items.map((item) => textureOf(item.src))).then((loaded) => {
-      if (this.bake !== bake) return;
-      const all = new Container();
-      items.forEach((item, k) => all.addChild(terrainSprite(item, loaded[k]!)));
-      all.scale.set(scale);
-      this.app.renderer.render({ container: all, target, clear: true });
-      // Shown shrunk: the smaller copies the GPU reads from have to be made again from what was drawn.
-      target.source.updateMipmaps();
-      all.destroy({ children: true });
-    });
+    const all = new Container();
+    for (const item of items) all.addChild(terrainSprite(item, loadedTextures.get(item.src) ?? Texture.EMPTY));
+    all.scale.set(scale);
+    this.app.renderer.render({ container: all, target, clear: true });
+    // Shown shrunk: the smaller copies the GPU reads from have to be made again from what was drawn.
+    target.source.updateMipmaps();
+    all.destroy({ children: true });
   }
 
   /** Screen px per pack px, and where pack (0, 0) lands on screen. */

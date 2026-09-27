@@ -7,7 +7,7 @@ import { ATTRACTION_LABELS, IdentityFields, SEX_LABELS } from "@/components/blob
 import { Button } from "@/components/ui/button";
 import { CountryField, countryName } from "@/components/country-field";
 import { AuraFx, InteractionFx, momentAt, type Aura } from "@/components/interaction-fx";
-import { CHUNK, depthZ, FRONT_Z, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
+import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, FRONT_Z, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
 import { cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
 import { useInView } from "@/lib/motion";
 
@@ -79,13 +79,6 @@ const walkZoom = (tiles: number) => Math.max(1, tiles / 8);
 // How many tiles fit across the screen at the camera's starting zoom, on a
 // big map; smaller maps start fully in view.
 const TILES_IN_VIEW = 14;
-/*
- * On a big map only what the camera sees is drawn: the ground in chunks, and
- * the blobs near the screen. Past DRAWN_CELLS cells in view, the map switches
- * to one baked picture of the whole island with blobs as dots, which is all
- * you can make out from that far anyway.
- */
-const DRAWN_CELLS = 2000;
 // Out of view, a blob's position is refreshed once every this many frames.
 const OFFSCREEN_EVERY = 20;
 // Seconds for the displayed position to close ~63% of a jump in the computed
@@ -506,8 +499,9 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
    * ground chunks to draw, whether it's the zoomed-out map, and which blobs.
    * Empty until the first frame has placed the camera.
    */
-  const culled = tiles * tiles > DRAWN_CELLS;
-  const [inView, setInView] = useState({ chunks: [] as string[], map: false, blobs: new Set<string>() });
+  // On a big map only what the camera sees is drawn: the ground in chunks, and the blobs near the screen.
+  const culled = tiles * tiles > MAP_CELLS;
+  const [inView, setInView] = useState({ chunks: [] as string[], map: false, far: false, blobs: new Set<string>() });
   const inViewRef = useRef(inView);
   const seesBlob = (seed: string) => inView.blobs.has(seed);
   /** The screen, in the island's pack px. */
@@ -524,10 +518,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const r = viewRect();
     if (!r || !world) return;
     const prev = inViewRef.current;
-    let { chunks, map } = prev;
+    let { chunks, map, far } = prev;
     const keys: string[] = [];
     for (const [key, b] of world.chunkBounds) if (!culled || (b.x1 > r.x0 && b.x0 < r.x1 && b.y1 > r.y0 && b.y0 < r.y1)) keys.push(key);
-    map = culled && keys.length * CHUNK * CHUNK > DRAWN_CELLS;
+    map = culled && keys.length * CHUNK * CHUNK > MAP_CELLS;
+    far = culled && keys.length * CHUNK * CHUNK > NAME_CELLS;
     const next = map ? [] : keys;
     if (next.join() !== chunks.join()) chunks = next;
     // Blobs a little past the edges too, so they're drawn before they walk in.
@@ -542,8 +537,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     if (chunks !== prev.chunks) world.showChunks(chunks);
     if (map !== prev.map) world.setMap(map);
     const sameBlobs = prev.blobs.size === blobs.size && [...blobs].every((seed) => prev.blobs.has(seed));
-    if (chunks === prev.chunks && map === prev.map && sameBlobs) return;
-    inViewRef.current = { chunks, map, blobs: sameBlobs ? prev.blobs : blobs };
+    if (chunks === prev.chunks && map === prev.map && far === prev.far && sameBlobs) return;
+    inViewRef.current = { chunks, map, far, blobs: sameBlobs ? prev.blobs : blobs };
     setInView(inViewRef.current);
     syncViews();
   }
@@ -814,7 +809,9 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       raf = requestAnimationFrame(loop);
     });
     return () => cancelAnimationFrame(raf);
-  }, [sceneInView, world]);
+    // The loop runs this render's functions, which read the island's size
+    // (whether it's big enough for a map, how far to zoom): a new size, a new loop.
+  }, [sceneInView, world, tiles]);
   // A click reframes at once, and draws.
   useEffect(() => {
     dirty.current = true;
@@ -837,6 +834,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         sceneRef(node);
       }}
       className="absolute inset-0 select-none overflow-hidden"
+      data-view={inView.map ? "map" : inView.far ? "far" : "near"}
       style={{ background: skyGradient(light), transition: "background 2s" }}
       onClickCapture={(e) => {
         if (!dragged.current) return;
@@ -886,7 +884,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       <div ref={overlayRef} className="pointer-events-none absolute inset-0">
         {blobs.map((blob) => {
           // Names only close up (and yours, and the one followed, always).
-          if (blob.seed !== selected && blob.seed !== startAt && (inView.map || !seesBlob(blob.seed))) return null;
+          if (blob.seed !== selected && blob.seed !== startAt && (inView.far || !seesBlob(blob.seed))) return null;
           const moment = moments.get(blob.seed);
           const size = sizeOf(blob);
           return (

@@ -1,4 +1,4 @@
-import type { Identity } from "@blob-land/sim";
+import { MAX_NAME_LENGTH, type Identity } from "@blob-land/sim";
 import { useState } from "react";
 import { CountryField } from "@/components/country-field";
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
         <input
           className="rounded-md border bg-transparent px-3 py-2 text-sm"
           placeholder="pseudo"
+          maxLength={MAX_NAME_LENGTH}
           value={pseudo}
           onChange={(e) => setPseudo(e.target.value)}
           autoFocus
@@ -74,6 +75,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
             <input
               className="rounded-md border bg-transparent px-3 py-2 text-sm"
               placeholder="a friend's pseudo, to live on their island (optional)"
+              maxLength={MAX_NAME_LENGTH}
               value={friend}
               onChange={(e) => setFriend(e.target.value)}
             />

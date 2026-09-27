@@ -1,4 +1,4 @@
-import { gardenSize, isAttraction, isCountry, isSex, REGION_CAP } from "@blob-land/sim";
+import { gardenSize, isAttraction, isCountry, isSex, MAX_NAME_LENGTH, playerPseudo, randomRng, REGION_CAP } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -7,7 +7,7 @@ import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
 import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
-import { isTaken, nameTaken } from "./names";
+import { cleanName, isTaken, nameTaken } from "./names";
 import { region } from "./region";
 import { noTree } from "./tree";
 
@@ -75,10 +75,10 @@ type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attract
 
 app.post("/auth/register", rateLimitAuth, async (c) => {
   const body = await c.req.json<RegisterBody>().catch(() => ({}) as RegisterBody);
-  const pseudo = body.pseudo?.trim();
+  const pseudo = cleanName(body.pseudo);
   const password = body.password;
   if (!pseudo || !password || password.length < 8) {
-    return c.json({ error: "pseudo and a password of at least 8 characters are required" }, 400);
+    return c.json({ error: `a pseudo of 1 to ${MAX_NAME_LENGTH} characters and a password of at least 8 are required` }, 400);
   }
   // Optional: a blob with no sex, drawn to anyone, unless the player says otherwise.
   const [sex, attraction] = [body.sex ?? "none", body.attraction ?? "any"];
@@ -281,12 +281,23 @@ app.post("/__dev/populate", devTools, async (c) => {
   const first = ((await db.prepare(`SELECT MAX(region) AS n FROM blobs`).first<number | null>("n")) ?? -1) + 1;
   const sexes = ["female", "male", "none"] as const;
   const attractions = ["women", "men", "any"] as const;
+  // Names like players pick, free in the garden-wide directory.
+  const { results: names } = await db.prepare(`SELECT name_key FROM blobs`).all<{ name_key: string }>();
+  const taken = new Set(names.map((r) => r.name_key));
+  const freeName = () => {
+    for (;;) {
+      const name = playerPseudo(randomRng);
+      if (taken.has(normalizeSeed(name))) continue;
+      taken.add(normalizeSeed(name));
+      return name;
+    }
+  };
   const made = Array.from({ length: count }, (_, i) => {
     const seed = `load-${crypto.randomUUID().slice(0, 13)}`;
-    return { seed, name: seed, n: into ?? first + Math.floor(i / REGION_CAP), identity: { sex: sexes[i % 3]!, attraction: attractions[(i >> 1) % 3]! } };
+    return { seed, name: freeName(), n: into ?? first + Math.floor(i / REGION_CAP), identity: { sex: sexes[i % 3]!, attraction: attractions[(i >> 1) % 3]! } };
   });
   for (let i = 0; i < made.length; i += 100) {
-    await db.batch(made.slice(i, i + 100).map((b) => db.prepare(`INSERT INTO blobs (seed, name_key, region, born_at) VALUES (?, ?, ?, ?)`).bind(b.seed, b.seed, b.n, now)));
+    await db.batch(made.slice(i, i + 100).map((b) => db.prepare(`INSERT INTO blobs (seed, name_key, region, born_at) VALUES (?, ?, ?, ?)`).bind(b.seed, normalizeSeed(b.name), b.n, now)));
   }
   const byRegion = new Map<number, typeof made>();
   for (const b of made) byRegion.set(b.n, [...(byRegion.get(b.n) ?? []), b]);

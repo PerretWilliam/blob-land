@@ -1,7 +1,5 @@
-import { pick, randomRng, type Rng } from "@blob-land/sim";
+import { MAX_NAME_LENGTH, pick, randomRng, type Rng } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
-
-export const MAX_NAME_LENGTH = 24;
 
 /**
  * Account pseudos and children's names are one namespace, compared on

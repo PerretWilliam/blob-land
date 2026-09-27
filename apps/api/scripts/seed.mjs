@@ -2,14 +2,15 @@
 // any player (each starts living as it joins): `pnpm --filter @blob-land/api seed [count]`.
 const API = process.env.API_URL ?? "http://localhost:8787";
 const count = Number(process.argv[2] ?? 16);
-const NAMES = ["pip", "mochi", "bramble", "tofu", "juniper", "kiwi", "nimbus", "pebble", "saffron", "fig", "clover", "quill", "maple", "zuzu", "wren", "orzo"];
+// Pseudos like players pick (the same styles as the sim's playerPseudo, which a plain node script can't import).
+const NAMES = ["Lucas", "emma", "Hugo", "chloe", "Kenji", "priya", "Mateo", "lena", "Omar", "zoe", "pixel", "Mochi", "nova", "Kiwi", "Jules", "ines"];
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
 let made = 0;
 for (let i = 0; made < count && i < count * 3; i++) {
   const sex = pick(["female", "female", "male", "male", "none"]);
   const attraction = sex === "none" ? "any" : pick(["women", "men", "any"]);
-  const pseudo = `${pick(NAMES)}${Math.floor(Math.random() * 1000)}`;
+  const pseudo = `${pick(NAMES)}${pick(["", "_", ""])}${Math.floor(Math.random() * 100)}`;
   const res = await fetch(`${API}/auth/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },

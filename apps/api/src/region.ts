@@ -1,11 +1,11 @@
-import { isAttraction, isCountry, isSex, randomRng, type Rng } from "@blob-land/sim";
+import { isAttraction, isCountry, isSex, MAX_NAME_LENGTH, randomRng, type Rng } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
 import { gardenView, join, journal, LOOKAHEAD, migrate, regionNumber, relationshipsOf, segmentsOf, step, STEP_EVERY, type Newcomer, type ViewBlob } from "./garden";
-import { cleanName, isTaken, MAX_NAME_LENGTH } from "./names";
+import { cleanName, isTaken } from "./names";
 import { familyTree } from "./tree";
 
 /** What every player of the region is sent, built once per step (see `view`). */

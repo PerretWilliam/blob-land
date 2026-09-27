@@ -1,15 +1,20 @@
 /*
- * The performance bench: a big garden island full of blobs, put through the
- * same scripted moves every run (sitting still, zooming, following a blob,
- * panning fast, by day and by night) while every frame is timed.
+ * The performance bench: the fullest island there is (REGION_CAP blobs on
+ * MAX_GARDEN tiles), put through the same scripted moves every run while
+ * every frame is timed. Twice over: everyone out walking, then everyone in
+ * the middle of a conversation (their effects over their heads); and by
+ * night. Each zoom that costs something is covered: close up, the widest
+ * view still drawn blob by blob, the map, and sweeps across the switch
+ * between the two. It also starts on a small island that grows, as the app
+ * does before the server says how big the garden is.
  *
  * Opened with `#bench` on the dev server, or built into the app with
  * VITE_BENCH=1 (see scripts/bench.mjs, which also reads RAM and CPU).
  * `?size=` and `?n=` change the island and the crowd; `?idle` shows it
- * without playing the moves, to look around by hand (`?night` by night,
- * `?rate=20` with garden time running 20 times faster).
+ * without playing the moves, to look around by hand (`?talk` with everyone
+ * talking, `?night` by night, `?rate=20` with garden time 20 times faster).
  */
-import { seededRng, type Segment } from "@blob-land/sim";
+import { INTERACTIONS, MAX_GARDEN, playerPseudo, REGION_CAP, seededRng, type Segment } from "@blob-land/sim";
 import { BaseDirectory, mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
 import { useEffect, useRef, useState } from "react";
 import { expressionNamed, Scene, type SceneBlob } from "@/components/scene";
@@ -17,37 +22,73 @@ import { useGardenIsland } from "@/lib/use-garden-island";
 
 const params = new URLSearchParams(location.search);
 // Also settable when building the bench app (VITE_BENCH_SIZE, VITE_BENCH_N), which has no URL to pass them in.
-const SIZE = Number(params.get("size") ?? import.meta.env.VITE_BENCH_SIZE ?? 128);
-const COUNT = Number(params.get("n") ?? import.meta.env.VITE_BENCH_N ?? 450);
+const SIZE = Number(params.get("size") ?? import.meta.env.VITE_BENCH_SIZE ?? MAX_GARDEN);
+const COUNT = Number(params.get("n") ?? import.meta.env.VITE_BENCH_N ?? REGION_CAP);
 const IDLE = params.has("idle");
 // Garden time's pace, like the API's TIME_SCALE in dev.
 const RATE = Number(params.get("rate") ?? 1);
+// The island the app shows before the server says the garden's size.
+const FIRST_SIZE = 24;
 
 const HOUR = 60 * 60 * 1000;
-// Garden times the bench plays at: noon, and deep in the night (UTC, like daylight()).
-const NOON = Date.UTC(2026, 0, 1, 12);
-const NIGHT = Date.UTC(2026, 0, 2, 1);
+const SLOT = 10 * 60 * 1000;
+// Garden times the bench plays at (UTC, like daylight()): everyone walking at
+// noon, everyone talking the next noon, and deep in the night.
+const WALK = Date.UTC(2026, 0, 1, 12);
+const TALK = Date.UTC(2026, 0, 2, 12);
+const NIGHT = Date.UTC(2026, 0, 3, 1);
 const EXPRESSIONS = ["idle", "happy", "sleepy", "love", "thinking", "wink"];
+const OUTCOMES = ["good", "good", "meh", "bad"];
 
-/** Everyone wandering the island around both times, the same every run. */
+/** The crowd, the same every run: wandering around WALK and NIGHT, in groups of two to four around TALK. */
 function crowd(): SceneBlob[] {
   const rng = seededRng(7);
-  return Array.from({ length: COUNT }, (_, i) => {
-    const segments: Segment[] = [];
-    for (const base of [NOON, NIGHT]) {
-      for (let t = base - HOUR; t < base + 2 * HOUR; t += 10 * 60 * 1000) {
-        const expression = EXPRESSIONS[Math.floor(rng() * EXPRESSIONS.length)]!;
-        segments.push({ start: t, end: t + 10 * 60 * 1000, activity: rng() < 0.8 ? "explore" : "rest", expression, x: rng(), y: rng(), rng: Math.floor(rng() * 2 ** 31), with: null, detail: null });
+  const segments: Segment[][] = Array.from({ length: COUNT }, () => []);
+  const around = (base: number) => ({ from: base - HOUR, to: base + 2 * HOUR });
+  const expression = () => EXPRESSIONS[Math.floor(rng() * EXPRESSIONS.length)]!;
+  for (const base of [WALK, NIGHT]) {
+    const { from, to } = around(base);
+    for (const list of segments) {
+      for (let t = from; t < to; t += SLOT) {
+        list.push({ start: t, end: t + SLOT, activity: rng() < 0.8 ? "explore" : "rest", expression: expression(), x: rng(), y: rng(), rng: Math.floor(rng() * 2 ** 31), with: null, detail: null });
       }
     }
+  }
+  // Everyone at a meeting, the whole time: groups meet somewhere, then somewhere else.
+  const { from, to } = around(TALK);
+  for (let i = 0; i < COUNT; ) {
+    const group = Array.from({ length: Math.min(COUNT - i, 2 + Math.floor(rng() * 3)) }, (_, k) => i + k);
+    i += group.length;
+    for (let t = from; t < to; t += SLOT) {
+      const [x, y] = [0.05 + rng() * 0.9, 0.05 + rng() * 0.9];
+      const detail = `${INTERACTIONS[Math.floor(rng() * INTERACTIONS.length)]!}:${OUTCOMES[Math.floor(rng() * OUTCOMES.length)]!}`;
+      group.forEach((b, k) => {
+        const angle = (2 * Math.PI * k) / group.length;
+        segments[b]!.push({
+          start: t,
+          end: t + SLOT,
+          activity: "meet",
+          expression: expression(),
+          x: x + Math.cos(angle) * 0.01,
+          y: y + Math.sin(angle) * 0.01,
+          rng: Math.floor(rng() * 2 ** 31),
+          with: group.filter((o) => o !== b).map((o) => `bench-${o}`),
+          detail,
+        });
+      });
+    }
+  }
+  return segments.map((list, i) => {
+    list.sort((a, b) => a.start - b.start);
     return {
       seed: `bench-${i}`,
-      label: `blob ${i}`,
-      segments,
-      expression: expressionNamed(segments[0]!.expression),
+      label: playerPseudo(rng),
+      segments: list,
+      expression: expressionNamed(list[0]!.expression),
       activity: "explore",
       sex: (["female", "male", "none"] as const)[i % 3]!,
       attraction: "any",
+      country: rng() < 0.4 ? (["FR", "JP", "BR", "US", "DE", "IN", "NG", "KR"] as const)[Math.floor(rng() * 8)]! : undefined,
     };
   });
 }
@@ -67,6 +108,10 @@ interface Result {
   tickMs: number;
   renderMs: number;
   drawnPct: number;
+  /** Names shown at the end: all the blobs in view close up, a handful otherwise. */
+  shown: number;
+  /** The view it ended in: near, far or map. */
+  view: string;
 }
 
 // Filled in by the scene's frame loop while it exists.
@@ -85,9 +130,13 @@ let started = false;
 
 const frame = () => new Promise<number>((r) => requestAnimationFrame(r));
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const shown = () => document.querySelectorAll("[data-label]").length;
+/** "near" (names and all), "far" (blobs without names) or "map" (dots): see the scene. */
+const view = () => document.querySelector<HTMLElement>("[data-view]")?.dataset.view ?? "";
 
 /** Times every frame for `ms`, calling `act` each frame with the time elapsed. */
 async function sample(name: string, ms: number, act?: (elapsed: number, n: number) => void): Promise<Result> {
+  Object.assign(profile, { tickMs: 0, renderMs: 0, ticks: 0, renders: 0 });
   const from = Date.now();
   const start = await frame();
   const gaps: number[] = [];
@@ -114,13 +163,16 @@ async function sample(name: string, ms: number, act?: (elapsed: number, n: numbe
     tickMs: round(profile.tickMs / (profile.renders || 1)),
     renderMs: round(profile.renderMs / (profile.renders || 1)),
     drawnPct: Math.round((100 * profile.renders) / (profile.ticks || 1)),
+    shown: shown(),
+    view: view(),
   };
 }
 
 export default function Bench() {
   const [blobs] = useState(crowd);
-  const layout = useGardenIsland(SIZE);
-  const [base, setBase] = useState(params.has("night") ? NIGHT : NOON);
+  const [size, setSize] = useState(IDLE ? SIZE : FIRST_SIZE);
+  const layout = useGardenIsland(size);
+  const [base, setBase] = useState(params.has("night") ? NIGHT : params.has("talk") ? TALK : WALK);
   const [results, setResults] = useState<Result[] | null>(null);
   // The page without the garden first: what the webview costs on its own.
   const [blank, setBlank] = useState(!IDLE);
@@ -136,7 +188,19 @@ export default function Bench() {
       const r = scene().getBoundingClientRect();
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     };
-    const wheel = (deltaY: number) => scene().dispatchEvent(new WheelEvent("wheel", { deltaY, clientX: centre().x, clientY: centre().y, bubbles: true }));
+    const wheel = (deltaY: number) => scene().dispatchEvent(new WheelEvent("wheel", { deltaY, clientX: centre().x, clientY: centre().y, bubbles: true, cancelable: true }));
+    const mapOut = () => wheel(20_000);
+    const closeUp = () => wheel(-20_000);
+    /** From the map, zooms in a notch at a time until blobs are drawn again: the widest view that isn't the map. */
+    const widest = async () => {
+      mapOut();
+      await wait(1500);
+      for (let i = 0; i < 200 && view() === "map"; i++) {
+        wheel(-15);
+        await wait(40);
+      }
+      await wait(1500);
+    };
     const pan = async (name: string) => {
       const c = centre();
       scene().dispatchEvent(new PointerEvent("pointerdown", { button: 0, clientX: c.x, clientY: c.y, bubbles: true }));
@@ -148,30 +212,28 @@ export default function Bench() {
       window.dispatchEvent(new PointerEvent("pointerup", {}));
       return result;
     };
-    const run = async () => {
-      const out: Result[] = [];
-      await wait(1000);
-      out.push(await sample("blank page", 3000));
-      setBlank(false);
-      await wait(3000); // Sprites load, the camera settles.
-      wheel(4000);
+    /** The same round at whatever time it is: still at every zoom, then moving. */
+    const round = async (label: string, out: Result[], extra: boolean) => {
+      closeUp();
       await wait(1500);
-      out.push(await sample("map, idle", 4000));
-      wheel(-4000);
+      out.push(await sample(`${label}: close up`, 4000));
+      await widest();
+      out.push(await sample(`${label}: widest before map`, 4000));
+      out.push(await pan(`${label}: widest, pan`));
+      mapOut();
       await wait(1500);
-      out.push(await sample("close up, idle", 4000));
-      out.push(await sample("zoom sweep", 4000, (e) => wheel(e < 2000 ? 25 : -25)));
-      let jumped = false;
+      out.push(await sample(`${label}: map`, 4000));
+      // Close up to the map and back, slowly: across the switch both ways.
+      out.push(await sample(`${label}: zoom sweep`, 6000, (e) => wheel(e < 3000 ? -12 : 12)));
+      if (!extra) return;
       out.push(
-        await sample("zoom jump", 4000, (e, n) => {
-          if (n === 0) wheel(4000);
-          else if (e > 2000 && !jumped) {
-            jumped = true;
-            wheel(-4000);
-          }
+        await sample(`${label}: zoom jump`, 4000, (e, n) => {
+          if (n === 0) closeUp();
+          else if (e > 2000 && e < 2100) mapOut();
         }),
       );
-      await wait(1000);
+      closeUp();
+      await wait(1500);
       // The blob nearest the middle of the screen.
       const c = centre();
       const distance = (el: HTMLElement) => {
@@ -179,13 +241,31 @@ export default function Bench() {
         return Math.hypot(r.x - c.x, r.y - c.y);
       };
       const near = [...document.querySelectorAll<HTMLElement>("[data-label]")].sort((a, b) => distance(a) - distance(b))[0];
-      out.push(await sample("follow a blob", 4000, (_e, n) => n === 0 && near?.querySelector("p")?.click()));
-      out.push(await sample("let go", 3000, (_e, n) => n === 0 && scene().click()));
-      out.push(await pan("fast pan"));
-      setBase(NIGHT);
+      out.push(await sample(`${label}: follow a blob`, 4000, (_e, n) => n === 0 && near?.querySelector("p")?.click()));
+      out.push(await sample(`${label}: let go`, 3000, (_e, n) => n === 0 && scene().click()));
+      out.push(await pan(`${label}: close up, pan`));
+    };
+    const at = async (time: number) => {
+      setBase(time);
+      await wait(2500); // The scene comes back for the new time: sprites, camera.
+    };
+    const run = async () => {
+      const out: Result[] = [];
+      await wait(1000);
+      out.push(await sample("blank page", 3000));
+      setBlank(false);
       await wait(2000);
-      out.push(await sample("night, close up", 4000));
-      out.push(await pan("night, fast pan"));
+      // The small island first, then the full size, as when the app opens.
+      setSize(SIZE);
+      await wait(3000);
+      mapOut();
+      await wait(1500);
+      out.push(await sample("grown island: map", 3000));
+      await round("walking", out, true);
+      await at(TALK);
+      await round("talking", out, true);
+      await at(NIGHT);
+      await round("night", out, false);
       setResults(out);
       const report = { size: SIZE, blobs: COUNT, userAgent: navigator.userAgent, at: new Date().toISOString(), results: out };
       (window as unknown as { __bench: unknown }).__bench = report;
@@ -209,6 +289,7 @@ export default function Bench() {
               <th>p95</th>
               <th>max</th>
               <th>jank %</th>
+              <th>view</th>
             </tr>
           </thead>
           <tbody>
@@ -220,6 +301,7 @@ export default function Bench() {
                 <td>{r.p95Ms}</td>
                 <td>{r.maxMs}</td>
                 <td>{r.jank}</td>
+                <td>{r.view}</td>
               </tr>
             ))}
           </tbody>

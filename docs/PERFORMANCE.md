@@ -21,18 +21,26 @@ pnpm --filter @blob-land/desktop bench --skip-build # run the last bench build a
 ```
 
 The bench (`apps/desktop/src/bench`) opens the app on a blank page first
-(what the webview costs on its own), then on a 128×128 island with 450 blobs,
-and plays the same moves every time: map and close-up at rest, a zoom sweep,
-a zoom jump, following a blob and letting go, fast panning, by day and by
-night. The page times every frame and the scene's own work in it (`move ms`,
-`draw ms`, and how many frames it actually drew); `scripts/bench.mjs` samples
+(what the webview costs on its own), then on the fullest island there is: 450
+blobs on 128×128, with players' kinds of pseudos. It starts on the small
+island the app shows before the server says the garden's size, and grows it.
+Then the same round three times, with everyone walking, everyone in the middle
+of a conversation (the effects over their heads), and by night: close up, the
+widest view still drawn blob by blob, panning there, the map, a slow zoom
+sweep across the switch to the map, and (by day) a zoom jump, following a
+blob, letting go and a fast pan. The page times every frame and the scene's
+own work in it (`move ms`, `draw ms`, and how many frames it actually drew),
+and says which view each scenario ended in (`near` with names, `far` without,
+`map` with dots) and how many names were shown; `scripts/bench.mjs` samples
 CPU and RAM of the app and its WebKit processes from outside, split into the
 page (JS, DOM, images) and WebKit's GPU process (WebGL, compositing). macOS
-only. `VITE_BENCH_SIZE` and `VITE_BENCH_N` change the island and the crowd.
+only; keep its window in front while it runs, as a hidden webview slows its
+frames down. `VITE_BENCH_SIZE` and `VITE_BENCH_N` change the island and the crowd.
 
 In a browser, open the dev server with `#bench` for the frame timings alone;
 `?idle#bench` shows the same island without playing the moves, to look around
-by hand, `?night` by night, `?size=` and `?n=` another island and crowd.
+by hand, `?talk` with everyone talking, `?night` by night, `?rate=20` with
+garden time 20 times faster, `?size=` and `?n=` another island and crowd.
 
 ## Baseline — 2026-09-27, before the WebGL renderer
 
@@ -132,3 +140,26 @@ sprites far from the camera), to be measured after the API work.
   request it serves, even a bare "hello" Worker (~10 KB each), and dies near
   1.5 GB: the load test sends a fixed number of requests, not a duration.
   Numbers from Cloudflare's network need a deployed API (not yet: no D1 id).
+
+## Zooming out on a full island — 2026-09-27
+
+The map (dots on one baked picture of the island) used to take over past
+2 000 cells in view, about an eighth of a full island: too soon, and its
+picture (4 096 px across) was blown up 2.3× on a Retina screen there. Every
+size change also left the frame loop with the first island's size, so a
+garden that opened on the small placeholder island never switched to the map
+at all, and drew all 450 blobs with their names when zoomed out.
+
+Now, on a full island with everyone talking (release build, M-series Mac):
+
+| Threshold | Widest view before the map | CPU there | Jank |
+|---|---|---|---|
+| Map past 2 000 cells | ~40 blobs, named | 42 % | 0 |
+| Map past 8 000 cells, names everywhere | ~190 blobs, named | 191 % | 17 % |
+| Map past 8 000, names within 2 500 | ~190 blobs, 0 names | 54 % | 0 |
+
+Names and meeting effects are HTML: a few hundred of them are what costs, not
+the blobs (under 3 ms a frame to move and draw at the widest). So from
+2 500 cells on, blobs go on without them, and the map comes at 8 000 cells,
+half the island, with a 6 144 px picture that's about 1:1 there. Every
+scenario holds 60 fps, jank ≤ 3 %, CPU ≤ 61 %, RAM steady at ~800 MB.

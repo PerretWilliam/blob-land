@@ -6,6 +6,8 @@ export {
   isAttraction,
   isSex,
   randomIdentity,
+  MAX_NAME_LENGTH,
+  playerPseudo,
   randomPersonality,
   SEXES,
   type Attraction,

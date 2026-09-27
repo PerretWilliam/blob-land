@@ -1,3 +1,4 @@
+import { MAX_NAME_LENGTH } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
 import { Check, Heart, Network, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -183,7 +184,7 @@ function RenameForm({ initial, onRename, onDone }: { initial: string; onRename: 
           onFocus={(e) => e.target.select()}
           aria-label="New name"
           aria-invalid={error ? true : undefined}
-          maxLength={24}
+          maxLength={MAX_NAME_LENGTH}
           className="h-6 min-w-0 flex-1 rounded border bg-background px-1.5 text-xs"
           value={value}
           onChange={(e) => setValue(e.target.value)}

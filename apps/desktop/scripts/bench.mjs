@@ -20,7 +20,7 @@ const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BINARY = join(APP_DIR, "src-tauri/target/release/blob-land-desktop");
 const DATA = join(homedir(), "Library/Application Support/dev.blobland.desktop");
 const REPORT = join(DATA, "bench.json");
-const TIMEOUT_MS = 180_000;
+const TIMEOUT_MS = 400_000;
 const EVERY_MS = 500;
 
 const args = process.argv.slice(2);
@@ -96,6 +96,9 @@ const rows = report.results.map((r) => {
     "move ms": r.tickMs,
     "draw ms": r.renderMs,
     "drawn %": r.drawnPct,
+    // Where it ended: near (names), far (blobs, no names), map (dots); and how many names.
+    view: r.view,
+    names: r.shown,
     "CPU %": during.length ? round(during.reduce((s, x) => s + x.cpu, 0) / during.length) : null,
     "RAM MB": during.length ? Math.round(Math.max(...during.map((s) => s.rssMB))) : null,
     // Of which the page (JS, DOM, images) and WebKit's GPU process (WebGL, compositing).

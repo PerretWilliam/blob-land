@@ -1,4 +1,4 @@
-import { between, weighted, type Rng } from "./rng";
+import { between, pick, weighted, type Rng } from "./rng";
 
 export const SEXES = ["female", "male", "none"] as const;
 export type Sex = (typeof SEXES)[number];
@@ -38,6 +38,38 @@ export function drawnTo(a: Identity, b: Identity): boolean {
 
 /** Romance needs both ways; otherwise the best it gets is best friends. */
 export const compatible = (a: Identity, b: Identity) => drawnTo(a, b) && drawnTo(b, a);
+
+/** The longest a pseudo or a blob's name can be: short enough to read over a blob's head. */
+export const MAX_NAME_LENGTH = 16;
+
+const FIRST_NAMES = [
+  "Lucas", "Emma", "Hugo", "Chloé", "Louis", "Léa", "Nathan", "Manon", "Jules", "Camille", "Theo", "Inès", "Noah", "Zoé", "Adam", "Jade",
+  "Liam", "Olivia", "Mateo", "Sofia", "Kenji", "Yuki", "Aiko", "Ravi", "Priya", "Omar", "Amira", "Tariq", "Lena", "Jonas", "Mila", "Finn",
+  "Elif", "Can", "Sven", "Astrid", "Diego", "Lucía", "Marco", "Giulia", "Ana", "João", "Kofi", "Ama", "Min", "Seo-yeon", "Mei", "Wei",
+  "Nina", "Oscar", "Ruby", "Leo", "Iris", "Max", "Luna", "Sam", "Alex", "Charlie", "Robin", "Eden", "Noor", "Maya", "Tom", "Anna",
+];
+const NICKNAMES = [
+  "pixel", "mochi", "nova", "kiwi", "bubble", "pepper", "echo", "biscuit", "comet", "sunny", "tofu", "maple", "ziggy", "pudding", "sprout", "nimbus",
+  "cosmo", "peanut", "frost", "marble", "juniper", "gizmo", "noodle", "clover", "sparrow", "waffle", "orbit", "cinder", "pebble", "fable",
+];
+
+/**
+ * A pseudo like players pick: a first name as is, lowercased, with a year
+ * or an initial, or a nickname. Never over MAX_NAME_LENGTH. For filling a
+ * garden with made-up players (dev tools, the bench); not guaranteed unique.
+ */
+export function playerPseudo(rng: Rng): string {
+  const name = pick(rng, rng() < 0.7 ? FIRST_NAMES : NICKNAMES);
+  const cased = rng() < 0.5 ? name.toLowerCase() : name.charAt(0).toUpperCase() + name.slice(1);
+  const style = rng();
+  const pseudo =
+    style < 0.35 ? cased
+    : style < 0.6 ? `${cased}${Math.floor(rng() * 100).toString().padStart(2, "0")}`
+    : style < 0.75 ? `${cased}_${"abcdefghijklmnoprstvz"[Math.floor(rng() * 21)]}`
+    : style < 0.9 ? `${cased}${1985 + Math.floor(rng() * 25)}`
+    : `the${name.charAt(0).toUpperCase()}${name.slice(1).toLowerCase()}`;
+  return pseudo.slice(0, MAX_NAME_LENGTH);
+}
 
 export function randomPersonality(rng: Rng): Personality {
   return { sociability: rng(), temper: rng(), playfulness: rng(), romance: rng(), chronotype: rng() };
