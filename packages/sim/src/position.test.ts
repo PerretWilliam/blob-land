@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstSegment, liveThrough, nextSolo, type Segment } from "./life";
-import { gardenSize, MAX_GARDEN, MIN_GARDEN, NEST, positionOn, REGION_CAP } from "./position";
+import { gardenSize, legIn, MAX_GARDEN, MIN_GARDEN, NEST, positionOn, REGION_CAP } from "./position";
 import { seededRng } from "./rng";
 
 const T0 = Date.UTC(2026, 8, 25, 8);
@@ -59,5 +59,14 @@ describe("gardenSize", () => {
     expect(gardenSize(10_000)).toBe(MAX_GARDEN);
     // A full region is just about as big as an island gets.
     expect(gardenSize(REGION_CAP)).toBeGreaterThanOrEqual(MAX_GARDEN - 8);
+  });
+});
+
+describe("legIn", () => {
+  it("gets a blob to its meeting within its first third, however far", () => {
+    const meet: Segment = { start: T0, end: T0 + 6 * 60_000, activity: "meet", expression: "idle", x: 0.9, y: 0.9, rng: 1, with: ["b"], detail: "chat:good" };
+    const at = (share: number) => legIn(meet, { x: 0.1, y: 0.1 }, T0 + share * 6 * 60_000, undefined, 16).e;
+    expect(at(0.2)).toBeLessThan(1);
+    expect(at(0.35)).toBe(1);
   });
 });

@@ -7,7 +7,7 @@ import { ATTRACTION_LABELS, IdentityFields, SEX_LABELS } from "@/components/blob
 import { Button } from "@/components/ui/button";
 import { CountryField, countryName } from "@/components/country-field";
 import { AuraFx, InteractionFx, momentAt, type Aura } from "@/components/interaction-fx";
-import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, FRONT_Z, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
+import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
 import { cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
 import { useInView } from "@/lib/motion";
 
@@ -151,19 +151,22 @@ const FREE = new Set<Activity>(["explore", "rest", "discover"]);
  * routed around cliffs and water. A couple who are both free walks together,
  * converging on the midpoint of their two own positions.
  */
-function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]))): GroundPoint[] {
+/** Where a blob should stand, and whether it's still on its way to a meeting (its show waits till it's there). */
+type Target = GroundPoint & { comingToMeet?: boolean };
+
+function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]))): Target[] {
   const zoom = walkZoom(layout.size);
   const gap = PAIR_GAP / zoom;
-  const ps = blobs.map((b) => {
+  const ps = blobs.map((b): Target => {
     // Each to its own nest at night.
     const home = homeNest(layout, b.seed, b.partner);
     const snap = (p: GroundPoint) => snapToGround(layout, p, home);
     const at = segmentAt(b.segments, t, snap);
     if (!at) return { x: 0.5, y: 0.5 };
     if (t >= at.seg.end) return snap({ x: at.seg.x, y: at.seg.y });
-    const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, t, segmentsOf, snap) : null;
+    const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, t, segmentsOf, snap, zoom) : null;
     const { from, to, e } = legIn(at.seg, at.from, t, spot ? () => spot : snap, zoom);
-    return alongPath(findPath(layout, from, to), e);
+    return { ...alongPath(findPath(layout, from, to), e), comingToMeet: spot !== null && e < 1 };
   });
   const index = new Map(blobs.map((b, i) => [b.seed, i]));
   const clamp = (v: number) => Math.min(1 - gap, Math.max(gap, v));
@@ -183,16 +186,18 @@ function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf
 /**
  * Where a blob stands in a meeting: the spot the sim gave it, moved along
  * with the whole gathering if its middle isn't somewhere blobs can stand (a
- * tree, water). Snapping each blob on its own would scatter them.
+ * tree, water). Snapping each blob on its own would scatter them. The sim's
+ * ring is in garden units: shrunk by `zoom`, like a couple's gap, so a
+ * gathering stands as close on a big island as on a small one.
  *
  * ponytail: the walk into the next segment starts from the unmoved spot, a
  * small hop when a gathering had to move; carry the offset over if it shows.
  */
-function meetingSpot(seg: Segment, t: number, segmentsOf: Map<string, Segment[]>, snap: (p: GroundPoint) => GroundPoint): GroundPoint {
+function meetingSpot(seg: Segment, t: number, segmentsOf: Map<string, Segment[]>, snap: (p: GroundPoint) => GroundPoint, zoom: number): GroundPoint {
   const spots = [seg, ...(seg.with ?? []).flatMap((s) => segmentAt(segmentsOf.get(s) ?? [], t)?.seg ?? [])].filter((x) => x.end === seg.end);
   const mid = { x: spots.reduce((a, x) => a + x.x, 0) / spots.length, y: spots.reduce((a, x) => a + x.y, 0) / spots.length };
   const moved = snap(mid);
-  return { x: moved.x + seg.x - mid.x, y: moved.y + seg.y - mid.y };
+  return { x: moved.x + (seg.x - mid.x) / zoom, y: moved.y + (seg.y - mid.y) / zoom };
 }
 
 export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations, startAt }: SceneProps) {
@@ -351,7 +356,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     if (!world) return;
     const f = feet(p);
     const followed = seed === selectedRef.current;
-    world.blobs.get(seed)?.place(f.x, f.y, followed ? FRONT_Z : depthZ(layoutRef.current.size, p.x, p.y) + 0.5);
+    // The one followed too: behind a hill, it's hidden like any other (its name stays on top).
+    world.blobs.get(seed)?.place(f.x, f.y, depthZ(layoutRef.current.size, p.x, p.y) + 0.5);
     const { map, blobs: seen } = inViewRef.current;
     if (map && !followed && seen.has(seed)) world.dot(seed, seed === startAt, f.x, f.y);
     const label = labels.current.get(seed);
@@ -775,7 +781,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           if (g.walk > 0.01) g.phase += dt * Math.PI * HOP_HZ;
           gait.current.set(b.seed, g);
           applyGait(b.seed, g);
-          arrived(b.seed, g.walk < 0.15, now);
+          arrived(b.seed, g.walk < 0.15 && !ps[i]!.comingToMeet, now);
         });
         dirty.current = true;
       }
@@ -898,9 +904,9 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
               {/* The effects zoom with the world, from the blob's feet. */}
               <div className="absolute top-0 left-0 origin-top-left" style={{ transform: "scale(var(--camera-zoom, 1))" }}>
                 {moment ? (
-                  <InteractionFx moment={moment} size={size} bottom={blobSize * 0.84 + 14} />
+                  <InteractionFx moment={moment} size={size} />
                 ) : blob.aura ? (
-                  <AuraFx aura={blob.aura} size={size} bottom={blobSize * 0.84 + 14} />
+                  <AuraFx aura={blob.aura} size={size} />
                 ) : null}
               </div>
               {/* Clicking a name selects its blob, even one hidden behind another. */}

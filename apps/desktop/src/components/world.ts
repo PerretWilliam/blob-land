@@ -114,8 +114,6 @@ export function depthZ(tiles: number, x: number, y: number) {
   const [i, j] = [Math.min(tiles - 1, Math.floor(u)), Math.min(tiles - 1, Math.floor(v))];
   return cellZ(i + j) + 1 + Math.round((u - i + (v - j)) * 490);
 }
-// The one being followed comes to the front, even from behind a crowd.
-export const FRONT_Z = 199_999;
 
 // Sprites are exported at 2x from the pack's SVG; `w` is the native width, in
 // the same pack pixels as the tile geometry.

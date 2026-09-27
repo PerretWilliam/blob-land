@@ -35,6 +35,8 @@ export type Snap = (p: GroundPoint) => GroundPoint;
 const LEG_MS = 45_000;
 // Ground units per ms when walking to a single spot (rest, meet, bed).
 const STROLL = 0.02 / 1000;
+// Blobs hurry to a meeting: there within this share of it, however far, so they spend it together.
+const MEET_ARRIVAL = 0.35;
 
 const smoothstep = (p: number) => p * p * (3 - 2 * p);
 const same: Snap = (p) => p;
@@ -55,7 +57,7 @@ export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = s
   const local = Math.max(0, t - seg.start);
   const length = Math.max(1, seg.end - seg.start);
   if (seg.activity !== "explore") {
-    const walk = Math.min(length, (Math.hypot(end.x - from.x, end.y - from.y) * zoom) / STROLL);
+    const walk = Math.min(length * (seg.activity === "meet" ? MEET_ARRIVAL : 1), (Math.hypot(end.x - from.x, end.y - from.y) * zoom) / STROLL);
     return { from, to: end, e: walk <= 0 ? 1 : smoothstep(Math.min(1, local / walk)) };
   }
   const legs = Math.max(1, Math.round(length / LEG_MS));
