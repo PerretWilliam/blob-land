@@ -4,6 +4,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GardenScreen } from "@/components/garden-screen";
 import { JoinGardenScreen } from "@/components/join-garden-screen";
+import { MainMenu } from "@/components/main-menu";
 import { PseudoScreen } from "@/components/pseudo-screen";
 import { gardenTime, getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
@@ -22,6 +23,8 @@ export default function App() {
   const [appState, setAppState] = useState<AppState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [joining, setJoining] = useState(false);
+  // Every start opens on the main menu; it says which scene to play.
+  const [playing, setPlaying] = useState<"private" | "garden" | null>(null);
   const [blobs, setBlobs] = useState<GardenBlob[]>([]);
   const [gardenClock, setGardenClock] = useState<GardenClock>(() => ({ at: Date.now(), readAt: Date.now(), rate: 1 }));
   // Which region's island is on screen (null: the player's own), and what the server says about the regions.
@@ -190,8 +193,23 @@ export default function App() {
     );
   }
 
+  if (!playing) {
+    return (
+      <MainMenu
+        seed={appState.localSeed}
+        name={appState.localPseudo}
+        inGarden={appState.account !== null}
+        onPlay={() => setPlaying("private")}
+        onGarden={() => setPlaying("garden")}
+        onJoin={() => setJoining(true)}
+      />
+    );
+  }
+
   return (
     <GardenScreen
+      initialView={playing}
+      onMainMenu={() => setPlaying(null)}
       localPseudo={appState.localPseudo}
       localSeed={appState.localSeed}
       life={appState.life}

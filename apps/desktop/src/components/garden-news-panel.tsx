@@ -45,11 +45,11 @@ export function GardenNewsPanel({ token, onClose }: { token: string; onClose: ()
   return (
     <aside
       aria-label="Garden news"
-      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col rounded-xl border bg-background/85 shadow-lg backdrop-blur-md"
+      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col toon"
     >
-      <header className="flex items-center gap-2 border-b p-3">
+      <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-sun">
         <Newspaper className="size-4" />
-        <h2 className="flex-1 text-sm font-semibold">Garden news</h2>
+        <h2 className="flex-1 text-base font-bold">Garden news</h2>
         <Button variant="ghost" size="icon-sm" aria-label="Close garden news" onClick={onClose}>
           <X />
         </Button>

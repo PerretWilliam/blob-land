@@ -2,6 +2,7 @@ import { activityLog, gardenSize, listNames, segmentAt, type Identity } from "@b
 import {
   BookOpen,
   Check,
+  DoorOpen,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -35,6 +36,10 @@ import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, 
 import { usePrefersReducedMotion } from "@/lib/motion";
 
 export interface GardenScreenProps {
+  /** The scene it opens on. */
+  initialView: "private" | "garden";
+  /** Back to the main menu. */
+  onMainMenu: () => void;
   localPseudo: string;
   localSeed: string;
   /** The private blob's own, locally lived timeline and identity. */
@@ -64,6 +69,8 @@ const STATE_TICK_MS = 5_000;
 const NEWBORN_MS = 30 * 60 * 1000;
 
 export function GardenScreen({
+  initialView,
+  onMainMenu,
   localPseudo,
   localSeed,
   life,
@@ -81,7 +88,7 @@ export function GardenScreen({
   onIslandChange,
 }: GardenScreenProps) {
   // One scene at a time: your own island, or the garden (with you in it).
-  const [view, setView] = useState<"private" | "garden">("private");
+  const [view, setView] = useState(initialView);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [tool, setTool] = useState<IslandTool>("grass");
@@ -182,7 +189,7 @@ export function GardenScreen({
 
       <nav
         aria-label="Menu"
-        className="absolute top-4 left-4 z-10 flex w-max flex-col gap-1 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md"
+        className="absolute top-4 left-4 z-10 flex w-max flex-col gap-1 toon p-1.5"
       >
         <Button
           variant="ghost"
@@ -256,6 +263,9 @@ export function GardenScreen({
 
             <div className="my-1 h-px bg-border" aria-hidden="true" />
 
+            <MenuItem icon={<DoorOpen />} onClick={onMainMenu}>
+              Main menu
+            </MenuItem>
             {inGarden ? (
               <>
                 <MenuItem icon={visible ? <Eye /> : <EyeOff />} onClick={onToggleVisibility}>
@@ -295,7 +305,7 @@ export function GardenScreen({
       {panel === "news" && account ? <GardenNewsPanel token={account.token} onClose={() => setPanel(null)} /> : null}
 
       {editing && !inGarden ? (
-        <div className="absolute bottom-4 left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md">
+        <div className="absolute bottom-4 left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 toon p-1.5">
           <IslandToolbar
             tool={tool}
             onTool={setTool}
@@ -321,11 +331,11 @@ function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["s
   return (
     <aside
       aria-label={`${name}'s journal`}
-      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-72 flex-col rounded-xl border bg-background/85 shadow-lg backdrop-blur-md"
+      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-72 flex-col toon"
     >
-      <header className="flex items-center gap-2 border-b p-3">
+      <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-sky">
         <BookOpen className="size-4" />
-        <h2 className="flex-1 text-sm font-semibold">{name}'s journal</h2>
+        <h2 className="flex-1 text-base font-bold">{name}'s journal</h2>
         <Button variant="ghost" size="icon-sm" aria-label="Close journal" onClick={onClose}>
           <X />
         </Button>
@@ -368,7 +378,7 @@ function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScree
   return (
     <nav
       aria-label="Islands"
-      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md"
+      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 toon p-1.5"
     >
       <Button variant="ghost" size="icon-sm" aria-label="Previous island" disabled={!prev} onClick={() => prev && onVisit(prev.region)}>
         <ChevronLeft />

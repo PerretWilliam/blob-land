@@ -1,6 +1,8 @@
 import { MAX_NAME_LENGTH, type Identity } from "@blob-land/sim";
 import { useState } from "react";
 import { CountryField } from "@/components/country-field";
+import { normalizeSeed } from "blobatar";
+import { MenuScreen } from "@/components/main-menu";
 import { Button } from "@/components/ui/button";
 import { checkPseudo, login, register, type AuthResponse } from "@/lib/api";
 
@@ -46,16 +48,16 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-8">
-      <form onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4 rounded-lg border p-6">
-        <h1 className="text-xl font-semibold">{mode === "login" ? "Log in to your account" : "Join the garden"}</h1>
+    <MenuScreen seed={normalizeSeed(pseudo.trim() || localPseudo)}>
+      <form onSubmit={submit} className="toon flex w-full flex-col gap-3 p-5">
+        <h2 className="text-xl font-bold">{mode === "login" ? "Log in to your account" : "Join the garden"}</h2>
         {mode === "register" ? (
           <p className="text-sm text-muted-foreground">
             Your private blob keeps its own seed either way — joining just grows a public copy in the garden.
           </p>
         ) : null}
         <input
-          className="rounded-md border bg-transparent px-3 py-2 text-sm"
+          className="toon-input"
           placeholder="pseudo"
           maxLength={MAX_NAME_LENGTH}
           value={pseudo}
@@ -63,7 +65,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
           autoFocus
         />
         <input
-          className="rounded-md border bg-transparent px-3 py-2 text-sm"
+          className="toon-input"
           placeholder="password"
           type="password"
           value={password}
@@ -73,7 +75,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
           <>
             <CountryField value={country} onChange={setCountry} />
             <input
-              className="rounded-md border bg-transparent px-3 py-2 text-sm"
+              className="toon-input"
               placeholder="a friend's pseudo, to live on their island (optional)"
               maxLength={MAX_NAME_LENGTH}
               value={friend}
@@ -88,7 +90,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
               <button
                 key={s}
                 type="button"
-                className="rounded-md border px-2 py-1 text-xs"
+                className="rounded-lg border-2 border-ink bg-sun px-2 py-1 text-xs font-semibold shadow-[0_2px_0_var(--ink)]"
                 onClick={() => {
                   setPseudo(s);
                   setSuggestions([]);
@@ -100,20 +102,20 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
             ))}
           </div>
         ) : null}
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" size="lg" disabled={pending}>
           {mode === "login" ? "Log in" : "Join the garden"}
         </Button>
         <button
           type="button"
-          className="text-sm text-muted-foreground underline"
+          className="text-sm font-medium text-muted-foreground underline decoration-2 underline-offset-4 hover:text-ink"
           onClick={() => setMode(mode === "login" ? "register" : "login")}
         >
           {mode === "login" ? "New account? Join instead" : "Already joined? Log in"}
         </button>
-        <button type="button" className="text-sm text-muted-foreground underline" onClick={onCancel}>
+        <button type="button" className="text-sm font-medium text-muted-foreground underline decoration-2 underline-offset-4 hover:text-ink" onClick={onCancel}>
           Not now
         </button>
       </form>
-    </main>
+    </MenuScreen>
   );
 }

@@ -1,6 +1,7 @@
 // Draws the app's icon and banner from the game's own pieces: three blobatars
 // stacked on a small floating island built from the iso sprite pack.
-// Writes brand/{icon,banner}.png; `pnpm tauri icon brand/icon.png` then
+// Writes brand/{icon,banner}.png, and the bare island the main menu floats
+// its blobs on (src/assets/menu-island.png); `pnpm tauri icon brand/icon.png` then
 // makes every platform's icon from icon.png.
 // Needs rsvg-convert (brew install librsvg) and, for the banner, the Fredoka font.
 import { execFileSync } from "node:child_process";
@@ -11,7 +12,6 @@ import { blobatar } from "blobatar";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const iso = join(root, "src/assets/iso");
-const out = join(root, "brand");
 const widths = JSON.parse(readFileSync(join(iso, "widths.json"), "utf8"));
 
 // The world's tile geometry (see src/components/world.ts), in pack pixels.
@@ -75,13 +75,13 @@ function stack(cx, baseY) {
 }
 
 // The scene in pack pixels, with its bounding box.
-function scene() {
+function scene({ blobs = true } = {}) {
   const centre = at(N / 2, N / 2);
-  const s = stack(centre.x, centre.y + 30);
+  const s = blobs ? stack(centre.x, centre.y + 30) : { svg: "", top: Infinity };
   const x0 = -N * HALF_W - 20;
   const x1 = N * HALF_W + 20;
   const y1 = at(N, N).y + (TILE_H - TOP_Y - 2 * HALF_H) + 10;
-  const y0 = Math.min(s.top, at(0, 0).y - 300) - 10;
+  const y0 = Math.min(s.top, at(0, 0).y - (blobs ? 300 : 210)) - 10;
   return { svg: island() + s.svg, x0, y0, w: x1 - x0, h: y1 - y0 };
 }
 
@@ -126,8 +126,20 @@ ${title(0, "url(#word)", 'stroke="#0b1a10" stroke-width="18" stroke-linejoin="ro
 </svg>`;
 }
 
-mkdirSync(out, { recursive: true });
-for (const [name, svg] of [["icon", icon()], ["banner", banner()]]) {
-  execFileSync("rsvg-convert", ["-o", join(out, `${name}.png`)], { input: svg });
-  console.log(`brand/${name}.png`);
+// The menu's island alone, on nothing: the menu stacks live blobs on it.
+function menuIsland() {
+  const sc = scene({ blobs: false });
+  const W = 900;
+  const H = Math.round((W * sc.h) / sc.w);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${fit(sc, 0, 0, W, H)}</svg>`;
+}
+
+mkdirSync(join(root, "brand"), { recursive: true });
+for (const [file, svg] of [
+  ["brand/icon.png", icon()],
+  ["brand/banner.png", banner()],
+  ["src/assets/menu-island.png", menuIsland()],
+]) {
+  execFileSync("rsvg-convert", ["-o", join(root, file)], { input: svg });
+  console.log(file);
 }

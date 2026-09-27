@@ -949,7 +949,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
               </div>
               {/* Clicking a name selects its blob, even one hidden behind another. */}
               <p
-                className="pointer-events-auto absolute flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-full bg-black/35 px-2 py-0.5 text-xs font-medium text-white transition-colors hover:bg-black/60"
+                className="pointer-events-auto absolute flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-full border-2 border-ink bg-card px-2 py-px text-xs font-semibold text-ink shadow-[0_2px_0_var(--ink)] transition-colors hover:bg-sun"
                 style={{ bottom: `calc(${blobSize * 0.84}px * var(--camera-zoom, 1))`, transform: "translateX(-50%)" }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -997,12 +997,12 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         return (
           <aside
             aria-label={`${blob.label}'s ID card`}
-            className="absolute right-4 bottom-4 z-10 w-64 rounded-xl border bg-background/85 p-3 shadow-lg backdrop-blur-md"
+            className="absolute right-4 bottom-4 z-10 w-64 toon p-3"
             onClick={(e) => e.stopPropagation()}
           >
-            <header className="flex items-center gap-2 border-b pb-2">
-              <h2 className="flex-1 truncate text-sm font-semibold">{blob.label}</h2>
-              <button type="button" aria-label="Close" className="text-muted-foreground hover:text-foreground" onClick={() => setSelected(null)}>
+            <header className="-mx-3 -mt-3 flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink bg-grass px-3 py-2">
+              <h2 className="flex-1 truncate text-base font-bold">{blob.label}</h2>
+              <button type="button" aria-label="Close" className="text-ink/70 hover:text-ink" onClick={() => setSelected(null)}>
                 <X className="size-4" />
               </button>
             </header>

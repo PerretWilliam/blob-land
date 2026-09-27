@@ -16,7 +16,7 @@
   "dependencies": {
     "@blob-land/sim": "workspace:*",
     "@blobatar/react": "^2.7.0",
-    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/fredoka": "^5.3.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-autostart": "^2.5.1",

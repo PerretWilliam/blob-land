@@ -116,11 +116,11 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
   return (
     <aside
       aria-label="Relations"
-      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col rounded-xl border bg-background/85 shadow-lg backdrop-blur-md"
+      className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col toon"
     >
-      <header className="flex items-center gap-2 border-b p-3">
+      <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-berry">
         <HeartHandshake className="size-4" />
-        <h2 className="flex-1 truncate text-sm font-semibold">{mine || !root ? "Relations" : `${root.name}'s relations`}</h2>
+        <h2 className="flex-1 truncate text-base font-bold">{mine || !root ? "Relations" : `${root.name}'s relations`}</h2>
         {!mine && seed ? (
           <Button variant="ghost" size="sm" onClick={() => setRoot({ seed, name: "" })}>
             Back to mine
@@ -157,7 +157,7 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search by name"
-                className="h-7 w-full rounded-md border bg-background/60 pr-2 pl-7 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-7 w-full rounded-lg border-2 border-ink bg-white pr-2 pl-7 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </label>
             <label>
@@ -165,7 +165,7 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as Sort)}
-                className="h-7 rounded-md border bg-background/60 px-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-7 rounded-lg border-2 border-ink bg-white px-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {Object.entries(SORTS).map(([key, { label }]) => (
                   <option key={key} value={key}>
