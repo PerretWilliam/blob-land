@@ -11,6 +11,10 @@ updates:
     ignore:
       # Bumped by hand, with tauri-plugin-http in Cargo.toml: the two must match.
       - dependency-name: "@tauri-apps/plugin-http"
+      # The API's tests run in @cloudflare/vitest-pool-workers, which needs
+      # vitest 4: take a new major once the pool supports it.
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies"]
     commit-message:
       prefix: chore
