@@ -7,8 +7,7 @@ This is a solo project under an MIT license, open to outside contributions.
 ```bash
 pnpm install
 pnpm --filter @blob-land/api db:apply   # local D1 schema
-pnpm --filter @blob-land/api dev        # API worker
-pnpm --filter @blob-land/desktop tauri dev
+pnpm dev                                # API worker, its world-step ticker, and the desktop app
 ```
 
 ## Commit messages

@@ -19,9 +19,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the technical stack and dat
 
 ```bash
 pnpm install
-pnpm --filter @blob-land/desktop tauri dev
-pnpm --filter @blob-land/api dev
-pnpm --filter @blob-land/sim test
+pnpm --filter @blob-land/api db:apply   # local D1 schema, once
+pnpm dev                                # API + world-step ticker + desktop app, in parallel
+pnpm -r test
 ```
 
 Each package also has its own README with package-specific commands.
