@@ -1,109 +1,204 @@
-import { childTraits, dayKey, hash01, loveChance, type Parent } from "@blob-land/sim";
+import {
+  firstSegment,
+  randomPersonality,
+  randomRng,
+  stepWorld,
+  type Attraction,
+  type Identity,
+  type Kin,
+  type Relationship,
+  type RelationStatus,
+  type Rng,
+  type Segment,
+  type Sex,
+  type World,
+  type WorldBlob,
+} from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { freeBabyName } from "./names";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const MIN = 60 * 1000;
+const DAY = 24 * 60 * MIN;
+/** How far ahead of now the world is lived, so clients always have something to play. */
+export const LOOKAHEAD = 30 * MIN;
+// A garden asleep for longer than this skips the gap rather than living it.
+const MAX_CATCH_UP = 2 * DAY;
+// Played-back history kept for journals.
+const KEEP_SEGMENTS = 3 * DAY;
+// D1 caps statements per batch; stay well under.
+const BATCH = 100;
 
-interface UserRow {
-  id: string;
-  pseudo: string;
+interface BlobRow {
   seed: string;
+  traits: string | null;
+  born_at: number;
+  adult_at: number;
+  sex: Sex;
+  attraction: Attraction;
+  personality: string;
+  energy: number;
+  mood: number;
+  last: string;
+  parent_a: string | null;
+  parent_b: string | null;
+}
+
+interface RelationshipRow {
+  seed_a: string;
+  seed_b: string;
+  friendship: number;
+  romance: number;
+  tension: number;
+  chemistry: number;
+  status: RelationStatus;
+  kin: Kin | null;
+  ex: number;
+  meetings: number;
+  last_met_at: number | null;
+}
+
+interface UnionRow {
+  id: string;
+  seed_a: string;
+  seed_b: string;
+  started_at: number;
+  last_birth_at: number | null;
+}
+
+/** A new account's blob, grown up and ready to live from `now`. */
+export function newAccountBlob(db: D1Database, userId: string, seed: string, identity: Identity, now: number, rng: Rng = randomRng) {
+  return db
+    .prepare(
+      `INSERT INTO blobs (seed, owner_user_id, born_at, adult_at, sex, attraction, personality, energy, mood, last)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0.9, 0.15, ?)`,
+    )
+    .bind(seed, userId, now, now, identity.sex, identity.attraction, JSON.stringify(randomPersonality(rng)), JSON.stringify(firstSegment(now, rng)));
+}
+
+async function loadWorld(db: D1Database): Promise<World> {
+  const [{ results: blobs }, { results: rels }, { results: unions }] = await Promise.all([
+    db
+      .prepare(
+        `SELECT b.seed, b.traits, b.born_at, b.adult_at, b.sex, b.attraction, b.personality, b.energy, b.mood, b.last,
+                u.seed_a AS parent_a, u.seed_b AS parent_b
+         FROM blobs b LEFT JOIN unions u ON u.id = b.parent_union_id`,
+      )
+      .all<BlobRow>(),
+    db.prepare(`SELECT * FROM relationships`).all<RelationshipRow>(),
+    db.prepare(`SELECT id, seed_a, seed_b, started_at, last_birth_at FROM unions WHERE ended_at IS NULL`).all<UnionRow>(),
+  ]);
+  const world: World = { blobs: new Map(), relationships: new Map(), unions: [] };
+  for (const r of blobs) {
+    const blob: WorldBlob = {
+      seed: r.seed,
+      identity: { sex: r.sex, attraction: r.attraction },
+      personality: JSON.parse(r.personality),
+      bornAt: r.born_at,
+      adultAt: r.adult_at,
+      parents: r.parent_a && r.parent_b ? [r.parent_a, r.parent_b] : null,
+      traits: r.traits ? JSON.parse(r.traits) : null,
+      vitals: { energy: r.energy, mood: r.mood },
+      last: JSON.parse(r.last) as Segment,
+    };
+    world.blobs.set(blob.seed, blob);
+  }
+  for (const r of rels) {
+    const rel: Relationship = {
+      a: r.seed_a,
+      b: r.seed_b,
+      friendship: r.friendship,
+      romance: r.romance,
+      tension: r.tension,
+      chemistry: r.chemistry,
+      status: r.status,
+      kin: r.kin,
+      ex: r.ex === 1,
+      meetings: r.meetings,
+      lastMetAt: r.last_met_at,
+    };
+    world.relationships.set(`${rel.a}|${rel.b}`, rel);
+  }
+  world.unions = unions.map((u) => ({ id: u.id, a: u.seed_a, b: u.seed_b, startedAt: u.started_at, endedAt: null, lastBirthAt: u.last_birth_at }));
+  return world;
 }
 
 /**
- * Pairs up present (seen in the last 24h), free (no active union) users
- * whose deterministic daily roll falls under their loveChance. Concurrent
- * calls can both decide to pair the same two users; the UNIQUE(user_a,
- * user_b, started_at) and partial "one active union per member" indexes in
- * schema.sql reject the loser, so this just ignores that failure.
+ * Lives the whole garden forward to `until` (now + LOOKAHEAD by default)
+ * and stores what happened. Run by the cron trigger only: one writer, so no
+ * two steps ever roll the same stretch of time differently.
+ *
+ * ponytail: loads every blob and every relationship each run — fine for a
+ * few hundred blobs; page by neighbourhood if the garden outgrows that.
  */
-export async function resolvePendingUnions(db: D1Database, now: number): Promise<void> {
-  const day = dayKey(now);
-  const cutoff = now - DAY_MS;
-  const { results } = await db
-    .prepare(
-      `SELECT id, pseudo, seed FROM users
-       WHERE last_seen_at >= ?
-         AND id NOT IN (SELECT user_a FROM unions WHERE ended_at IS NULL)
-         AND id NOT IN (SELECT user_b FROM unions WHERE ended_at IS NULL)`,
-    )
-    .bind(cutoff)
-    .all<UserRow>();
-  const present = results;
+export async function advanceGarden(db: D1Database, now: number, rng: Rng = randomRng, until = now + LOOKAHEAD): Promise<void> {
+  const world = await loadWorld(db);
+  if (world.blobs.size === 0) return;
+  const step = stepWorld(world, until, rng, MAX_CATCH_UP);
 
-  for (let i = 0; i < present.length; i++) {
-    for (let j = i + 1; j < present.length; j++) {
-      const a = present[i]!;
-      const b = present[j]!;
-      const chance = loveChance(a.pseudo, b.pseudo, day);
-      const roll = hash01(`${a.pseudo}|${b.pseudo}|${day}|pair-roll`);
-      if (roll >= chance) continue;
-
-      const [userA, userB] = a.id < b.id ? [a, b] : [b, a];
-      try {
-        await db
-          .prepare(`INSERT INTO unions (id, user_a, user_b, started_at) VALUES (?, ?, ?, ?)`)
-          .bind(crypto.randomUUID(), userA.id, userB.id, now)
-          .run();
-      } catch {
-        // Unique-index conflict: another concurrent request already paired
-        // one of these two. Nothing to do.
-      }
-    }
+  const writes: D1PreparedStatement[] = [];
+  for (const u of step.unionsStarted) {
+    writes.push(db.prepare(`INSERT INTO unions (id, seed_a, seed_b, started_at) VALUES (?, ?, ?, ?)`).bind(u.id, u.a, u.b, u.startedAt));
   }
-}
-
-interface PendingUnionRow {
-  id: string;
-  user_a: string;
-  user_b: string;
-  started_at: number;
-}
-
-async function getParent(db: D1Database, userId: string): Promise<Parent> {
-  const user = await db.prepare(`SELECT seed FROM users WHERE id = ?`).bind(userId).first<{ seed: string }>();
-  if (!user) throw new Error(`union references missing user ${userId}`);
-  // Users are always seed-only parents: only children (in `blobs`) carry
-  // frozen traits, and children can't hold a union of their own yet.
-  return { seed: user.seed, traits: null };
-}
-
-/** Writes the frozen child for any union whose birth delay has passed and
- * that doesn't have a child yet, and ends the union at that moment — a union
- * lasts until its child is born, not via a separate end endpoint. Idempotent:
- * guarded by child_traits IS NULL. */
-export async function resolvePendingBirths(db: D1Database, now: number): Promise<void> {
-  const { results } = await db
-    .prepare(`SELECT id, user_a, user_b, started_at FROM unions WHERE child_traits IS NULL`)
-    .all<PendingUnionRow>();
-
-  for (const union of results) {
-    // Birth 1-7 days after the union starts, deterministic per union.
-    const delay = (1 + hash01(`${union.id}|birth-delay`) * 6) * DAY_MS;
-    const bornAt = union.started_at + delay;
-    if (now < bornAt) continue;
-
-    const [parentA, parentB] = await Promise.all([getParent(db, union.user_a), getParent(db, union.user_b)]);
-    const childSeed = `child:${union.id}`;
-    const traits = childTraits(parentA, parentB, childSeed);
-    const traitsJson = JSON.stringify(traits);
-    const name = await freeBabyName(db, childSeed);
-
-    // Only a duplicate *seed* (a concurrent resolve) is ignored: a name taken
-    // in the meantime fails the whole batch, and the next resolve retries,
-    // rather than silently dropping the child while ending the union.
-    await db
-      .batch([
-        db
-          .prepare(
-            `INSERT INTO blobs (seed, traits, parent_union_id, born_at, name, name_key) VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT(seed) DO NOTHING`,
-          )
-          .bind(childSeed, traitsJson, union.id, bornAt, name, normalizeSeed(name)),
-        db
-          .prepare(`UPDATE unions SET child_traits = ?, ended_at = ? WHERE id = ? AND child_traits IS NULL`)
-          .bind(traitsJson, bornAt, union.id),
-      ])
-      .catch(() => {});
+  // After the inserts: a couple can meet and split within one step.
+  for (const u of step.unionsEnded) writes.push(db.prepare(`UPDATE unions SET ended_at = ? WHERE id = ?`).bind(u.endedAt, u.id));
+  for (const { child, unionId } of step.births) {
+    const name = await freeBabyName(db, rng);
+    writes.push(
+      db.prepare(`UPDATE unions SET last_birth_at = ? WHERE id = ?`).bind(child.bornAt, unionId),
+      db
+        .prepare(
+          `INSERT INTO blobs (seed, name, name_key, traits, parent_union_id, born_at, adult_at, sex, attraction, personality, energy, mood, last)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '{}')`,
+        )
+        .bind(
+          child.seed,
+          name,
+          normalizeSeed(name),
+          JSON.stringify(child.traits),
+          unionId,
+          child.bornAt,
+          child.adultAt,
+          child.identity.sex,
+          child.identity.attraction,
+          JSON.stringify(child.personality),
+        ),
+    );
   }
+  for (const s of step.segments) {
+    writes.push(
+      db
+        .prepare(`INSERT OR REPLACE INTO segments (seed, start, end, activity, expression, x, y, rng, with_seed, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(s.seed, s.start, s.end, s.activity, s.expression, s.x, s.y, s.rng, s.with?.join(",") ?? null, s.detail),
+    );
+  }
+  for (const m of step.meetings) {
+    writes.push(
+      db
+        .prepare(
+          `INSERT INTO interactions (id, seed_a, seed_b, kind, outcome, started_at, ended_at, rng, d_friendship, d_romance, d_tension)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(m.id, m.a, m.b, m.kind, m.outcome, m.start, m.end, m.rng, m.delta.friendship, m.delta.romance, m.delta.tension),
+    );
+  }
+  for (const r of step.relationships) {
+    writes.push(
+      db
+        .prepare(
+          `INSERT OR REPLACE INTO relationships (seed_a, seed_b, friendship, romance, tension, chemistry, status, kin, ex, meetings, last_met_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(r.a, r.b, r.friendship, r.romance, r.tension, r.chemistry, r.status, r.kin, r.ex ? 1 : 0, r.meetings, r.lastMetAt),
+    );
+  }
+  // Only what the step owns (newborns included): identity and visibility belong to the player.
+  for (const blob of world.blobs.values()) {
+    writes.push(
+      db.prepare(`UPDATE blobs SET energy = ?, mood = ?, last = ? WHERE seed = ?`).bind(blob.vitals.energy, blob.vitals.mood, JSON.stringify(blob.last), blob.seed),
+    );
+  }
+  writes.push(db.prepare(`DELETE FROM segments WHERE end < ?`).bind(now - KEEP_SEGMENTS));
+  writes.push(db.prepare(`DELETE FROM interactions WHERE ended_at < ?`).bind(now - KEEP_SEGMENTS));
+
+  for (let i = 0; i < writes.length; i += BATCH) await db.batch(writes.slice(i, i + BATCH));
 }

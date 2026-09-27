@@ -12,12 +12,17 @@
     },
     "fs:allow-read-file",
     "fs:allow-write-file",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
     "fs:allow-mkdir",
     "fs:allow-exists",
     "dialog:allow-open",
     "dialog:allow-save",
     "notification:default",
     "autostart:default",
-    "http:default"
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://localhost:8787/*" }, { "url": "http://127.0.0.1:8787/*" }, { "url": "https://*.workers.dev/*" }]
+    }
   ]
 }

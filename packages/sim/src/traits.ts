@@ -1,5 +1,5 @@
 import { traits as blobatarTraits, type TraitOverrides } from "blobatar";
-import { hash01 } from "./hash";
+import type { Rng } from "./rng";
 
 /** A parent going into a union: an account/seed-only blob has no stored
  * overrides (`traits: null`, its look comes straight from its seed); a child
@@ -70,22 +70,21 @@ function effectiveTraits(parent: Parent): Record<string, number> {
 }
 
 /**
- * A deterministic genetic mix of two parents' effective traits (their stored
- * `blobs.traits`, or their seed's own hash for an unmixed account blob —
- * never recomputed from a seed once a child exists). Categorical keys
- * inherit whole from one parent or the other; continuous keys lerp. Frozen
- * at birth: store the result as-is in `blobs.traits`, never recompute it.
+ * A random genetic mix of two parents' effective traits (their stored
+ * `blobs.traits`, or their seed's own look for an unmixed account blob).
+ * Categorical keys inherit whole from one parent or the other; continuous
+ * keys lerp. Frozen at birth: store the result as-is in `blobs.traits`.
  */
-export function childTraits(parentA: Parent, parentB: Parent, childSeed: string): Record<string, number> {
+export function childTraits(parentA: Parent, parentB: Parent, rng: Rng): Record<string, number> {
   const a = effectiveTraits(parentA);
   const b = effectiveTraits(parentB);
   const child: Record<string, number> = {};
 
   for (const key of GENETIC_KEYS) {
     if (CATEGORICAL_KEYS.has(key)) {
-      child[key] = hash01(`${childSeed}|${key}|pick`) < 0.5 ? a[key]! : b[key]!;
+      child[key] = rng() < 0.5 ? a[key]! : b[key]!;
     } else {
-      const w = hash01(`${childSeed}|${key}|lerp`);
+      const w = rng();
       child[key] = a[key]! + (b[key]! - a[key]!) * w;
     }
   }

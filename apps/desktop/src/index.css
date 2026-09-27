@@ -138,6 +138,12 @@
   }
 }
 
+/* A blob's gender sign lifts with the blob on hover, as blobatar's own .mo-root:hover does
+   (see components/blob-gender.tsx). */
+[data-body]:hover [data-gender] .mo-root {
+  transform: translateY(-1.5px) scale(1.04);
+}
+
 /* A black outline that follows a blob's silhouette (hover / selected, see components/scene.tsx). */
 @utility blob-outline {
   filter: drop-shadow(2px 0 0 #000) drop-shadow(-2px 0 0 #000) drop-shadow(0 2px 0 #000) drop-shadow(0 -2px 0 #000);

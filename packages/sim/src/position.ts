@@ -1,5 +1,5 @@
-import { hash01 } from "./hash";
-import { stateAt } from "./state";
+import type { Segment } from "./life";
+import { seededRng } from "./rng";
 
 /** A point on the ground square, both axes in [0, 1]. The renderer decides
  * the projection (isometric in the desktop app). */
@@ -12,70 +12,65 @@ export interface GroundPoint {
  * Exported so the renderer draws it where blobs sleep. */
 export const NEST = { min: 0.03, max: 0.13 } as const;
 
-// One leg = walk from the previous leg's target to this leg's target, then
-// idle until the leg ends. Fixed length so leg k is O(1) to find from t.
+/** Moves a point the sim picked onto ground the blob can stand on. The sim
+ * doesn't know the terrain (water, trees…); the renderer does. */
+export type Snap = (p: GroundPoint) => GroundPoint;
+
+// One explore stop every ~45s: walk there, pause, go on.
 const LEG_MS = 45_000;
-
-/** Whether a blob may stop at a point — the renderer knows the terrain (water,
- * trees…), the sim doesn't. Walking across anything is still fine. */
-export type Walkable = (p: GroundPoint) => boolean;
-
-// Rerolls before giving up on finding walkable ground (an island that is
-// nearly all water): the last roll stands.
-const TRIES = 12;
-
-function legTarget(seed: string, k: number, walkable: Walkable): GroundPoint & { slow: boolean } {
-  for (let n = 0; ; n++) {
-    const p = rawTarget(seed, k, n ? `|${n}` : "");
-    if (n >= TRIES - 1 || walkable(p)) return p;
-  }
-}
-
-function rawTarget(seed: string, k: number, salt: string): GroundPoint & { slow: boolean } {
-  const { activity, since } = stateAt(seed, k * LEG_MS);
-  const nest = (axis: string) => NEST.min + hash01(`${seed}|nest|${axis}`) * (NEST.max - NEST.min);
-  // Rest/discover spots stay out of the nest corner.
-  const spot = (axis: string) => 0.25 + hash01(`${seed}|spot|${since}|${axis}${salt}`) * 0.7;
-  const leg = (axis: string) => 0.03 + hash01(`${seed}|leg|${k}|${axis}${salt}`) * 0.94;
-  switch (activity) {
-    case "sleep":
-      return { x: nest("x"), y: nest("y"), slow: false };
-    // One spot per segment (keyed on `since`), so every leg of the segment
-    // aims at the same point: the blob walks there slowly, then stays put.
-    case "rest":
-    case "discover":
-      return { x: spot("x"), y: spot("y"), slow: true };
-    case "explore":
-      return { x: leg("x"), y: leg("y"), slow: false };
-  }
-}
+// Ground units per ms when walking to a single spot (rest, meet, bed).
+const STROLL = 0.02 / 1000;
 
 const smoothstep = (p: number) => p * p * (3 - 2 * p);
+const same: Snap = (p) => p;
 
 /**
- * The current leg's endpoints and progress `e` in [0, 1] (eased): where the
- * blob came from, where it's headed, and how far along. Exposed for
- * renderers that need to route the walk between them instead of cutting
- * straight across (see `positionAt`, which just lerps).
+ * The walk inside one segment at `t`, as a leg: where from, where to, how far
+ * along (`e`, eased, in [0, 1]). An explore is a string of stops replayed
+ * from `seg.rng` (the same on every client), ending on the segment's stored
+ * point; anything else is one stroll to it, then standing still.
  */
-export function legAt(seed: string, t: number, walkable: Walkable = () => true): { from: GroundPoint; to: GroundPoint; e: number } {
-  const k = Math.floor(t / LEG_MS);
-  const from = legTarget(seed, k - 1, walkable);
-  const to = legTarget(seed, k, walkable);
-  // Fraction of the leg spent walking; the rest is a pause. Slow legs (the
-  // approach to a rest/discover spot) walk the whole leg instead.
-  const walk = to.slow ? 1 : 0.6 + 0.4 * hash01(`${seed}|walk|${k}`);
-  const e = smoothstep(Math.min(1, (t - k * LEG_MS) / LEG_MS / walk));
-  return { from, to, e };
+export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = same): { from: GroundPoint; to: GroundPoint; e: number } {
+  const end = snap({ x: seg.x, y: seg.y });
+  const local = Math.max(0, t - seg.start);
+  const length = Math.max(1, seg.end - seg.start);
+  if (seg.activity !== "explore") {
+    const walk = Math.min(length, Math.hypot(end.x - from.x, end.y - from.y) / STROLL);
+    return { from, to: end, e: walk <= 0 ? 1 : smoothstep(Math.min(1, local / walk)) };
+  }
+  const legs = Math.max(1, Math.round(length / LEG_MS));
+  const legMs = length / legs;
+  const k = Math.min(legs - 1, Math.floor(local / legMs));
+  // Stops 0..legs-2 are random; the last is the stored end point. Each leg
+  // walks for a random share of its time, then pauses.
+  const rng = seededRng(seg.rng);
+  let prev = from;
+  for (let i = 0; ; i++) {
+    const [x, y, walk] = [0.03 + rng() * 0.94, 0.03 + rng() * 0.94, 0.6 + 0.4 * rng()];
+    const stop = i === legs - 1 ? end : snap({ x, y });
+    if (i === k) return { from: prev, to: stop, e: smoothstep(Math.min(1, (local - k * legMs) / legMs / walk)) };
+    prev = stop;
+  }
 }
 
-/**
- * Where the blob stands on the ground at `t` (epoch ms). Pure in (seed, t),
- * and continuous in t — each leg starts exactly where the previous one
- * ended — so reopening the app never teleports. Every stop lands on
- * `walkable` ground; the nest is assumed to be.
- */
-export function positionAt(seed: string, t: number, walkable: Walkable = () => true): GroundPoint {
-  const { from, to, e } = legAt(seed, t, walkable);
+/** The segment running at `t` (the last one begun), and where the blob stood
+ * when it began. `segments` are one blob's, sorted by start. */
+export function segmentAt(segments: readonly Segment[], t: number, snap: Snap = same): { seg: Segment; from: GroundPoint } | null {
+  let i = segments.length - 1;
+  while (i > 0 && segments[i]!.start > t) i--;
+  const seg = segments[i];
+  if (!seg) return null;
+  const before = segments[i - 1];
+  // Without the one before (the start of a fetched window), it began where it ends.
+  return { seg, from: snap(before ? { x: before.x, y: before.y } : { x: seg.x, y: seg.y }) };
+}
+
+/** Where the blob stands at `t`, played back from its stored segments.
+ * Continuous: every segment starts where the one before it ended. */
+export function positionOn(segments: readonly Segment[], t: number, snap: Snap = same): GroundPoint {
+  const at = segmentAt(segments, t, snap);
+  if (!at) return { x: 0.5, y: 0.5 };
+  if (t >= at.seg.end) return snap({ x: at.seg.x, y: at.seg.y });
+  const { from, to, e } = legIn(at.seg, at.from, t, snap);
   return { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e };
 }

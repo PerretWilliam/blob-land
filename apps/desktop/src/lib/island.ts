@@ -241,6 +241,22 @@ export function canStopAt(island: IslandLayout, p: { x: number; y: number }): bo
   return !cell || (canPass(cell.ground) && !cell.decor);
 }
 
+/** `p` if a blob can stand there, else the middle of the nearest cell it can
+ * stand on — the sim picks points without knowing the terrain. */
+export function snapToGround(island: IslandLayout, p: GroundPoint): GroundPoint {
+  if (canStopAt(island, p)) return p;
+  let best: GroundPoint = p;
+  let bestD = Infinity;
+  for (let j = 0; j < island.size; j++) {
+    for (let i = 0; i < island.size; i++) {
+      const c = { x: (i + 0.5) / island.size, y: (j + 0.5) / island.size };
+      const d = (c.x - p.x) ** 2 + (c.y - p.y) ** 2;
+      if (d < bestD && canStopAt(island, c)) [best, bestD] = [c, d];
+    }
+  }
+  return best;
+}
+
 const cellOf = (size: number, p: GroundPoint) =>
   [Math.min(size - 1, Math.max(0, Math.floor(p.x * size))), Math.min(size - 1, Math.max(0, Math.floor(p.y * size)))] as const;
 

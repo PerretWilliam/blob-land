@@ -1,4 +1,5 @@
 import { exists, mkdir, readTextFile, writeTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
+import { newLife, type LocalLife } from "@/lib/life";
 
 export interface AppSettings {
   visible: boolean;
@@ -26,6 +27,8 @@ export interface AppState {
   lastOpenedAt: number;
   settings: AppSettings;
   account: AccountState | null;
+  /** The private blob's life, lived on this device (see lib/life.ts). */
+  life: LocalLife;
 }
 
 const STATE_FILE = "state.json";
@@ -33,7 +36,9 @@ const STATE_FILE = "state.json";
 export async function loadState(): Promise<AppState | null> {
   if (!(await exists(STATE_FILE, { baseDir: BaseDirectory.AppData }))) return null;
   const text = await readTextFile(STATE_FILE, { baseDir: BaseDirectory.AppData });
-  return JSON.parse(text) as AppState;
+  const state = JSON.parse(text) as Partial<AppState> & Omit<AppState, "life">;
+  // Saved before blobs had a life of their own: start one now.
+  return { ...state, life: state.life ?? newLife({ sex: "none", attraction: "any" }, Date.now()) };
 }
 
 export async function saveState(state: AppState): Promise<void> {

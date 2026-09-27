@@ -1,45 +1,50 @@
-import { eventsOfDay } from "./events";
-import { activityChanges, stateAt } from "./state";
-import { addDays, dayKey } from "./time";
+import { interactionText, type InteractionKind, type Outcome } from "./interactions";
+import type { Segment } from "./life";
 
 export interface JournalEntry {
   at: number;
   text: string;
 }
 
-const MAX_DAYS = 30;
-
-/** Deterministic journal text for the events between two visits, capped at
- * the last ~30 days so a long-absent visitor doesn't get years of backlog. */
-export function journal(seed: string, from: number, to: number): JournalEntry[] {
-  if (to <= from) return [];
-
-  const lastDay = dayKey(to);
-  const earliestDay = addDays(lastDay, -(MAX_DAYS - 1));
-  const firstDay = dayKey(from) < earliestDay ? earliestDay : dayKey(from);
-
+/**
+ * What the blob did, oldest first, read off its stored segments — the
+ * journal you scroll back through. `nameOf` turns a seed met into a name.
+ * Back-to-back explores read as one outing.
+ */
+export function activityLog(segments: readonly Segment[], nameOf: (seed: string) => string = (s) => s): JournalEntry[] {
   const entries: JournalEntry[] = [];
-  for (let day = firstDay; day <= lastDay; day = addDays(day, 1)) {
-    for (const event of eventsOfDay(seed, day)) {
-      if (event.at < from || event.at > to) continue;
-      const text = event.type === "wake" ? "Woke up." : `Found ${event.detail}.`;
-      entries.push({ at: event.at, text });
+  segments.forEach((seg, i) => {
+    const before = segments[i - 1]?.activity;
+    const at = seg.start;
+    // A new blob's zero-length starting point isn't something it did.
+    if (seg.end === seg.start) return;
+    switch (seg.activity) {
+      case "sleep":
+        return entries.push({ at, text: "Fell asleep." });
+      case "wake":
+        return entries.push({ at, text: "Woke up." });
+      case "rest":
+        return entries.push({ at, text: "Took a break." });
+      case "explore":
+        return before === "explore" ? undefined : entries.push({ at, text: "Went exploring." });
+      case "discover":
+        return entries.push({ at, text: `Found ${seg.detail ?? "something"}.` });
+      case "meet": {
+        const [kind, outcome] = (seg.detail ?? "chat:meh").split(":") as [InteractionKind, Outcome];
+        return entries.push({ at, text: interactionText(kind, outcome, seg.with?.length ? listNames(seg.with.map(nameOf)) : "someone") });
+      }
     }
-  }
+  });
   return entries;
 }
 
-/** Everything the blob did in (from, to], oldest first — the journal you can
- * scroll back through, not just the notable bits `journal` notifies about. */
-export function activityLog(seed: string, from: number, to: number): JournalEntry[] {
-  const changes = activityChanges(seed, from, to);
-  return changes.map(({ at, activity }, i) => {
-    const before = i ? changes[i - 1]!.activity : stateAt(seed, from).activity;
-    if (activity === "explore" && before === "sleep") return { at, text: "Woke up." };
-    if (activity === "discover") {
-      const found = eventsOfDay(seed, dayKey(at)).find((e) => e.type === "discover" && e.at === at);
-      return { at, text: found ? `Found ${found.detail}.` : "Found something." };
-    }
-    return { at, text: { sleep: "Fell asleep.", rest: "Took a break.", explore: "Went exploring." }[activity] };
-  });
-}
+/** "A", "A and B", "A, B and C". */
+export const listNames = (names: readonly string[]) =>
+  names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+
+/** The bits worth a notification: waking up, finding things, meeting someone. */
+export const notable = (segments: readonly Segment[], nameOf?: (seed: string) => string) =>
+  activityLog(
+    segments.filter((s) => s.activity === "wake" || s.activity === "discover" || s.activity === "meet"),
+    nameOf,
+  );

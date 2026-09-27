@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.0.0",
   "scripts": {
-    "dev": "pnpm --filter @blob-land/desktop tauri dev",
+    "dev": "pnpm -r --parallel run \"/^dev/\"",
     "sim:test": "pnpm --filter @blob-land/sim test",
     "api:dev": "pnpm --filter @blob-land/api dev",
     "api:test": "pnpm --filter @blob-land/api test",

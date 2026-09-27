@@ -1,14 +1,15 @@
-import { daylight, legAt, NEST, type Activity, type GroundPoint, type Walkable } from "@blob-land/sim";
+import { daylight, legIn, NEST, segmentAt, type Activity, type Attraction, type GroundPoint, type Identity, type Segment, type Sex } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
-import { happy, idle, love, sleepy, surprised, thinking, type Expression } from "blobatar/expression";
-import { Footprints, Moon, Sparkles, Coffee, X } from "lucide-react";
+import * as EXPRESSIONS from "blobatar/expression";
+import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
+import { Coffee, Footprints, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { ATTRACTION_LABELS, BlobGenderSign, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
 import DECOR_WIDTHS from "@/assets/iso/widths.json";
 import {
   canHoldDecor,
-  canStopAt,
   cellAt,
   DECOR_KINDS,
   EDGES,
@@ -17,6 +18,7 @@ import {
   nestCell,
   OPPOSITE_EDGE,
   rampDirection,
+  snapToGround,
   surfaceHeight,
   type DecorKind,
   type Ground,
@@ -27,17 +29,38 @@ import { useInView } from "@/lib/motion";
 export interface SceneBlob {
   seed: string;
   label: string;
+  /** Its stored timeline around now, sorted by start: played back for where it walks. */
+  segments: Segment[];
   expression: Expression;
   /** What it's doing right now, shown as an icon next to its name. */
   activity?: Activity;
-  /** In an active union: walks with its partner instead of on its own. */
-  paired?: boolean;
+  sex: Sex;
+  attraction: Attraction;
+  /** Who it's meeting right now, by name, while its activity is "meet". */
+  meetingWith?: string;
+  /** Its other half, if it's in a couple: they wander together when both are free. */
+  partner?: string | null;
+  /** Its partner's display name, for the ID card. */
+  partnerLabel?: string;
+  /** Still a child. */
+  young?: boolean;
+  /** Set on the player's own blob: lets them change who it is from its ID card. */
+  onIdentityChange?: (identity: Identity) => void;
+}
+
+/** A stored expression name as blobatar's expression object. */
+export const expressionNamed = (name: string): Expression =>
+  (EXPRESSIONS as unknown as Record<string, Expression | undefined>)[name] ?? idle;
+
+/** What a blob is doing and wearing at `t`, read off its timeline. */
+export function blobStateAt(segments: readonly Segment[], t: number): { activity: Activity; expression: Expression; since: number } {
+  const seg = segmentAt(segments, t)?.seg;
+  if (!seg) return { activity: "rest", expression: idle, since: t };
+  return { activity: seg.activity, expression: expressionNamed(seg.expression), since: seg.start };
 }
 
 export interface SceneProps {
   blobs: SceneBlob[];
-  /** Whose sleep window sets the sky — the viewer's own blob. */
-  skySeed: string;
   reducedMotion: boolean;
   /** The walkable ground: which cells are water, what stands where. */
   layout: IslandLayout;
@@ -216,14 +239,6 @@ GROUND_THUMBS.road = piece("road-nw-se");
 GROUND_THUMBS.river = piece("river-nw-se");
 export const RAMP_THUMB = piece("ramp-nw");
 
-/**
- * Where each blob should stand at `t`. Pairs converge on the midpoint of
- * their two free positions, so a couple still wanders — just together.
- *
- * ponytail: /garden only says `paired`, not with whom, so paired blobs are
- * matched in seed order. Wrong when a partner is hidden or on another page;
- * return the partner's seed from /garden if that starts to show.
- */
 /** How far along a `findPath` walk a blob has got at progress `e` in [0, 1]:
  * arc-length along the route, not a straight-line lerp, so a walk bends
  * around cliffs and water instead of cutting through them. */
@@ -245,20 +260,35 @@ function alongPath(path: GroundPoint[], e: number): GroundPoint {
   return path[path.length - 1]!;
 }
 
-function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, walkable: Walkable): GroundPoint[] {
+// Free to wander off with a partner: not asleep, not busy with someone else.
+const FREE = new Set<Activity>(["explore", "rest", "discover"]);
+
+/**
+ * Where each blob should stand at `t`, played back from its timeline and
+ * routed around cliffs and water. A couple who are both free walks together,
+ * converging on the midpoint of their two own positions.
+ */
+function targets(layout: IslandLayout, blobs: SceneBlob[], t: number): GroundPoint[] {
+  const snap = (p: GroundPoint) => snapToGround(layout, p);
   const ps = blobs.map((b) => {
-    const { from, to, e } = legAt(b.seed, t, walkable);
+    const at = segmentAt(b.segments, t, snap);
+    if (!at) return { x: 0.5, y: 0.5 };
+    if (t >= at.seg.end) return snap({ x: at.seg.x, y: at.seg.y });
+    const { from, to, e } = legIn(at.seg, at.from, t, snap);
     return alongPath(findPath(layout, from, to), e);
   });
-  const paired = blobs.map((b, i) => [b.seed, i] as const).filter(([, i]) => blobs[i]!.paired).sort();
+  const index = new Map(blobs.map((b, i) => [b.seed, i]));
   const clamp = (v: number) => Math.min(1 - PAIR_GAP, Math.max(PAIR_GAP, v));
-  for (let j = 0; j + 1 < paired.length; j += 2) {
-    const [a, b] = [paired[j]![1], paired[j + 1]![1]];
-    const mid = { x: clamp((ps[a]!.x + ps[b]!.x) / 2), y: clamp((ps[a]!.y + ps[b]!.y) / 2) };
+  blobs.forEach((b, i) => {
+    const j = b.partner ? index.get(b.partner) : undefined;
+    if (j === undefined || b.seed > blobs[j]!.seed) return;
+    const [sa, sb] = [segmentAt(b.segments, t)?.seg, segmentAt(blobs[j]!.segments, t)?.seg];
+    if (!sa || !sb || !FREE.has(sa.activity) || !FREE.has(sb.activity)) return;
+    const mid = { x: clamp((ps[i]!.x + ps[j]!.x) / 2), y: clamp((ps[i]!.y + ps[j]!.y) / 2) };
     // Side by side along the screen's horizontal, so neither hides the other.
-    ps[a] = { x: mid.x - PAIR_GAP, y: mid.y + PAIR_GAP };
-    ps[b] = { x: mid.x + PAIR_GAP, y: mid.y - PAIR_GAP };
-  }
+    ps[i] = { x: mid.x - PAIR_GAP, y: mid.y + PAIR_GAP };
+    ps[j] = { x: mid.x + PAIR_GAP, y: mid.y - PAIR_GAP };
+  });
   return ps;
 }
 
@@ -276,15 +306,14 @@ function depthZ(tiles: number, p: GroundPoint) {
   return cellZ(i + j) + 1 + Math.round((u - i + (v - j)) * 490);
 }
 
-export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blobScale = 0.6 }: SceneProps) {
+export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6 }: SceneProps) {
   const tiles = layout.size;
   const [sceneRef, sceneInView] = useInView();
-  const [light, setLight] = useState(() => daylight(skySeed, Date.now()));
+  const [light, setLight] = useState(() => daylight(Date.now()));
   useEffect(() => {
-    setLight(daylight(skySeed, Date.now()));
-    const id = setInterval(() => setLight(daylight(skySeed, Date.now())), 60_000);
+    const id = setInterval(() => setLight(daylight(Date.now())), 60_000);
     return () => clearInterval(id);
-  }, [skySeed]);
+  }, []);
 
   const lift = Math.max(0, ...layout.cells.map((c) => (c.height ?? 0) + (c.ramp ? 1 : 0)));
   const island = islandGeometry(tiles, lift);
@@ -310,9 +339,6 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
   };
   const liftRef = useRef(liftAt);
   liftRef.current = liftAt;
-  // Blobs only stop where they can stand: not in water, not inside a tree.
-  const walkableRef = useRef<Walkable>(() => true);
-  walkableRef.current = (p) => canStopAt(layout, p);
   const islandRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLDivElement>(null);
   const cloudsRef = useRef<HTMLDivElement>(null);
@@ -349,8 +375,6 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
   const gait = useRef(new Map<string, Gait>());
   // `lift`: how high the feet are (see liftAt), eased like x/y so stepping
   // into water or up a cliff is a quick slide rather than a jump.
-  // ponytail: blobs don't path through ramps, they hop straight up cliffs;
-  // positionAt would need the terrain to route them.
   const shown = useRef(new Map<string, GroundPoint & { lift: number }>());
 
   /*
@@ -438,7 +462,7 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
       const kCamera = snap ? 1 : 1 - Math.exp(-dt / CAMERA_EASE_S);
       last = now;
       const list = blobsRef.current;
-      const ps = targets(layoutRef.current, list, Date.now(), walkableRef.current);
+      const ps = targets(layoutRef.current, list, Date.now());
       list.forEach((b, i) => {
         const to = { ...ps[i]!, lift: liftRef.current(ps[i]!) };
         const prev = shown.current.get(b.seed);
@@ -493,7 +517,7 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
     let p = shown.current.get(seed);
     if (!p) {
       const i = blobsRef.current.findIndex((b) => b.seed === seed);
-      const g = targets(layoutRef.current, blobsRef.current, Date.now(), walkableRef.current)[i] ?? { x: 0.5, y: 0.5 };
+      const g = targets(layoutRef.current, blobsRef.current, Date.now())[i] ?? { x: 0.5, y: 0.5 };
       p = { ...g, lift: liftRef.current(g) };
       shown.current.set(seed, p);
     }
@@ -599,7 +623,7 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
           }),
         )}
 
-        {/* The nest, flat on the ground over exactly the square positionAt sleeps in. */}
+        {/* The nest, flat on the ground over exactly the square blobs sleep in. */}
         <svg
           aria-hidden="true"
           className="absolute -translate-x-1/2 -translate-y-1/2"
@@ -636,7 +660,7 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
           <SceneBlobView
             key={blob.seed}
             blob={blob}
-            size={blobSize}
+            size={blob.young ? Math.round(blobSize * 0.7) : blobSize}
             reducedMotion={reducedMotion}
             selected={blob.seed === selected}
             onSelect={() => setSelected(blob.seed)}
@@ -655,7 +679,7 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
           >
             <p
               className="absolute flex origin-bottom items-center gap-1 whitespace-nowrap rounded-full bg-black/35 px-2 py-0.5 text-xs font-medium text-white"
-              style={{ bottom: blobSize * 0.72, transform: "translateX(-50%) scale(calc(1 / var(--camera-zoom, 1)))" }}
+              style={{ bottom: blobSize * 0.84, transform: "translateX(-50%) scale(calc(1 / var(--camera-zoom, 1)))" }}
             >
               {blob.label}
               <MoodIcon expression={blob.expression} />
@@ -690,7 +714,7 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
                   {blob.activity ? (
                     <>
                       <ActivityIcon activity={blob.activity} />
-                      {ACTIVITY_LABELS[blob.activity]}
+                      {blob.meetingWith ? `With ${blob.meetingWith}` : ACTIVITY_LABELS[blob.activity]}
                     </>
                   ) : (
                     "—"
@@ -705,8 +729,20 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">Sex</dt>
+                <dd>{SEX_LABELS[blob.sex]}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">Falls for</dt>
+                <dd>{ATTRACTION_LABELS[blob.attraction]}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">Age</dt>
+                <dd>{blob.young ? "Child" : "Grown-up"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
                 <dt className="text-muted-foreground">Status</dt>
-                <dd>{blob.paired ? "Paired up" : "Single"}</dd>
+                <dd className="truncate">{blob.partner ? `With ${blob.partnerLabel ?? "someone"}` : "Single"}</dd>
               </div>
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-muted-foreground">ID</dt>
@@ -715,6 +751,11 @@ export function Scene({ blobs, skySeed, reducedMotion, layout, onCellPaint, blob
                 </dd>
               </div>
             </dl>
+            {blob.onIdentityChange ? (
+              <div className="mt-3 border-t pt-3">
+                <IdentityFields value={{ sex: blob.sex, attraction: blob.attraction }} onChange={blob.onIdentityChange} />
+              </div>
+            ) : null}
           </aside>
         );
       })()}
@@ -823,7 +864,8 @@ function SceneBlobView({
           // Outline on hover or keyboard focus, and kept while the camera follows it.
           // Only the drawn silhouette takes the pointer: the blobatar's box has
           // transparent margins, which made the hover fire before reaching the blob.
-          className={`pointer-events-none origin-[50%_80%] cursor-pointer outline-none will-change-transform hover:blob-outline focus-visible:blob-outline [&_img]:pointer-events-auto [&_svg_*]:pointer-events-auto ${selected ? "blob-outline" : ""}`}
+          // The outline goes on the blobatar alone: its gender sign has its own stroke.
+          className={`pointer-events-none origin-[50%_80%] cursor-pointer outline-none will-change-transform hover:[&>:first-child]:blob-outline focus-visible:[&>:first-child]:blob-outline [&_img]:pointer-events-auto [&_svg:not([data-gender])_*]:pointer-events-auto ${selected ? "[&>:first-child]:blob-outline" : ""}`}
           onClick={(e) => {
             // Don't let the scene's own click (which zooms out) undo this.
             e.stopPropagation();
@@ -841,18 +883,21 @@ function SceneBlobView({
             animate={inView && !reducedMotion ? "always" : undefined}
             expression={blob.expression}
           />
+          <BlobGenderSign seed={blob.seed} sex={blob.sex} size={size} animated={inView && !reducedMotion} />
         </div>
       </div>
     </div>
   );
 }
 
-const ACTIVITY_ICONS = { sleep: Moon, rest: Coffee, explore: Footprints, discover: Sparkles } as const;
+const ACTIVITY_ICONS = { sleep: Moon, wake: Sunrise, rest: Coffee, explore: Footprints, discover: Sparkles, meet: Users } as const;
 export const ACTIVITY_LABELS: Record<Activity, string> = {
   sleep: "Sleeping",
+  wake: "Waking up",
   rest: "Resting",
   explore: "Exploring",
   discover: "Found something",
+  meet: "With someone",
 };
 
 export function ActivityIcon({ activity, className = "size-3" }: { activity: Activity; className?: string }) {
@@ -868,6 +913,13 @@ const MOODS = new Map<Expression, { label: string; emoji: string }>([
   [surprised, { label: "Surprised", emoji: "😮" }],
   [thinking, { label: "Thoughtful", emoji: "🤔" }],
   [love, { label: "In love", emoji: "🥰" }],
+  [sad, { label: "Sad", emoji: "😢" }],
+  [mad, { label: "Angry", emoji: "😠" }],
+  [shy, { label: "Shy", emoji: "😳" }],
+  [wink, { label: "Playful", emoji: "😉" }],
+  [smug, { label: "Smug", emoji: "😏" }],
+  [unsure, { label: "Unsure", emoji: "😕" }],
+  [scared, { label: "Scared", emoji: "😨" }],
 ]);
 export const moodOf = (expression: Expression) => MOODS.get(expression);
 

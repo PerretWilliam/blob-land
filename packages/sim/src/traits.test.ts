@@ -1,47 +1,36 @@
 import { describe, expect, it } from "vitest";
+import { seededRng } from "./rng";
 import { childTraits, type Parent } from "./traits";
 
 const alice: Parent = { seed: "alice", traits: null };
 const bob: Parent = { seed: "bob", traits: null };
 
 describe("childTraits", () => {
-  it("is deterministic and frozen: same inputs always produce the same result", () => {
-    expect(childTraits(alice, bob, "child-1")).toEqual(childTraits(alice, bob, "child-1"));
+  it("replays the same child from the same rng", () => {
+    expect(childTraits(alice, bob, seededRng(1))).toEqual(childTraits(alice, bob, seededRng(1)));
   });
 
-  it("varies with the child seed (siblings aren't clones)", () => {
-    expect(childTraits(alice, bob, "child-1")).not.toEqual(childTraits(alice, bob, "child-2"));
+  it("gives siblings different looks", () => {
+    expect(childTraits(alice, bob, seededRng(1))).not.toEqual(childTraits(alice, bob, seededRng(2)));
   });
 
-  it("never recomputes from a seed for a parent that already has stored traits", () => {
-    // A child-parent's stored traits are the source of truth, not its seed —
-    // two different "effective" trait sets under the same seed must mix
-    // differently.
+  it("mixes a parent's stored traits, not its seed", () => {
     const childParent: Parent = { seed: "shared-seed", traits: { shape: 0.05, hue: 0.9 } };
     const seedOnlyParent: Parent = { seed: "shared-seed", traits: null };
-    expect(childTraits(childParent, bob, "grandchild")).not.toEqual(
-      childTraits(seedOnlyParent, bob, "grandchild"),
-    );
+    expect(childTraits(childParent, bob, seededRng(3))).not.toEqual(childTraits(seedOnlyParent, bob, seededRng(3)));
   });
 
   it("picks categorical keys whole from one parent, never blended", () => {
-    const a = childTraits(alice, bob, "x");
-    // Re-derive what each parent's own value was for a categorical key and
-    // confirm the child landed on exactly one of them.
-    const aOnly = childTraits(alice, alice, "probe-a")["shape"];
-    const bOnly = childTraits(bob, bob, "probe-b")["shape"];
-    expect([aOnly, bOnly]).toContain(a["shape"]);
+    const own = (p: Parent) => childTraits(p, p, seededRng(9))["shape"];
+    for (let s = 0; s < 20; s++) expect([own(alice), own(bob)]).toContain(childTraits(alice, bob, seededRng(s))["shape"]);
   });
 
-  it("lerps continuous keys between both parents' values (inclusive)", () => {
-    const a = childTraits(alice, alice, "probe-a")["hue"]!;
-    const b = childTraits(bob, bob, "probe-b")["hue"]!;
-    const lo = Math.min(a, b);
-    const hi = Math.max(a, b);
-    for (const childSeed of ["c1", "c2", "c3", "c4", "c5"]) {
-      const value = childTraits(alice, bob, childSeed)["hue"]!;
-      expect(value).toBeGreaterThanOrEqual(lo);
-      expect(value).toBeLessThanOrEqual(hi);
+  it("lerps continuous keys between both parents' values", () => {
+    const [a, b] = [childTraits(alice, alice, seededRng(0))["hue"]!, childTraits(bob, bob, seededRng(0))["hue"]!];
+    for (let s = 0; s < 20; s++) {
+      const hue = childTraits(alice, bob, seededRng(s))["hue"]!;
+      expect(hue).toBeGreaterThanOrEqual(Math.min(a, b));
+      expect(hue).toBeLessThanOrEqual(Math.max(a, b));
     }
   });
 });

@@ -17,3 +17,7 @@ simple = { limit = 20, period = 60 }
 
 # JWT_SECRET is a secret, not a var: `wrangler secret put JWT_SECRET`.
 # For local dev/tests, put it in a .dev.vars file (gitignored).
+
+# The world step (src/garden.ts): the only writer of what blobs do.
+[triggers]
+crons = ["*/5 * * * *"]

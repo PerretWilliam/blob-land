@@ -1,3 +1,4 @@
+import type { Attraction, Identity, Kin, RelationStatus, Segment, Sex } from "@blob-land/sim";
 import { fetch } from "@tauri-apps/plugin-http";
 
 // plugin-http issues the request from the Rust side, not the webview, so it
@@ -12,10 +13,19 @@ export interface AuthResponse {
 export interface GardenBlob {
   seed: string;
   pseudo: string | null;
-  paired: boolean;
+  sex: Sex;
+  attraction: Attraction;
+  bornAt: number;
+  /** A child until then. */
+  adultAt: number;
+  /** Who it's in a couple with, if anyone. */
+  partner: string | null;
+  /** Its stored timeline around now, sorted: the scene plays it back. */
+  segments: Segment[];
 }
 
 export interface GardenResponse {
+  now: number;
   blobs: GardenBlob[];
 }
 
@@ -42,8 +52,12 @@ export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
   return request(`/pseudo/${encodeURIComponent(pseudo)}`);
 }
 
-export function register(pseudo: string, password: string): Promise<AuthResponse> {
-  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password }) });
+export function register(pseudo: string, password: string, identity: Identity): Promise<AuthResponse> {
+  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity }) });
+}
+
+export function setIdentity(token: string, identity: Identity): Promise<{ ok: true }> {
+  return request("/me/identity", { method: "PATCH", headers: authHeader(token), body: JSON.stringify(identity) });
 }
 
 export function login(pseudo: string, password: string): Promise<AuthResponse> {
@@ -101,4 +115,22 @@ export function renameChild(token: string, seed: string, name: string): Promise<
     headers: authHeader(token),
     body: JSON.stringify({ name }),
   });
+}
+
+/** GET /blobs/:seed/relationships — public, like the family tree. */
+export interface Relation {
+  seed: string;
+  name: string | null;
+  status: RelationStatus;
+  /** Each in [0, 100]. */
+  friendship: number;
+  romance: number;
+  tension: number;
+  kin: Kin | null;
+  meetings: number;
+  lastMetAt: number | null;
+}
+
+export function getRelationships(seed: string): Promise<{ relationships: Relation[] }> {
+  return request(`/blobs/${encodeURIComponent(seed)}/relationships`);
 }

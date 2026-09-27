@@ -26,20 +26,24 @@ export interface FamilyTree {
   children: { seed: string; name: string | null; born_at: number; depth: number; parents: [ParentInfo, ParentInfo] }[];
 }
 
-// ponytail: depth cap of 10 guards against a future cycle in the data;
-// today's schema can only ever produce depth 1 (children can't pair yet).
+// Guards the recursion against a cycle in the data; generations stack up
+// now that children pair too, but not ten deep any time soon.
 const MAX_DEPTH = 10;
+
+// A blob's display name: a child's own, or its account's pseudo.
+const NAME = `COALESCE(%.name, (SELECT pseudo FROM users WHERE id = %.owner_user_id))`;
+export const nameOf = (alias: string) => NAME.replaceAll("%", alias);
 
 /** Walks the genealogy from `seed` down through `unions`/`blobs` via a
  * recursive CTE, plus the direct parents if `seed` is itself a child. */
 export async function familyTree(db: D1Database, seed: string): Promise<FamilyTree> {
   const parentRow = await db
     .prepare(
-      `SELECT pa.seed AS seed_a, pa.pseudo AS pseudo_a, pb.seed AS seed_b, pb.pseudo AS pseudo_b
+      `SELECT pa.seed AS seed_a, ${nameOf("pa")} AS pseudo_a, pb.seed AS seed_b, ${nameOf("pb")} AS pseudo_b
        FROM blobs b
        JOIN unions u ON u.id = b.parent_union_id
-       JOIN users pa ON pa.id = u.user_a
-       JOIN users pb ON pb.id = u.user_b
+       JOIN blobs pa ON pa.seed = u.seed_a
+       JOIN blobs pb ON pb.seed = u.seed_b
        WHERE b.seed = ?`,
     )
     .bind(seed)
@@ -52,42 +56,38 @@ export async function familyTree(db: D1Database, seed: string): Promise<FamilyTr
          UNION ALL
          SELECT b.seed, t.depth + 1
          FROM tree t
-         JOIN users p ON p.seed = t.seed
-         JOIN unions u ON u.user_a = p.id OR u.user_b = p.id
+         JOIN unions u ON u.seed_a = t.seed OR u.seed_b = t.seed
          JOIN blobs b ON b.parent_union_id = u.id
          WHERE t.depth < ${MAX_DEPTH}
        )
-       SELECT b.seed, b.name, b.born_at, t.depth, pa.seed AS parent_a, pb.seed AS parent_b, pa.pseudo AS pseudo_a, pb.pseudo AS pseudo_b
+       SELECT b.seed, b.name, b.born_at, t.depth, pa.seed AS parent_a, pb.seed AS parent_b,
+              ${nameOf("pa")} AS pseudo_a, ${nameOf("pb")} AS pseudo_b
        FROM tree t
        JOIN blobs b ON b.seed = t.seed
        JOIN unions u ON u.id = b.parent_union_id
-       JOIN users pa ON pa.id = u.user_a
-       JOIN users pb ON pb.id = u.user_b
-       WHERE t.depth > 0
+       JOIN blobs pa ON pa.seed = u.seed_a
+       JOIN blobs pb ON pb.seed = u.seed_b
+       WHERE t.depth > 0 AND b.born_at <= ?2
        ORDER BY t.depth, b.born_at`,
     )
-    .bind(seed)
+    .bind(seed, Date.now())
     .all<ChildRow>();
 
   const self = await db
     .prepare(
-      `SELECT pseudo AS name FROM users WHERE seed = ?1
-       UNION ALL
-       SELECT name FROM blobs WHERE seed = ?1
-       LIMIT 1`,
+      `SELECT ${nameOf("b")} AS name FROM blobs b WHERE seed = ?`,
     )
     .bind(seed)
     .first<{ name: string | null }>();
 
   const partner = await db
     .prepare(
-      `SELECT o.seed, o.pseudo
-       FROM users me
-       JOIN unions u ON u.ended_at IS NULL AND (u.user_a = me.id OR u.user_b = me.id)
-       JOIN users o ON o.id = CASE WHEN u.user_a = me.id THEN u.user_b ELSE u.user_a END
-       WHERE me.seed = ?`,
+      `SELECT o.seed, ${nameOf("o")} AS pseudo
+       FROM unions u
+       JOIN blobs o ON o.seed = CASE WHEN u.seed_a = ?1 THEN u.seed_b ELSE u.seed_a END
+       WHERE (u.seed_a = ?1 OR u.seed_b = ?1) AND u.started_at <= ?2 AND (u.ended_at IS NULL OR u.ended_at > ?2)`,
     )
-    .bind(seed)
+    .bind(seed, Date.now())
     .first<ParentInfo>();
 
   return {

@@ -1,75 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { NEST, positionAt } from "./position";
-import { daylight } from "./sleep";
-import { stateAt } from "./state";
-import { dayStart } from "./time";
+import { firstSegment, liveThrough, nextSolo, type Segment } from "./life";
+import { NEST, positionOn } from "./position";
+import { seededRng } from "./rng";
 
-const SEED = "alice";
-const DAY = "2026-09-25";
-const MIN = 60 * 1000;
-const HOUR = 60 * MIN;
+const T0 = Date.UTC(2026, 8, 25, 8);
+const HOUR = 60 * 60 * 1000;
 
-describe("positionAt", () => {
-  it("is deterministic for the same seed and instant", () => {
-    const t = dayStart(DAY) + 12 * HOUR + 1234;
-    expect(positionAt(SEED, t)).toEqual(positionAt(SEED, t));
-    expect(positionAt("bob", t)).toEqual(positionAt("bob", t));
-  });
+function life(seed: number, hours: number): Segment[] {
+  const rng = seededRng(seed);
+  let vitals = { energy: 0.9, mood: 0.1 };
+  const segs = [firstSegment(T0, rng)];
+  while (segs.at(-1)!.end < T0 + hours * HOUR) {
+    const seg = nextSolo(segs.at(-1)!, vitals, rng);
+    vitals = liveThrough(vitals, seg);
+    segs.push(seg);
+  }
+  return segs;
+}
 
-  it("stays within the ground", () => {
-    for (let t = dayStart(DAY); t < dayStart(DAY) + 24 * HOUR; t += 7 * MIN) {
-      const { x, y } = positionAt(SEED, t);
-      for (const v of [x, y]) {
-        expect(v).toBeGreaterThanOrEqual(0);
-        expect(v).toBeLessThanOrEqual(1);
-      }
-    }
-  });
+describe("positionOn", () => {
+  const segs = life(7, 48);
 
-  it("never jumps between close instants, across a whole day and every activity change", () => {
-    const step = 100; // ms, about six frames
-    for (let t = dayStart(DAY); t < dayStart(DAY) + 24 * HOUR; t += 2999) {
-      const [a, b] = [positionAt(SEED, t), positionAt(SEED, t + step)];
+  it("never jumps between close instants, across segment boundaries too", () => {
+    for (let t = T0; t < T0 + 48 * HOUR; t += 2_999) {
+      const [a, b] = [positionOn(segs, t), positionOn(segs, t + 100)];
       expect(Math.hypot(b.x - a.x, b.y - a.y)).toBeLessThan(0.02);
     }
   });
 
-  it("confines a sleeping blob to the nest", () => {
+  it("stays on the ground", () => {
+    for (let t = T0; t < T0 + 48 * HOUR; t += 60_000) {
+      const { x, y } = positionOn(segs, t);
+      for (const v of [x, y]) expect(v >= 0 && v <= 1).toBe(true);
+    }
+  });
+
+  it("sleeps in the nest once it got there", () => {
     let checked = 0;
-    for (let t = dayStart(DAY); t < dayStart(DAY) + 24 * HOUR; t += MIN) {
-      const { activity, since } = stateAt(SEED, t);
-      // Skip the first two minutes: that is the walk home into the nest.
-      if (activity !== "sleep" || t - since < 2 * MIN) continue;
-      const { x, y } = positionAt(SEED, t);
-      for (const v of [x, y]) {
-        expect(v).toBeGreaterThanOrEqual(NEST.min);
-        expect(v).toBeLessThanOrEqual(NEST.max);
-      }
+    for (const seg of segs.filter((s) => s.activity === "sleep")) {
+      const { x, y } = positionOn(segs, seg.start + (seg.end - seg.start) / 2);
+      for (const v of [x, y]) expect(v >= NEST.min && v <= NEST.max).toBe(true);
       checked++;
     }
-    expect(checked).toBeGreaterThan(60);
+    expect(checked).toBeGreaterThan(0);
   });
 
-  it("actually moves while exploring", () => {
-    const morning = dayStart(DAY) + 10 * HOUR;
-    const xs = Array.from({ length: 20 }, (_, i) => positionAt(SEED, morning + i * 5 * MIN).x);
-    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.3);
-  });
-
-  it("only stops on walkable ground", () => {
-    // Legs are 45s: each boundary is a stop (the previous leg's target).
-    const westOnly = (p: { x: number }) => p.x < 0.5;
-    for (let k = 0; k < 2000; k++) {
-      const t = dayStart(DAY) + k * 45_000;
-      if (stateAt(SEED, t - 45_000).activity === "sleep") continue;
-      expect(positionAt(SEED, t, westOnly).x).toBeLessThan(0.5);
-    }
-  });
-});
-
-describe("daylight", () => {
-  it("is day at noon and night at 02:00", () => {
-    expect(daylight(SEED, dayStart(DAY) + 12 * HOUR)).toBe(1);
-    expect(daylight(SEED, dayStart(DAY) + 2 * HOUR)).toBe(0);
+  it("snaps every stop onto standable ground", () => {
+    const westOnly = (p: { x: number; y: number }) => ({ x: Math.min(p.x, 0.5), y: p.y });
+    for (let t = T0; t < T0 + 48 * HOUR; t += 45_000) expect(positionOn(segs, t, westOnly).x).toBeLessThanOrEqual(0.5);
   });
 });
