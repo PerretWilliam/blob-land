@@ -126,6 +126,8 @@
     }
   html {
     @apply font-sans;
+    /* A desktop app: the window never bounces or scrolls past its edges. */
+    overscroll-behavior: none;
     }
 }
 /*

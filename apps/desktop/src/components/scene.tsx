@@ -664,6 +664,21 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       return { x: px - (sx - w / 2) / z, y: py - (sy - h / 2) / z, z };
     });
   }
+  // Wheel (or a trackpad's scroll and pinch) zooms. Listened to natively:
+  // React's wheel listener is passive, so it can't keep the webview from
+  // scrolling or zooming the page itself.
+  useEffect(() => {
+    const el = sceneEl.current;
+    if (onCellPaint || !el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      // A pinch comes as a ctrl-wheel, in much smaller steps.
+      zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX - rect.left, e.clientY - rect.top);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  });
   useEffect(() => {
     if (onCellPaint) return;
     const onKey = (e: KeyboardEvent) => {
@@ -689,7 +704,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const p = pointer.current;
     const seed = p && !dragging.current && !onCellPaint ? (world.blobsAt(p.x, p.y)[0] ?? null) : null;
     const dot = p && !seed && !dragging.current ? world.dotAt(p.x, p.y) : null;
-    el.style.cursor = seed || dot ? "pointer" : "";
+    el.style.cursor = onCellPaint ? "" : dragging.current ? "grabbing" : seed || dot ? "pointer" : "grab";
     if (seed === hovered.current) return;
     world.blobs.get(hovered.current ?? "")?.hover(false, at);
     world.blobs.get(seed ?? "")?.hover(true, at);
@@ -821,7 +836,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         sceneEl.current = node;
         sceneRef(node);
       }}
-      className="absolute inset-0 overflow-hidden"
+      className="absolute inset-0 select-none overflow-hidden"
       style={{ background: skyGradient(light), transition: "background 2s" }}
       onClickCapture={(e) => {
         if (!dragged.current) return;
@@ -839,11 +854,6 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       }}
       onPointerLeave={() => {
         pointer.current = null;
-      }}
-      onWheel={(e) => {
-        if (onCellPaint) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top);
       }}
     >
       {STARS.map(([x, y]) => (

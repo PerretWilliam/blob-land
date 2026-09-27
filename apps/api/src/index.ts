@@ -272,9 +272,10 @@ app.post("/__dev/step", devTools, async (c) => {
   return c.json({ regions: regions.length });
 });
 
-// `count` blobs without accounts, filling new regions: for the load test (scripts/load.mjs).
+// `count` blobs without accounts, filling new regions (for the load test,
+// scripts/load.mjs), or topping up `region` to see an island at its fullest.
 app.post("/__dev/populate", devTools, async (c) => {
-  const { count } = await c.req.json<{ count: number }>();
+  const { count, region: into } = await c.req.json<{ count: number; region?: number }>();
   const db = c.env.DB;
   const now = await gardenNow(c.env);
   const first = ((await db.prepare(`SELECT MAX(region) AS n FROM blobs`).first<number | null>("n")) ?? -1) + 1;
@@ -282,7 +283,7 @@ app.post("/__dev/populate", devTools, async (c) => {
   const attractions = ["women", "men", "any"] as const;
   const made = Array.from({ length: count }, (_, i) => {
     const seed = `load-${crypto.randomUUID().slice(0, 13)}`;
-    return { seed, name: seed, n: first + Math.floor(i / REGION_CAP), identity: { sex: sexes[i % 3]!, attraction: attractions[(i >> 1) % 3]! } };
+    return { seed, name: seed, n: into ?? first + Math.floor(i / REGION_CAP), identity: { sex: sexes[i % 3]!, attraction: attractions[(i >> 1) % 3]! } };
   });
   for (let i = 0; i < made.length; i += 100) {
     await db.batch(made.slice(i, i + 100).map((b) => db.prepare(`INSERT INTO blobs (seed, name_key, region, born_at) VALUES (?, ?, ?, ?)`).bind(b.seed, b.seed, b.n, now)));
