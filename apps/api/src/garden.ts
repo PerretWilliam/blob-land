@@ -29,6 +29,8 @@ const MAX_CATCH_UP = 2 * DAY;
 const KEEP_SEGMENTS = 3 * DAY;
 // D1 caps statements per batch; stay well under.
 const BATCH = 100;
+// How far past REGION_CAP friends can still squeeze in with each other.
+const FRIENDS_ROOM = 50;
 
 interface BlobRow {
   seed: string;
@@ -68,22 +70,46 @@ interface UnionRow {
 }
 
 /**
- * A new account's blob, grown up and ready to live from `now`. It moves into
- * the first region with fewer than `cap` blobs, so each fills up (and gets
- * lively) before the next opens, or opens the next when all are full. Picked
- * inside the insert: D1 runs writes one at a time, so two sign-ups can't
- * both take a region's last place.
+ * A new account's blob, grown up and ready to live from `now`. It moves in
+ * with `friend` (an account's seed) while their region has room, a little
+ * past `cap` (FRIENDS_ROOM), else into the first region with fewer than `cap`, so
+ * each fills up (and gets lively) before the next opens, or opens the next
+ * when all are full. Picked inside the insert: D1 runs writes one at a time,
+ * so two sign-ups can't both take a region's last place.
  */
-export function newAccountBlob(db: D1Database, userId: string, seed: string, identity: Identity, now: number, rng: Rng = randomRng, cap = REGION_CAP) {
+export function newAccountBlob(
+  db: D1Database,
+  userId: string,
+  seed: string,
+  identity: Identity,
+  now: number,
+  friend: string | null = null,
+  rng: Rng = randomRng,
+  cap = REGION_CAP,
+) {
   return db
     .prepare(
       `INSERT INTO blobs (seed, owner_user_id, born_at, adult_at, sex, attraction, personality, energy, mood, last, region)
        VALUES (?, ?, ?, ?, ?, ?, ?, 0.9, 0.15, ?, COALESCE(
+         (SELECT f.region FROM blobs f JOIN users u ON u.id = f.owner_user_id
+          WHERE u.seed = ? AND (SELECT COUNT(*) FROM blobs WHERE region = f.region) < ?),
          (SELECT region FROM blobs GROUP BY region HAVING COUNT(*) < ? ORDER BY region LIMIT 1),
          (SELECT COALESCE(MAX(region) + 1, 0) FROM blobs)
        ))`,
     )
-    .bind(seed, userId, now, now, identity.sex, identity.attraction, JSON.stringify(randomPersonality(rng)), JSON.stringify(firstSegment(now, rng)), cap);
+    .bind(
+      seed,
+      userId,
+      now,
+      now,
+      identity.sex,
+      identity.attraction,
+      JSON.stringify(randomPersonality(rng)),
+      JSON.stringify(firstSegment(now, rng)),
+      friend,
+      cap + FRIENDS_ROOM,
+      cap,
+    );
 }
 
 /** One region's blobs, with the relationships and couples they're in. A
@@ -148,23 +174,27 @@ async function loadWorld(db: D1Database, region: number): Promise<World> {
 
 /**
  * Lives the whole garden forward to `until` (now + LOOKAHEAD by default)
- * and stores what happened, one region at a time. Run by the cron trigger
- * only: one writer, so no two steps ever roll the same stretch of time
- * differently.
- *
- * ponytail: every region in one cron run, one after the other; give each
- * region its own writer (a Durable Object) when there are too many for one run.
+ * and stores what happened, every region at once. Run by the cron trigger
+ * only, which steps each region in its own Durable Object (src/region.ts):
+ * one writer per region, so no two steps ever roll the same stretch of time
+ * differently. Tests step them in place.
  */
-export async function advanceGarden(db: D1Database, now: number, rng: Rng = randomRng, until = now + LOOKAHEAD): Promise<void> {
+export async function advanceGarden(
+  db: D1Database,
+  now: number,
+  rng: Rng = randomRng,
+  until = now + LOOKAHEAD,
+  step = (region: number) => advanceRegion(db, region, now, rng, until),
+): Promise<void> {
   const { results } = await db.prepare(`SELECT DISTINCT region FROM blobs`).all<{ region: number }>();
-  for (const { region } of results) await advanceRegion(db, region, now, rng, until);
+  await Promise.all(results.map(({ region }) => step(region)));
   await db.batch([
     db.prepare(`DELETE FROM segments WHERE end < ?`).bind(now - KEEP_SEGMENTS),
     db.prepare(`DELETE FROM interactions WHERE ended_at < ?`).bind(now - KEEP_SEGMENTS),
   ]);
 }
 
-async function advanceRegion(db: D1Database, region: number, now: number, rng: Rng, until: number): Promise<void> {
+export async function advanceRegion(db: D1Database, region: number, now: number, rng: Rng, until: number): Promise<void> {
   const world = await loadWorld(db, region);
   if (world.blobs.size === 0) return;
   // Blobs from before chronotypes get one, rolled once and stored.

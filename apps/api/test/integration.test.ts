@@ -1,9 +1,10 @@
 import { seededRng } from "@blob-land/sim";
-import { env, SELF } from "cloudflare:test";
+import { createScheduledController, env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import schemaSql from "../schema.sql?raw";
 import { gardenNow } from "../src/clock";
 import { advanceGarden, newAccountBlob } from "../src/garden";
+import worker from "../src/index";
 
 beforeAll(async () => {
   // Strip `-- comment` text first: a comment can itself contain a `;` (see
@@ -22,7 +23,7 @@ async function jsonAs<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string } = {}) {
+async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string; friend?: string } = {}) {
   const res = await SELF.fetch("https://api.test/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -85,7 +86,8 @@ describe("blob-land API", () => {
     const home = await register("homebody");
     const away = await register("islander");
     await env.DB.prepare(`UPDATE blobs SET region = 1 WHERE seed = ?`).bind(away.seed).run();
-    await advanceGarden(env.DB, Date.now());
+    // The cron itself: each region stepped by its own Durable Object.
+    await worker.scheduled(createScheduledController(), env);
 
     // Each player gets their own region; neither sees the other.
     const mine = await garden(home.token);
@@ -123,13 +125,22 @@ describe("blob-land API", () => {
       )
         .bind(id, seed, seed)
         .run();
-      await newAccountBlob(env.DB, id, seed, { sex: "none", attraction: "any" }, Date.now(), seededRng(1), count + 1).run();
+      await newAccountBlob(env.DB, id, seed, { sex: "none", attraction: "any" }, Date.now(), null, seededRng(1), count + 1).run();
       return env.DB.prepare(`SELECT region FROM blobs WHERE seed = ?`).bind(seed).first<number>("region");
     };
     expect(await join("filler")).toBe(0);
     expect(await join("pioneer")).toBe(1);
     // Back home, so later tests share one garden.
-    await env.DB.prepare(`UPDATE blobs SET region = 0 WHERE seed = 'pioneer'`).run();
+    // A friend's island wins over the first one with room; an unknown friend is refused.
+    const buddy = await register("buddy", { friend: "Pioneer" });
+    expect((await garden(buddy.token)).region).toBe(1);
+    const lost = await SELF.fetch("https://api.test/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pseudo: "lonely", password: PASSWORD, friend: "nobody-at-all" }),
+    });
+    expect(lost.status).toBe(404);
+    await env.DB.prepare(`UPDATE blobs SET region = 0 WHERE seed IN ('pioneer', 'buddy')`).run();
   });
 
   it("takes a sex and attraction at sign-up, and lets the player change them", async () => {

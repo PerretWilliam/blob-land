@@ -18,6 +18,15 @@ simple = { limit = 20, period = 60 }
 # JWT_SECRET is a secret, not a var: `wrangler secret put JWT_SECRET`.
 # For local dev/tests, put it in a .dev.vars file (gitignored).
 
+# One world-step writer per region (src/region.ts): the cron fans out to them.
+[[durable_objects.bindings]]
+name = "REGION"
+class_name = "Region"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Region"]
+
 # The world step (src/garden.ts): the only writer of what blobs do.
 [triggers]
 crons = ["*/5 * * * *"]

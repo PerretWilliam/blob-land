@@ -82,8 +82,9 @@ export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
   return request(`/pseudo/${encodeURIComponent(pseudo)}`);
 }
 
-export function register(pseudo: string, password: string, identity: Identity, country: string | null = null): Promise<AuthResponse> {
-  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country }) });
+/** `friend`: an account's pseudo, to live on their island. */
+export function register(pseudo: string, password: string, identity: Identity, country: string | null = null, friend = ""): Promise<AuthResponse> {
+  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country, friend }) });
 }
 
 export function setCountry(token: string, country: string | null): Promise<{ ok: true }> {

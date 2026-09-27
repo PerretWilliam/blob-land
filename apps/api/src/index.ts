@@ -7,7 +7,7 @@ import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
 import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
-import { advanceGarden, newAccountBlob } from "./garden";
+import { advanceGarden, LOOKAHEAD, newAccountBlob } from "./garden";
 import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
 import { familyTree, nameOf } from "./tree";
 
@@ -71,7 +71,7 @@ app.get("/pseudo/:p", async (c) => {
   return c.json({ seed, available: false, suggestions });
 });
 
-type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attraction?: unknown; country?: unknown };
+type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attraction?: unknown; country?: unknown; friend?: unknown };
 
 app.post("/auth/register", rateLimitAuth, async (c) => {
   const body = await c.req.json<RegisterBody>().catch(() => ({}) as RegisterBody);
@@ -89,6 +89,11 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
 
   const seed = normalizeSeed(pseudo);
   if (await nameTaken(c.env.DB, pseudo)) return c.json({ error: "pseudo already taken" }, 409);
+  // Optional: a friend's pseudo, to live on their island.
+  const friend = typeof body.friend === "string" && body.friend.trim() ? normalizeSeed(body.friend) : null;
+  if (friend && !(await c.env.DB.prepare(`SELECT 1 FROM users WHERE seed = ?`).bind(friend).first())) {
+    return c.json({ error: "no account goes by that friend's pseudo" }, 404);
+  }
 
   const { hash, salt } = await hashPassword(password);
   const id = crypto.randomUUID();
@@ -98,7 +103,7 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
       `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, country, last_seen_at, created_at)
        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     ).bind(id, pseudo, seed, hash, salt, country, now, now),
-    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env)),
+    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env), friend),
   ]);
 
   const token = await sign({ sub: id, exp: Math.floor(now / 1000) + 60 * 60 * 24 * 30 }, c.env.JWT_SECRET, "HS256");
@@ -327,10 +332,14 @@ app.get("/tree/:seed", async (c) => {
   return c.json(tree);
 });
 
+export { Region } from "./region";
+
 export default {
   fetch: app.fetch,
-  // The only writer of the world: every 5 minutes (wrangler.toml), live everyone forward.
-  scheduled(_controller, env, ctx) {
-    ctx.waitUntil(gardenNow(env).then((now) => advanceGarden(env.DB, now)));
+  // Every 5 minutes (wrangler.toml), live everyone forward: each region in its own writer.
+  async scheduled(_controller, env) {
+    const now = await gardenNow(env);
+    const until = now + LOOKAHEAD;
+    await advanceGarden(env.DB, now, undefined, until, (region) => env.REGION.get(env.REGION.idFromName(String(region))).step(region, now, until));
   },
 } satisfies ExportedHandler<Env>;
