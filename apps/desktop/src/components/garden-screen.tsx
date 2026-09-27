@@ -26,7 +26,7 @@ import { FamilyPanel } from "@/components/family-tree";
 import { RelationsPanel } from "@/components/relations-panel";
 import { Button } from "@/components/ui/button";
 import { ACTIVITY_LABELS, ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
-import type { GardenBlob } from "@/lib/api";
+import { gardenTime, type GardenBlob, type GardenClock } from "@/lib/api";
 import type { LocalLife } from "@/lib/life";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
 import { usePrefersReducedMotion } from "@/lib/motion";
@@ -39,6 +39,8 @@ export interface GardenScreenProps {
   onIdentityChange: (identity: Identity) => void;
   account: { pseudo: string; seed: string; token: string } | null;
   blobs: GardenBlob[];
+  /** The garden's time, which may run faster than the private blob's (dev). */
+  gardenClock: GardenClock;
   visible: boolean;
   onToggleVisibility: () => void;
   onJoinGarden: () => void;
@@ -61,6 +63,7 @@ export function GardenScreen({
   onIdentityChange,
   account,
   blobs,
+  gardenClock,
   visible,
   onToggleVisibility,
   onJoinGarden,
@@ -77,14 +80,15 @@ export function GardenScreen({
   // Re-render now and then, so states (and expressions) follow the clock.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), STATE_TICK_MS);
+    const id = setInterval(() => setNow(Date.now()), Math.max(500, STATE_TICK_MS / gardenClock.rate));
     return () => clearInterval(id);
-  }, []);
+  }, [gardenClock.rate]);
+  const gardenNow = gardenTime(gardenClock);
   const nameOf = (seed: string) => blobs.find((b) => b.seed === seed)?.pseudo ?? "a blob";
   // A garden blob as the scene draws it: its face and activity right now, off its timeline.
   const fromGarden = (blob: GardenBlob, label = blob.pseudo ?? "a new blob"): SceneBlob => {
-    const { expression, activity } = blobStateAt(blob.segments, now);
-    const withSeed = segmentAt(blob.segments, now)?.seg.with;
+    const { expression, activity } = blobStateAt(blob.segments, gardenNow);
+    const withSeed = segmentAt(blob.segments, gardenNow)?.seg.with;
     return {
       seed: blob.seed,
       label,
@@ -96,7 +100,7 @@ export function GardenScreen({
       partner: blob.partner,
       meetingWith: activity === "meet" && withSeed?.length ? listNames(withSeed.map(nameOf)) : undefined,
       partnerLabel: blob.partner ? nameOf(blob.partner) : undefined,
-      young: now < blob.adultAt,
+      young: gardenNow < blob.adultAt,
       ...(blob.seed === account?.seed ? { onIdentityChange } : {}),
     };
   };
@@ -146,7 +150,7 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={GARDEN_ISLAND} blobScale={0.55} />
+        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={GARDEN_ISLAND} blobScale={0.55} clock={() => gardenTime(gardenClock)} />
       ) : (
         <Scene
           key="private"

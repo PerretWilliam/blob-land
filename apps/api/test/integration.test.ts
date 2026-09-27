@@ -2,6 +2,7 @@ import { seededRng } from "@blob-land/sim";
 import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import schemaSql from "../schema.sql?raw";
+import { gardenNow } from "../src/clock";
 import { advanceGarden } from "../src/garden";
 
 beforeAll(async () => {
@@ -193,5 +194,16 @@ describe("blob-land API", () => {
     expect((await rename(alice.token, "Pebble")).status).toBe(200);
     const renamed = await jsonAs<{ name: string }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
     expect(renamed.name).toBe("Pebble");
+  });
+});
+
+describe("the garden clock", () => {
+  it("is real time by default, and runs TIME_SCALE times faster when set", async () => {
+    expect(Math.abs((await gardenNow(env)) - Date.now())).toBeLessThan(50);
+    const fast = { ...env, TIME_SCALE: "60" };
+    const [a, real] = [await gardenNow(fast), Date.now()];
+    await new Promise((r) => setTimeout(r, 100));
+    const b = await gardenNow(fast);
+    expect(b - a).toBeGreaterThanOrEqual((Date.now() - real) * 60 * 0.8);
   });
 });

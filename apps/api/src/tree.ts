@@ -36,7 +36,7 @@ export const nameOf = (alias: string) => NAME.replaceAll("%", alias);
 
 /** Walks the genealogy from `seed` down through `unions`/`blobs` via a
  * recursive CTE, plus the direct parents if `seed` is itself a child. */
-export async function familyTree(db: D1Database, seed: string): Promise<FamilyTree> {
+export async function familyTree(db: D1Database, seed: string, now: number): Promise<FamilyTree> {
   const parentRow = await db
     .prepare(
       `SELECT pa.seed AS seed_a, ${nameOf("pa")} AS pseudo_a, pb.seed AS seed_b, ${nameOf("pb")} AS pseudo_b
@@ -70,7 +70,7 @@ export async function familyTree(db: D1Database, seed: string): Promise<FamilyTr
        WHERE t.depth > 0 AND b.born_at <= ?2
        ORDER BY t.depth, b.born_at`,
     )
-    .bind(seed, Date.now())
+    .bind(seed, now)
     .all<ChildRow>();
 
   const self = await db
@@ -87,7 +87,7 @@ export async function familyTree(db: D1Database, seed: string): Promise<FamilyTr
        JOIN blobs o ON o.seed = CASE WHEN u.seed_a = ?1 THEN u.seed_b ELSE u.seed_a END
        WHERE (u.seed_a = ?1 OR u.seed_b = ?1) AND u.started_at <= ?2 AND (u.ended_at IS NULL OR u.ended_at > ?2)`,
     )
-    .bind(seed, Date.now())
+    .bind(seed, now)
     .first<ParentInfo>();
 
   return {

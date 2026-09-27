@@ -25,9 +25,22 @@ export interface GardenBlob {
 }
 
 export interface GardenResponse {
+  /** The garden's time when it answered. */
   now: number;
+  /** How fast the garden's clock runs: 1, or more in a sped-up local dev garden. */
+  rate: number;
   blobs: GardenBlob[];
 }
+
+/** The garden's clock, as last read from the server. */
+export interface GardenClock {
+  at: number;
+  /** Local time when `at` was read. */
+  readAt: number;
+  rate: number;
+}
+
+export const gardenTime = (clock: GardenClock) => clock.at + (Date.now() - clock.readAt) * clock.rate;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {

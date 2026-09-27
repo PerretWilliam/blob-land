@@ -5,6 +5,7 @@ import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
+import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
 import { advanceGarden, newAccountBlob } from "./garden";
 import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
@@ -94,7 +95,7 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
       `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, last_seen_at, created_at)
        VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
     ).bind(id, pseudo, seed, hash, salt, now, now),
-    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, now),
+    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env)),
   ]);
 
   const token = await sign({ sub: id, exp: Math.floor(now / 1000) + 60 * 60 * 24 * 30 }, c.env.JWT_SECRET, "HS256");
@@ -134,7 +135,7 @@ interface SegmentRow {
 const SEGMENT_HISTORY = 15 * 60 * 1000;
 
 app.get("/garden", requireAuth, async (c) => {
-  const now = Date.now();
+  const now = await gardenNow(c.env);
   // Children born in the world step's lookahead aren't here yet.
   const { results: blobs } = await c.env.DB.prepare(
     `SELECT b.seed, COALESCE(b.name, u.pseudo) AS pseudo, b.sex, b.attraction, b.born_at, b.adult_at
@@ -161,6 +162,8 @@ app.get("/garden", requireAuth, async (c) => {
   // Timelines, not states: the client plays the stored segments back itself.
   return c.json({
     now,
+    // How fast the garden's clock runs: clients play timelines back at this rate.
+    rate: timeScale(c.env),
     blobs: blobs.map((b) => ({
       seed: b.seed,
       pseudo: b.pseudo,
@@ -237,14 +240,14 @@ app.get("/blobs/:seed/relationships", async (c) => {
      LEFT JOIN users u ON u.id = o.owner_user_id
      WHERE (r.seed_a = ?1 OR r.seed_b = ?1) AND o.born_at <= ?2 AND (u.id IS NULL OR u.visible_in_garden = 1)`,
   )
-    .bind(c.req.param("seed"), Date.now())
+    .bind(c.req.param("seed"), await gardenNow(c.env))
     .all();
   return c.json({ relationships: results });
 });
 
 // Genealogy is part of the public garden layer, not the private one — no auth.
 app.get("/tree/:seed", async (c) => {
-  const tree = await familyTree(c.env.DB, c.req.param("seed"));
+  const tree = await familyTree(c.env.DB, c.req.param("seed"), await gardenNow(c.env));
   return c.json(tree);
 });
 
@@ -252,6 +255,6 @@ export default {
   fetch: app.fetch,
   // The only writer of the world: every 5 minutes (wrangler.toml), live everyone forward.
   scheduled(_controller, env, ctx) {
-    ctx.waitUntil(advanceGarden(env.DB, Date.now()));
+    ctx.waitUntil(gardenNow(env).then((now) => advanceGarden(env.DB, now)));
   },
 } satisfies ExportedHandler<Env>;

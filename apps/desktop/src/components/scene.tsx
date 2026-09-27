@@ -70,6 +70,9 @@ export interface SceneProps {
   /** Blob size as a fraction of one tile's width, so blobs keep their
    * proportions to the ground at any window size. */
   blobScale?: number;
+  /** The time timelines are played back at (and the sky follows): real
+   * time, or the garden's own clock, which may run faster (dev). */
+  clock?: () => number;
 }
 
 // Half the distance two partners keep between them, per ground axis.
@@ -324,14 +327,14 @@ function depthZ(tiles: number, p: GroundPoint) {
   return cellZ(i + j) + 1 + Math.round((u - i + (v - j)) * 490);
 }
 
-export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6 }: SceneProps) {
+export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now }: SceneProps) {
   const tiles = layout.size;
   const [sceneRef, sceneInView] = useInView();
-  const [light, setLight] = useState(() => daylight(Date.now()));
-  useEffect(() => {
-    const id = setInterval(() => setLight(daylight(Date.now())), 60_000);
-    return () => clearInterval(id);
-  }, []);
+  const clockRef = useRef(clock);
+  clockRef.current = clock;
+  // Read on each render: the screen re-renders on its own tick.
+  const now = clock();
+  const light = daylight(now);
 
   const lift = Math.max(0, ...layout.cells.map((c) => (c.height ?? 0) + (c.ramp ? 1 : 0)));
   const island = islandGeometry(tiles, lift);
@@ -497,7 +500,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       const kCamera = snap ? 1 : 1 - Math.exp(-dt / CAMERA_EASE_S);
       last = now;
       const list = blobsRef.current;
-      const ps = targets(layoutRef.current, list, Date.now());
+      const ps = targets(layoutRef.current, list, clockRef.current());
       list.forEach((b, i) => {
         const to = { ...ps[i]!, lift: liftRef.current(ps[i]!) };
         const prev = shown.current.get(b.seed);
@@ -553,7 +556,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     let p = shown.current.get(seed);
     if (!p) {
       const i = blobsRef.current.findIndex((b) => b.seed === seed);
-      const g = targets(layoutRef.current, blobsRef.current, Date.now())[i] ?? { x: 0.5, y: 0.5 };
+      const g = targets(layoutRef.current, blobsRef.current, clockRef.current())[i] ?? { x: 0.5, y: 0.5 };
       p = { ...g, lift: liftRef.current(g) };
       shown.current.set(seed, p);
     }
@@ -589,8 +592,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     j: Math.floor(n / island.cols),
   })).sort((a, b) => a.i + a.j - (b.i + b.j));
 
-  // Meetings as of this render; the garden re-renders on its own clock.
-  const now = Date.now();
+  // Meetings as of this render.
   const segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]));
   const moments = new Map(blobs.map((b) => [b.seed, momentAt(b.seed, b.segments, now, (seed) => segmentsOf.get(seed))]));
 
