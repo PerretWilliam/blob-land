@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compatible, randomPersonality, type Identity } from "./identity";
 import { allowedFor, feeling, INTERACTIONS, MAX_STEP, moodShift, pickInteraction, type MeetingContext } from "./interactions";
-import { DURATION, firstSegment, NEXT, SLEEP_HOURS, type Segment } from "./life";
+import { DURATION, firstSegment, NEXT, nextSolo, SLEEP_HOURS, sleepPressure, type Segment } from "./life";
 import { applyDelta, newRelationship, relationStatus, type Relationship } from "./relationship";
 import { randomRng, seededRng, type Rng } from "./rng";
 import { GROUP_MAX, stepWorld, type World, type WorldBlob } from "./world";
@@ -109,6 +109,21 @@ describe("stepWorld", () => {
         if (s.detail === "argue:bad" && next && (next.activity === "explore" || next.activity === "rest")) expect(next.expression).toBe("mad");
       });
     }
+  });
+
+  it("keeps night owls up and early birds in bed on their own clocks", () => {
+    const evening = Date.UTC(2026, 8, 26, 22);
+    const tired = { energy: 0.4, mood: 0 };
+    expect(sleepPressure(tired, evening, 1)).toBeLessThan(sleepPressure(tired, evening, 0));
+    // Both fall asleep at 22:00; the night owl sleeps in.
+    const bed: Segment = { ...firstSegment(evening, seededRng(1)), activity: "explore" };
+    const wakeAt = (chronotype: number) => {
+      const rng = seededRng(3);
+      let seg = bed;
+      for (let i = 0; i < 50 && seg.activity !== "sleep"; i++) seg = nextSolo(seg, { energy: 0.1, mood: 0 }, rng, chronotype);
+      return seg.end;
+    };
+    expect(wakeAt(1)).toBeGreaterThan(wakeAt(0) + 2 * HOUR);
   });
 
   it("carries a meeting's mood into what comes next, most of the time", () => {

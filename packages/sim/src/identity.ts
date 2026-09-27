@@ -22,6 +22,9 @@ export interface Personality {
   playfulness: number;
   /** How fast a liking turns into a crush. */
   romance: number;
+  /** Early bird (0) to night owl (1): shifts its bedtime and waking by up to
+   * 4 hours either way, so the garden is never all asleep at once. */
+  chronotype: number;
 }
 
 export const isSex = (v: unknown): v is Sex => SEXES.includes(v as Sex);
@@ -37,7 +40,7 @@ export function drawnTo(a: Identity, b: Identity): boolean {
 export const compatible = (a: Identity, b: Identity) => drawnTo(a, b) && drawnTo(b, a);
 
 export function randomPersonality(rng: Rng): Personality {
-  return { sociability: rng(), temper: rng(), playfulness: rng(), romance: rng() };
+  return { sociability: rng(), temper: rng(), playfulness: rng(), romance: rng(), chronotype: rng() };
 }
 
 /** A child's identity: rolled, not inherited. */
@@ -57,5 +60,6 @@ export function childPersonality(a: Personality, b: Personality, rng: Rng): Pers
     temper: mix(a.temper, b.temper),
     playfulness: mix(a.playfulness, b.playfulness),
     romance: mix(a.romance, b.romance),
+    chronotype: mix(a.chronotype, b.chronotype),
   };
 }

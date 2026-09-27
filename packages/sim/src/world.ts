@@ -153,7 +153,7 @@ export function stepWorld(world: World, until: number, rng: Rng, maxCatchUp = 2 
     const t = b.last.end;
     // A cheerful blob goes looking for company; a low one keeps to itself.
     const wantsCompany = 0.05 + 0.3 * b.personality.sociability + 0.2 * b.vitals.mood;
-    if (canSocialize(b.last, b.vitals, t) && rng() < wantsCompany) {
+    if (canSocialize(b.last, b.vitals, t, b.personality.chronotype) && rng() < wantsCompany) {
       const group = [b];
       for (let c = pickCompany(world, group, t, rng); c; c = group.length < GROUP_MAX && rng() < GROWS(b) ? pickCompany(world, group, t, rng) : undefined) {
         group.push(c);
@@ -163,7 +163,7 @@ export function stepWorld(world: World, until: number, rng: Rng, maxCatchUp = 2 
         continue;
       }
     }
-    push(b, nextSolo(b.last, b.vitals, rng));
+    push(b, nextSolo(b.last, b.vitals, rng, b.personality.chronotype));
   }
 
   out.relationships = [...touched.values()];
@@ -180,7 +180,7 @@ function pickCompany(world: World, group: WorldBlob[], t: number, rng: Rng): Wor
   const weights: Record<string, number> = {};
   for (const c of world.blobs.values()) {
     if (group.includes(c) || c.last.end < t || c.last.end > t + SOCIAL_WAIT) continue;
-    if (!canSocialize(c.last, c.vitals, c.last.end)) continue;
+    if (!canSocialize(c.last, c.vitals, c.last.end, c.personality.chronotype)) continue;
     // Geometric mean: one rival already there is enough to put a blob off joining.
     const liking = Math.exp(mean(group.map((m) => Math.log(MEET_WEIGHT[world.relationships.get(pairKey(m.seed, c.seed))?.status ?? "strangers"]))));
     const near = 1 / (1 + 4 * Math.hypot(c.last.x - cx, c.last.y - cy));

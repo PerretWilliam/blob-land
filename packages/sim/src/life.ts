@@ -79,17 +79,24 @@ const hourOf = (t: number) => {
   return d.getUTCHours() + d.getUTCMinutes() / 60;
 };
 
-/** How much a blob wants to sleep at `t`: tiredness, plus the pull of night (UTC). */
-export function sleepPressure(vitals: Vitals, t: number): number {
-  const h = hourOf(t);
+// How far a chronotype shifts a blob's night, at most, either way.
+const CHRONO_SHIFT = 4 * HOUR;
+const chronoShift = (chronotype: number) => (chronotype - 0.5) * 2 * CHRONO_SHIFT;
+// When an average blob's morning comes (UTC); a chronotype moves it.
+const WAKE_HOUR = 6.5;
+
+/** How much a blob wants to sleep at `t`: tiredness, plus the pull of night
+ * (UTC), which comes earlier for an early bird and later for a night owl. */
+export function sleepPressure(vitals: Vitals, t: number, chronotype = 0.5): number {
+  const h = hourOf(t - chronoShift(chronotype));
   // Night pulls toward bed; broad daylight holds a tired blob up a while longer.
   const clock = h >= 21.5 || h < 5 ? 0.5 : h >= 20 ? 0.25 : h >= 9 && h < 18 ? -0.25 : 0;
   return 1 - vitals.energy + clock;
 }
 
 /** Whether a blob, having just finished `last`, is up for company. */
-export const canSocialize = (last: Segment, vitals: Vitals, t: number) =>
-  last.activity !== "sleep" && vitals.energy > 0.25 && sleepPressure(vitals, t) < 0.8;
+export const canSocialize = (last: Segment, vitals: Vitals, t: number, chronotype = 0.5) =>
+  last.activity !== "sleep" && vitals.energy > 0.25 && sleepPressure(vitals, t, chronotype) < 0.8;
 
 export function awakeExpression(vitals: Vitals, rng: Rng): string {
   if (vitals.mood > 0.35) return "happy";
@@ -117,10 +124,10 @@ function lingering(last: Segment, rng: Rng): string | null {
 
 const span = (rng: Rng, activity: keyof typeof DURATION) => between(rng, DURATION[activity][0], DURATION[activity][1]);
 
-function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng): Exclude<Activity, "meet"> {
+function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng, chronotype: number): Exclude<Activity, "meet"> {
   if (prev === "sleep") return "wake";
   if (prev === "wake") return weighted(rng, { explore: 7, rest: 3 });
-  const pressure = sleepPressure(vitals, t);
+  const pressure = sleepPressure(vitals, t, chronotype);
   // Past 1, bedtime isn't a maybe; from 0.8 up it's a growing one.
   if (pressure > 1) return "sleep";
   return weighted(rng, {
@@ -133,13 +140,17 @@ function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng): Excl
 }
 
 /** The blob's next solo segment, starting where and when `last` ended. */
-export function nextSolo(last: Segment, vitals: Vitals, rng: Rng): Segment {
+export function nextSolo(last: Segment, vitals: Vitals, rng: Rng, chronotype = 0.5): Segment {
   const t = last.end;
-  const activity = nextActivity(last.activity, vitals, t, rng);
+  const activity = nextActivity(last.activity, vitals, t, rng, chronotype);
   const base = { start: t, activity, rng: randomSeed(rng), with: null, detail: null };
   switch (activity) {
     case "sleep": {
-      const hours = Math.min(SLEEP_HOURS[1], Math.max(SLEEP_HOURS[0], (1 - vitals.energy) * 9 * between(rng, 0.85, 1.15)));
+      // Sleeps off its tiredness, or until its own morning if that's later:
+      // an early bird is up at dawn, a night owl sleeps in.
+      const need = (1 - vitals.energy) * 9 * between(rng, 0.85, 1.15);
+      const morning = (WAKE_HOUR + between(rng, -0.75, 0.75) - hourOf(t - chronoShift(chronotype)) + 24) % 24;
+      const hours = Math.min(SLEEP_HOURS[1], Math.max(SLEEP_HOURS[0], need * 0.8, morning));
       return { ...base, end: t + hours * HOUR, expression: "sleepy", x: between(rng, NEST.min, NEST.max), y: between(rng, NEST.min, NEST.max) };
     }
     case "wake":

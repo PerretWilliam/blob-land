@@ -5,6 +5,7 @@ import {
   stepWorld,
   type Attraction,
   type Identity,
+  type Personality,
   type Kin,
   type Relationship,
   type RelationStatus,
@@ -92,7 +93,7 @@ async function loadWorld(db: D1Database): Promise<World> {
     const blob: WorldBlob = {
       seed: r.seed,
       identity: { sex: r.sex, attraction: r.attraction },
-      personality: JSON.parse(r.personality),
+      personality: JSON.parse(r.personality) as Personality,
       bornAt: r.born_at,
       adultAt: r.adult_at,
       parents: r.parent_a && r.parent_b ? [r.parent_a, r.parent_b] : null,
@@ -133,9 +134,15 @@ async function loadWorld(db: D1Database): Promise<World> {
 export async function advanceGarden(db: D1Database, now: number, rng: Rng = randomRng, until = now + LOOKAHEAD): Promise<void> {
   const world = await loadWorld(db);
   if (world.blobs.size === 0) return;
+  // Blobs from before chronotypes get one, rolled once and stored.
+  const writes: D1PreparedStatement[] = [];
+  for (const blob of world.blobs.values()) {
+    if (blob.personality.chronotype !== undefined) continue;
+    blob.personality = { ...blob.personality, chronotype: rng() };
+    writes.push(db.prepare(`UPDATE blobs SET personality = ? WHERE seed = ?`).bind(JSON.stringify(blob.personality), blob.seed));
+  }
   const step = stepWorld(world, until, rng, MAX_CATCH_UP);
 
-  const writes: D1PreparedStatement[] = [];
   for (const u of step.unionsStarted) {
     writes.push(db.prepare(`INSERT INTO unions (id, seed_a, seed_b, started_at) VALUES (?, ?, ?, ?)`).bind(u.id, u.a, u.b, u.startedAt));
   }
