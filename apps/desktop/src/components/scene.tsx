@@ -3,7 +3,7 @@ import { Blobatar } from "@blobatar/react";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { ATTRACTION_LABELS, BlobGenderSign, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
 import { Button } from "@/components/ui/button";
 import { CountryField, countryName } from "@/components/country-field";
@@ -83,10 +83,18 @@ export interface SceneProps {
   clock?: () => number;
   /** Shows a "See relations" button on a blob's ID card. */
   onShowRelations?: (seed: string, name: string) => void;
+  /** On a map too big to show whole, the blob the camera starts on. */
+  startAt?: string;
 }
 
 // Half the distance two partners keep between them, per ground axis.
 const PAIR_GAP = 0.04;
+// Past 8 tiles a side, ground units cover more tiles: slow walks (and pull
+// couples closer) by as much, so blobs keep their pace and spacing per tile.
+const walkZoom = (tiles: number) => Math.max(1, tiles / 8);
+// How many tiles fit across the screen at the camera's starting zoom, on a
+// big map; smaller maps start fully in view.
+const TILES_IN_VIEW = 14;
 // Seconds for the displayed position to close ~63% of the gap to the computed
 // one. Hides frame-to-frame steps and absorbs discrete jumps (a new pairing).
 const EASE_S = 0.6;
@@ -284,17 +292,19 @@ const FREE = new Set<Activity>(["explore", "rest", "discover"]);
  */
 function targets(layout: IslandLayout, blobs: SceneBlob[], t: number): GroundPoint[] {
   const snap = (p: GroundPoint) => snapToGround(layout, p);
+  const zoom = walkZoom(layout.size);
+  const gap = PAIR_GAP / zoom;
   const segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]));
   const ps = blobs.map((b) => {
     const at = segmentAt(b.segments, t, snap);
     if (!at) return { x: 0.5, y: 0.5 };
     if (t >= at.seg.end) return snap({ x: at.seg.x, y: at.seg.y });
     const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, t, segmentsOf, snap) : null;
-    const { from, to, e } = legIn(at.seg, at.from, t, spot ? () => spot : snap);
+    const { from, to, e } = legIn(at.seg, at.from, t, spot ? () => spot : snap, zoom);
     return alongPath(findPath(layout, from, to), e);
   });
   const index = new Map(blobs.map((b, i) => [b.seed, i]));
-  const clamp = (v: number) => Math.min(1 - PAIR_GAP, Math.max(PAIR_GAP, v));
+  const clamp = (v: number) => Math.min(1 - gap, Math.max(gap, v));
   blobs.forEach((b, i) => {
     const j = b.partner ? index.get(b.partner) : undefined;
     if (j === undefined || b.seed > blobs[j]!.seed) return;
@@ -302,8 +312,8 @@ function targets(layout: IslandLayout, blobs: SceneBlob[], t: number): GroundPoi
     if (!sa || !sb || !FREE.has(sa.activity) || !FREE.has(sb.activity)) return;
     const mid = { x: clamp((ps[i]!.x + ps[j]!.x) / 2), y: clamp((ps[i]!.y + ps[j]!.y) / 2) };
     // Side by side along the screen's horizontal, so neither hides the other.
-    ps[i] = { x: mid.x - PAIR_GAP, y: mid.y + PAIR_GAP };
-    ps[j] = { x: mid.x + PAIR_GAP, y: mid.y - PAIR_GAP };
+    ps[i] = { x: mid.x - gap, y: mid.y + gap };
+    ps[j] = { x: mid.x + gap, y: mid.y - gap };
   });
   return ps;
 }
@@ -337,8 +347,11 @@ function depthZ(tiles: number, p: GroundPoint) {
   return cellZ(i + j) + 1 + Math.round((u - i + (v - j)) * 490);
 }
 
-export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations }: SceneProps) {
+export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations, startAt }: SceneProps) {
   const tiles = layout.size;
+  // Fitting the whole map is zoom 1; how far in the camera starts, and follows a blob.
+  const baseZoom = Math.max(1, tiles / TILES_IN_VIEW);
+  const focusZoom = Math.max(FOCUS_ZOOM, (FOCUS_ZOOM * tiles) / 7);
   const [sceneRef, sceneInView] = useInView();
   const clockRef = useRef(clock);
   clockRef.current = clock;
@@ -393,7 +406,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     observer.observe(box);
     return () => observer.disconnect();
   }, []);
-  const blobSize = Math.max(32, Math.round(((islandPx * 2 * HALF_W) / island.w) * blobScale));
+  const blobSize = Math.max(32 / baseZoom, Math.round(((islandPx * 2 * HALF_W) / island.w) * blobScale));
   const blobSizeRef = useRef(blobSize);
   blobSizeRef.current = blobSize;
   // Per blob: the anchor (moved), its hopping body and shadow, and its label.
@@ -492,15 +505,22 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const box = islandRef.current;
     if (!cam || !box) return;
     const [w, h] = [cam.clientWidth, cam.clientHeight];
-    let target = { x: w / 2, y: h / 2, z: 1 };
+    // A blob's head, in the camera's unscaled coordinates. The island is
+    // centred with a -50%/-50% translate that offsetLeft/Top ignore.
+    const headOf = (p: GroundPoint & { lift: number }) => {
+      const feet = blobPx(box, p);
+      return { x: box.offsetLeft - box.clientWidth / 2 + feet.x, y: box.offsetTop - box.clientHeight / 2 + feet.y - blobSizeRef.current * 0.4 };
+    };
     const seed = selectedRef.current;
     const p = seed ? shown.current.get(seed) : undefined;
-    if (p && blobsRef.current.some((b) => b.seed === seed)) {
-      const feet = blobPx(box, p);
-      // The island is centred with a -50%/-50% translate that offsetLeft/Top ignore.
-      const x = box.offsetLeft - box.clientWidth / 2 + feet.x;
-      const y = box.offsetTop - box.clientHeight / 2 + feet.y - blobSizeRef.current * 0.4;
-      target = { x, y, z: FOCUS_ZOOM };
+    let target: { x: number; y: number; z: number };
+    if (p && blobsRef.current.some((b) => b.seed === seed)) target = { ...headOf(p), z: focusZoom };
+    else {
+      if (!view.current) {
+        const start = startAt ? shown.current.get(startAt) : undefined;
+        view.current = start ? { ...headOf(start), z: baseZoom } : { x: w / 2, y: h / 2, z: baseZoom };
+      }
+      target = view.current = clampView(view.current);
     }
     const c = camera.current ?? target;
     const next = { x: c.x + (target.x - c.x) * k, y: c.y + (target.y - c.y) * k, z: c.z + (target.z - c.z) * k };
@@ -514,6 +534,79 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     // Labels divide by this to keep their on-screen size while zoomed.
     cam.style.setProperty("--camera-zoom", String(next.z));
   }
+
+  /*
+   * The camera the visitor steers when no blob is followed: drag to pan,
+   * wheel (or +/-) to zoom around the pointer, arrows to pan. Kept over the
+   * island, and between fitting it whole and the follow zoom.
+   */
+  const view = useRef<{ x: number; y: number; z: number } | null>(null);
+  function clampView(v: { x: number; y: number; z: number }) {
+    const box = islandRef.current;
+    if (!box) return v;
+    const [left, top] = [box.offsetLeft - box.clientWidth / 2, box.offsetTop - box.clientHeight / 2];
+    const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+    return { x: clamp(v.x, left, left + box.clientWidth), y: clamp(v.y, top, top + box.clientHeight), z: clamp(v.z, 1, focusZoom) };
+  }
+  // Where steering starts from: the camera itself while it follows a blob.
+  const steerFrom = () => (selectedRef.current ? camera.current : (view.current ?? camera.current));
+  /** Takes the camera back from a followed blob, from where it is now. */
+  function steer(change: (v: { x: number; y: number; z: number }) => { x: number; y: number; z: number }) {
+    const from = steerFrom();
+    if (!from) return;
+    if (selectedRef.current) setSelected(null);
+    view.current = clampView(change({ ...from }));
+    if (reducedMotion) applyCamera(1);
+  }
+  // Set by a drag, so the click that ends it doesn't also select or deselect.
+  const dragged = useRef(false);
+  function startDrag(e: ReactPointerEvent) {
+    if (onCellPaint || e.button !== 0) return;
+    const [x0, y0] = [e.clientX, e.clientY];
+    let from: { x: number; y: number; z: number } | null = null;
+    const onMove = (m: PointerEvent) => {
+      const [dx, dy] = [m.clientX - x0, m.clientY - y0];
+      if (!from && Math.hypot(dx, dy) < 5) return;
+      from ??= steerFrom();
+      const f = from;
+      if (f) steer(() => ({ x: f.x - dx / f.z, y: f.y - dy / f.z, z: f.z }));
+    };
+    const onUp = () => {
+      dragged.current = from !== null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+  /** Zooms by `factor`, keeping the point under screen position (sx, sy) in place. */
+  function zoomAt(factor: number, sx: number, sy: number) {
+    const cam = cameraRef.current;
+    if (!cam) return;
+    const [w, h] = [cam.clientWidth, cam.clientHeight];
+    steer((v) => {
+      const z = Math.min(focusZoom, Math.max(1, v.z * factor));
+      const [px, py] = [v.x + (sx - w / 2) / v.z, v.y + (sy - h / 2) / v.z];
+      return { x: px - (sx - w / 2) / z, y: py - (sy - h / 2) / z, z };
+    });
+  }
+  useEffect(() => {
+    if (onCellPaint) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && e.target.closest("input, textarea, select, [contenteditable]")) return;
+      const cam = cameraRef.current;
+      if (!cam) return;
+      const step = 80 / (view.current?.z ?? 1);
+      const pan = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, [number, number]>)[e.key];
+      if (pan) steer((v) => ({ ...v, x: v.x + pan[0], y: v.y + pan[1] }));
+      else if (e.key === "+" || e.key === "=") zoomAt(1.25, cam.clientWidth / 2, cam.clientHeight / 2);
+      else if (e.key === "-") zoomAt(0.8, cam.clientWidth / 2, cam.clientHeight / 2);
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   useEffect(() => {
     if (!sceneInView) return;
@@ -604,34 +697,104 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   // Night dims the sprites themselves — per element, since a filter on a
   // shared wrapper would break the blobs' depth sorting against the decor.
   const spriteFilter = `brightness(${0.45 + 0.55 * light}) saturate(${0.55 + 0.45 * light})`;
+  // Through a variable set on the scene, so the terrain needn't re-render as the light turns.
   const sprite = (at: { left: number; top: number }, w: number, z: number): CSSProperties => ({
     left: `${at.left}%`,
     top: `${at.top}%`,
     width: `${(w / island.w) * 100}%`,
-    filter: spriteFilter,
+    filter: "var(--sprite-filter)",
     zIndex: z,
   });
 
-  // Back to front, so each tile's sides are covered by the tiles in front of it.
-  const tileCells = Array.from({ length: island.cols * island.rows }, (_, n) => ({
-    i: n % island.cols,
-    j: Math.floor(n / island.cols),
-  })).sort((a, b) => a.i + a.j - (b.i + b.j));
 
   // Meetings as of this render.
   const segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]));
   const moments = new Map(blobs.map((b) => [b.seed, momentAt(b.seed, b.segments, now, (seed) => segmentsOf.get(seed))]));
 
-  const nestMid = (NEST.min + NEST.max) / 2;
-  const nestW = (NEST.max - NEST.min) * tiles * 2 * HALF_W + 40;
+  const nest = layout.nest ?? NEST;
+  const nestMid = (nest.min + nest.max) / 2;
+  const nestW = (nest.max - nest.min) * tiles * 2 * HALF_W + 40;
+
+  // The ground and everything standing on it only change with the layout:
+  // thousands of sprites on a big map, so they're built once, not every tick.
+  const terrain = useMemo(() => {
+    // Back to front, so each tile's sides are covered by the tiles in front of it.
+    const tileCells = Array.from({ length: island.cols * island.rows }, (_, n) => ({
+      i: n % island.cols,
+      j: Math.floor(n / island.cols),
+    })).sort((a, b) => a.i + a.j - (b.i + b.j));
+    // Open sea (water all round) isn't drawn: the island floats in the sky
+    // with just a ring of shallows, however big the map around it.
+    const wet = (i: number, j: number) => {
+      const g = cellAt(layout, i, j)?.ground;
+      return !g || g === "water";
+    };
+    const openSea = (i: number, j: number) => {
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (!wet(i + di, j + dj)) return false;
+      return true;
+    };
+    return (
+      <>
+        {tileCells.flatMap(({ i, j }) =>
+          openSea(i, j) ? [] : cellStack(layout, i, j).map((src, level) => {
+            const at = island.at(i, j, level);
+            // Shift so the image's top vertex (not its corner) lands on the grid point.
+            const corner = { left: at.left - (TOP_X / island.w) * 100, top: at.top - (TOP_Y / island.h) * 100 };
+            return (
+              <img
+                key={`${i}-${j}-${level}`}
+                src={src}
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+                className="absolute max-w-none select-none"
+                style={sprite(corner, TILE_IMG_W, level === 0 ? 0 : cellZ(i + j))}
+              />
+            );
+          }),
+        )}
+        {layout.cells.map((cell, n) => {
+          if (!cell.decor || !canHoldDecor(cell.ground) || cell.ramp) return null;
+          const at = { x: ((n % tiles) + 0.5) / tiles, y: (Math.floor(n / tiles) + 0.5) / tiles };
+          const { src, w } = DECOR_SPRITES[cell.decor];
+          const base = island.at(at.x * tiles, at.y * tiles, cell.height ?? 0);
+          return (
+            <img
+              key={`decor-${n}`}
+              src={src}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+              // Anchored at the sprite's base, a little above its bottom edge.
+              className="absolute max-w-none -translate-x-1/2 -translate-y-[92%] select-none"
+              style={sprite(base, w, depthZ(tiles, at))}
+            />
+          );
+        })}
+      </>
+    );
+    // `island` and `sprite` are pure functions of the layout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout]);
 
   return (
     <div
       ref={sceneRef}
       // Fills its parent; `container-type: size` lets the island size itself in cq units.
       className="absolute inset-0 overflow-hidden [container-type:size]"
-      style={{ background: skyGradient(light), transition: "background 2s" }}
+      style={{ background: skyGradient(light), transition: "background 2s", "--sprite-filter": spriteFilter } as CSSProperties}
+      onClickCapture={(e) => {
+        if (!dragged.current) return;
+        dragged.current = false;
+        e.stopPropagation();
+      }}
       onClick={() => setSelected(null)}
+      onPointerDown={startDrag}
+      onWheel={(e) => {
+        if (onCellPaint) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top);
+      }}
     >
       {STARS.map(([x, y]) => (
         <span
@@ -673,24 +836,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           aspectRatio: `${island.w} / ${island.h}`,
         }}
       >
-        {tileCells.flatMap(({ i, j }) =>
-          cellStack(layout, i, j).map((src, level) => {
-            const at = island.at(i, j, level);
-            // Shift so the image's top vertex (not its corner) lands on the grid point.
-            const corner = { left: at.left - (TOP_X / island.w) * 100, top: at.top - (TOP_Y / island.h) * 100 };
-            return (
-              <img
-                key={`${i}-${j}-${level}`}
-                src={src}
-                alt=""
-                aria-hidden="true"
-                draggable={false}
-                className="absolute max-w-none select-none"
-                style={sprite(corner, TILE_IMG_W, level === 0 ? 0 : cellZ(i + j))}
-              />
-            );
-          }),
-        )}
+        {terrain}
 
         {/* The nest, flat on the ground over exactly the square blobs sleep in. */}
         <svg
@@ -703,25 +849,6 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           <ellipse cx="60" cy="31" rx="36" ry="15" fill="#5e3b20" stroke="#000" strokeWidth="4" />
           <path d="M14 26 Q40 14 70 18 M50 46 Q80 44 104 30" stroke="#000" strokeWidth="3" fill="none" strokeLinecap="round" />
         </svg>
-
-        {layout.cells.map((cell, n) => {
-          if (!cell.decor || !canHoldDecor(cell.ground) || cell.ramp) return null;
-          const at = { x: ((n % tiles) + 0.5) / tiles, y: (Math.floor(n / tiles) + 0.5) / tiles };
-          const { src, w } = DECOR_SPRITES[cell.decor];
-          const base = island.at(at.x * tiles, at.y * tiles, cell.height ?? 0);
-          return (
-            <img
-              key={n}
-              src={src}
-              alt=""
-              aria-hidden="true"
-              draggable={false}
-              // Anchored at the sprite's base, a little above its bottom edge.
-              className="absolute max-w-none -translate-x-1/2 -translate-y-[92%] select-none"
-              style={sprite(base, w, depthZ(tiles, at))}
-            />
-          );
-        })}
 
         {onCellPaint ? <EditGrid layout={layout} island={island} onCellPaint={onCellPaint} /> : null}
 

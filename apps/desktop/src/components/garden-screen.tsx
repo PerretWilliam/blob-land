@@ -22,7 +22,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FamilyPanel } from "@/components/family-tree";
 import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { RelationsPanel } from "@/components/relations-panel";
@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { ACTIVITY_LABELS, ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import { gardenTime, type GardenBlob, type GardenClock } from "@/lib/api";
 import type { LocalLife } from "@/lib/life";
+import { gardenIsland, gardenSize } from "@/lib/world-gen";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
 import { usePrefersReducedMotion } from "@/lib/motion";
 
@@ -58,8 +59,6 @@ const PAGE_SIZE = 50;
 const STATE_TICK_MS = 5_000;
 // How long a newborn sparkles, in garden time.
 const NEWBORN_MS = 30 * 60 * 1000;
-// The shared garden is never edited: everyone sees the same default island.
-const GARDEN_ISLAND = defaultIsland(7);
 
 export function GardenScreen({
   localPseudo,
@@ -123,6 +122,10 @@ export function GardenScreen({
   useEffect(() => setPage((p) => Math.min(p, pageCount - 1)), [pageCount]);
   // Losing the account (or never having one) means there's no garden to show.
   const inGarden = view === "garden" && account !== null;
+  // The shared garden is never edited: everyone sees the same generated
+  // island, sized for how many live there.
+  const gardenSide = gardenSize(blobs.length);
+  const gardenLayout = useMemo(() => gardenIsland(gardenSide), [gardenSide]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -161,7 +164,7 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={GARDEN_ISLAND} blobScale={0.55}
+        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={account.seed}
           clock={() => gardenTime(gardenClock)}
           onShowRelations={(seed, name) => {
             setRelationsOf({ seed, name });

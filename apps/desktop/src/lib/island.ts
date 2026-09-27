@@ -58,6 +58,9 @@ export interface IslandCell {
 export interface IslandLayout {
   size: number;
   cells: IslandCell[];
+  /** Where blobs sleep, if not the sim's own NEST corner: the garden's
+   * village. Same shape as NEST (a square on the diagonal). */
+  nest?: { min: number; max: number };
 }
 
 export const ISLAND_SIZE = 4;
@@ -242,19 +245,41 @@ export function canStopAt(island: IslandLayout, p: { x: number; y: number }): bo
 }
 
 /** `p` if a blob can stand there, else the middle of the nearest cell it can
- * stand on — the sim picks points without knowing the terrain. */
+ * stand on — the sim picks points without knowing the terrain. On a layout
+ * with its own nest, a sleeping spot in the sim's NEST corner moves there. */
 export function snapToGround(island: IslandLayout, p: GroundPoint): GroundPoint {
+  const { nest } = island;
+  if (nest && p.x >= NEST.min && p.x <= NEST.max && p.y >= NEST.min && p.y <= NEST.max) {
+    const k = (nest.max - nest.min) / (NEST.max - NEST.min);
+    p = { x: nest.min + (p.x - NEST.min) * k, y: nest.min + (p.y - NEST.min) * k };
+  }
   if (canStopAt(island, p)) return p;
-  let best: GroundPoint = p;
-  let bestD = Infinity;
-  for (let j = 0; j < island.size; j++) {
-    for (let i = 0; i < island.size; i++) {
-      const c = { x: (i + 0.5) / island.size, y: (j + 0.5) / island.size };
-      const d = (c.x - p.x) ** 2 + (c.y - p.y) ** 2;
-      if (d < bestD && canStopAt(island, c)) [best, bestD] = [c, d];
+  const [i, j] = cellOf(island.size, p);
+  const n = nearestStops(island)[j * island.size + i]!;
+  return n < 0 ? p : { x: ((n % island.size) + 0.5) / island.size, y: (Math.floor(n / island.size) + 0.5) / island.size };
+}
+
+// Per layout (layouts are immutable): each cell's nearest cell a blob can stop on.
+const nearestCache = new WeakMap<IslandLayout, Int32Array>();
+function nearestStops(island: IslandLayout): Int32Array {
+  let nearest = nearestCache.get(island);
+  if (nearest) return nearest;
+  const { size } = island;
+  const centre = (n: number) => ({ x: ((n % size) + 0.5) / size, y: (Math.floor(n / size) + 0.5) / size });
+  const stops = island.cells.map((_, n) => n).filter((n) => canStopAt(island, centre(n)));
+  // ponytail: O(cells × stops) once per layout (~16M steps at 64²); a BFS if the garden grows past that.
+  nearest = new Int32Array(size * size).fill(-1);
+  for (let n = 0; n < size * size; n++) {
+    const [i, j] = [n % size, Math.floor(n / size)];
+    let bestD = Infinity;
+    for (const m of stops) {
+      const d = ((m % size) - i) ** 2 + (Math.floor(m / size) - j) ** 2;
+      if (d < bestD) [nearest[n], bestD] = [m, d];
+      if (d === 0) break;
     }
   }
-  return best;
+  nearestCache.set(island, nearest);
+  return nearest;
 }
 
 const cellOf = (size: number, p: GroundPoint) =>
@@ -284,6 +309,28 @@ export function findPath(island: IslandLayout, from: GroundPoint, to: GroundPoin
   const [si, sj] = cellOf(size, from);
   const [ei, ej] = cellOf(size, to);
   if (si === ei && sj === ej) return [from, to];
+  // The scene asks every frame for the same few walks: route each pair of cells once.
+  let cache = pathCache.get(island);
+  if (!cache) pathCache.set(island, (cache = new Map()));
+  const cacheKey = `${si},${sj},${ei},${ej}`;
+  let route = cache.get(cacheKey);
+  if (route === undefined) {
+    if (cache.size > 5000) cache.clear();
+    route = routeCells(island, si, sj, ei, ej);
+    cache.set(cacheKey, route);
+  }
+  if (!route) return [from, to];
+  const waypoints = route.map(([i, j]) => ({ x: (i + 0.5) / size, y: (j + 0.5) / size }));
+  waypoints[0] = from;
+  waypoints[waypoints.length - 1] = to;
+  return waypoints;
+}
+
+const pathCache = new WeakMap<IslandLayout, Map<string, [number, number][] | null>>();
+
+/** The cells of the shortest hop-by-hop route, both ends included, or null. */
+function routeCells(island: IslandLayout, si: number, sj: number, ei: number, ej: number): [number, number][] | null {
+  const { size } = island;
   const key = (i: number, j: number) => j * size + i;
   const prev = new Map<number, number>();
   const seen = new Set<number>([key(si, sj)]);
@@ -303,15 +350,11 @@ export function findPath(island: IslandLayout, from: GroundPoint, to: GroundPoin
       queue.push([ni, nj]);
     }
   }
-  if (!reached) return [from, to];
+  if (!reached) return null;
   const cells: [number, number][] = [[ei, ej]];
   for (let k = key(ei, ej); k !== key(si, sj); ) {
     k = prev.get(k)!;
     cells.push([k % size, Math.floor(k / size)]);
   }
-  cells.reverse();
-  const waypoints = cells.map(([i, j]) => ({ x: (i + 0.5) / size, y: (j + 0.5) / size }));
-  waypoints[0] = from;
-  waypoints[waypoints.length - 1] = to;
-  return waypoints;
+  return cells.reverse();
 }
