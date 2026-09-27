@@ -186,7 +186,8 @@ describe("relationships", () => {
     rel = { ...rel, status: relationStatus(rel, false) };
     const seen = new Set<string>();
     for (let i = 0; i < 100; i++) {
-      rel = applyDelta(rel, { friendship: i % 2 ? 2 : -2, romance: 0, tension: 0 }, i, false);
+      // Gains shrink as friendship grows (applyDelta), so +3/-1 hovers in place, just under best friends.
+      rel = applyDelta(rel, { friendship: i % 2 ? 3 : -1, romance: 0, tension: 0 }, i, false);
       seen.add(rel.status);
     }
     expect(seen.size).toBe(1);

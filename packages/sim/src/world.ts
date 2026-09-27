@@ -103,7 +103,7 @@ const CROWD = 0.6;
 // Births slow down as the garden fills, and stop here.
 // ponytail: one soft cap for the whole garden; per-couple limits if it ever feels samey.
 export const POPULATION_CAP = 150;
-const BIRTH_COOLDOWN = 3 * DAY;
+const BIRTH_COOLDOWN = 5 * DAY;
 export const ADULT_AFTER_DAYS = [8, 12] as const;
 
 // How much a blob would rather see someone, by how they get on.
@@ -180,7 +180,8 @@ function pickCompany(world: World, group: WorldBlob[], t: number, rng: Rng): Wor
   for (const c of world.blobs.values()) {
     if (group.includes(c) || c.last.end < t || c.last.end > t + SOCIAL_WAIT) continue;
     if (!canSocialize(c.last, c.vitals, c.last.end)) continue;
-    const liking = mean(group.map((m) => MEET_WEIGHT[world.relationships.get(pairKey(m.seed, c.seed))?.status ?? "strangers"]));
+    // Geometric mean: one rival already there is enough to put a blob off joining.
+    const liking = Math.exp(mean(group.map((m) => Math.log(MEET_WEIGHT[world.relationships.get(pairKey(m.seed, c.seed))?.status ?? "strangers"]))));
     const near = 1 / (1 + 4 * Math.hypot(c.last.x - cx, c.last.y - cy));
     weights[c.seed] = liking * near * (0.3 + c.personality.sociability);
   }
@@ -329,7 +330,7 @@ function maybeBorn(
   if (outcome !== "good" || (kind !== "hug" && kind !== "kiss" && kind !== "dance")) return;
   const room = Math.max(0, 1 - world.blobs.size / POPULATION_CAP);
   const rested = union.lastBirthAt === null || at - union.lastBirthAt >= BIRTH_COOLDOWN;
-  if (rested && rng() < 0.12 * room) born(world, union, b, c, where, at, rng, out, touched);
+  if (rested && rng() < 0.05 * room) born(world, union, b, c, where, at, rng, out, touched);
 }
 
 function born(

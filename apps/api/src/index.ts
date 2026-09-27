@@ -258,7 +258,8 @@ const shown = (alias: string) => `NOT EXISTS (SELECT 1 FROM users WHERE id = ${a
 const JOURNAL_SIZE = 60;
 
 // The garden's news, newest first: couples forming and splitting, births, and
-// the fights everyone heard about. Only what has happened by now — the world
+// the fights everyone heard about (between blobs who matter to each other, or
+// can't stand each other: squabbles between acquaintances are everyday). Only what has happened by now — the world
 // step lives a little ahead. Fights are kept as long as interactions are (3 days).
 app.get("/garden/journal", requireAuth, async (c) => {
   const now = await gardenNow(c.env);
@@ -278,7 +279,9 @@ app.get("/garden/journal", requireAuth, async (c) => {
        UNION ALL
        SELECT i.ended_at, 'fight', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, NULL, NULL
        FROM interactions i JOIN blobs a ON a.seed = i.seed_a JOIN blobs b ON b.seed = i.seed_b
+       JOIN relationships r ON r.seed_a = i.seed_a AND r.seed_b = i.seed_b
        WHERE i.kind = 'argue' AND i.outcome = 'bad' AND i.ended_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+         AND r.status IN ('lovers', 'ex', 'rivals', 'complicated', 'best_friends')
      ) ORDER BY at DESC LIMIT ?2`,
   )
     .bind(now, JOURNAL_SIZE)
