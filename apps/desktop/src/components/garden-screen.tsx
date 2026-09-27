@@ -24,6 +24,7 @@ import {
   ArrowUpFromLine,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { EmptyState, RetryButton } from "@/components/empty-state";
 import { FamilyPanel } from "@/components/family-tree";
 import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { RelationsPanel } from "@/components/relations-panel";
@@ -40,6 +41,12 @@ export interface GardenScreenProps {
   initialView: "private" | "garden";
   /** Back to the main menu. */
   onMainMenu: () => void;
+  /** Whether the garden's server can be reached; `onRetryOnline` looks again. */
+  online: boolean;
+  onRetryOnline: () => Promise<boolean>;
+  /** A change that couldn't be saved, to tell the player about. */
+  notice: string | null;
+  onDismissNotice: () => void;
   localPseudo: string;
   localSeed: string;
   /** The private blob's own, locally lived timeline and identity. */
@@ -71,6 +78,10 @@ const NEWBORN_MS = 30 * 60 * 1000;
 export function GardenScreen({
   initialView,
   onMainMenu,
+  online,
+  onRetryOnline,
+  notice,
+  onDismissNotice,
   localPseudo,
   localSeed,
   life,
@@ -212,7 +223,7 @@ export function GardenScreen({
                 Garden
               </MenuItem>
             ) : (
-              <MenuItem icon={<Trees />} onClick={onJoinGarden}>
+              <MenuItem icon={<Trees />} onClick={onJoinGarden} disabled={!online}>
                 Join the garden
               </MenuItem>
             )}
@@ -288,6 +299,30 @@ export function GardenScreen({
         ) : null}
       </nav>
 
+      {notice ? <Notice text={notice} onDismiss={onDismissNotice} /> : null}
+
+      {inGarden && !online ? (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 p-6">
+          <div className="toon w-full max-w-sm">
+            <EmptyState
+              face="sad"
+              seed={account.seed}
+              title="The garden is out of reach"
+              action={
+                <div className="flex flex-col items-center gap-2">
+                  <RetryButton onRetry={onRetryOnline} />
+                  <Button variant="link" onClick={() => switchView("private")}>
+                    Go to my island
+                  </Button>
+                </div>
+              }
+            >
+              The garden lives online, and it can't be reached right now. Check your internet connection. Your own island keeps living offline.
+            </EmptyState>
+          </div>
+        </div>
+      ) : null}
+
       {inGarden && regions && regions.list.length > 1 ? <RegionSwitcher regions={regions} onVisit={onVisit} /> : null}
 
       {panel === "journal" ? <JournalPanel segments={life.segments} name={localPseudo} now={now} onClose={() => setPanel(null)} /> : null}
@@ -317,6 +352,27 @@ export function GardenScreen({
         </div>
       ) : null}
     </main>
+  );
+}
+
+// How long a notice stays up.
+const NOTICE_MS = 7_000;
+
+/** A change that didn't go through: a note at the bottom, gone after a while. */
+function Notice({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const id = setTimeout(onDismiss, NOTICE_MS);
+    return () => clearTimeout(id);
+  }, [text, onDismiss]);
+  return (
+    <div role="alert" className="toon absolute bottom-4 left-1/2 z-30 flex w-max max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 bg-sun px-4 py-2.5">
+      <p className="text-sm font-medium">
+        <span className="font-bold">Not saved.</span> {text}
+      </p>
+      <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onClick={onDismiss}>
+        <X />
+      </Button>
+    </div>
   );
 }
 
@@ -402,11 +458,13 @@ function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScree
 function MenuItem({
   icon,
   active = false,
+  disabled,
   onClick,
   children,
 }: {
   icon: ReactNode;
   active?: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -415,6 +473,7 @@ function MenuItem({
       variant={active ? "secondary" : "ghost"}
       className="justify-start"
       aria-current={active ? "page" : undefined}
+      disabled={disabled}
       onClick={onClick}
     >
       {icon}

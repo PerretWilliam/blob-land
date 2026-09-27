@@ -1,5 +1,5 @@
 import { Blobatar } from "@blobatar/react";
-import { Play, Trees, UserPlus } from "lucide-react";
+import { Play, Trees, UserPlus, WifiOff } from "lucide-react";
 import type { ReactNode } from "react";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
@@ -79,6 +79,7 @@ export function MainMenu({
   seed,
   name,
   inGarden,
+  online,
   onPlay,
   onGarden,
   onJoin,
@@ -86,6 +87,8 @@ export function MainMenu({
   seed: string;
   name: string;
   inGarden: boolean;
+  /** Whether the garden's server can be reached: the garden needs it, your island doesn't. */
+  online: boolean;
   onPlay: () => void;
   onGarden: () => void;
   onJoin: () => void;
@@ -100,14 +103,20 @@ export function MainMenu({
           <Play className="fill-current" /> My island
         </Button>
         {inGarden ? (
-          <Button size="lg" variant="secondary" onClick={onGarden}>
+          <Button size="lg" variant="secondary" onClick={onGarden} disabled={!online}>
             <Trees /> The garden
           </Button>
         ) : (
-          <Button size="lg" variant="secondary" onClick={onJoin}>
+          <Button size="lg" variant="secondary" onClick={onJoin} disabled={!online}>
             <UserPlus /> Join the garden
           </Button>
         )}
+        {!online ? (
+          <p className="flex items-start gap-2 rounded-xl border-2 border-ink bg-card px-3 py-2 text-sm font-medium" role="status">
+            <WifiOff className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            No connection: the garden needs the internet. Your own island keeps living offline.
+          </p>
+        ) : null}
       </nav>
     </MenuScreen>
   );

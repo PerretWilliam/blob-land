@@ -4,9 +4,13 @@ import { CountryField } from "@/components/country-field";
 import { normalizeSeed } from "blobatar";
 import { MenuScreen } from "@/components/main-menu";
 import { Button } from "@/components/ui/button";
-import { checkPseudo, login, register, type AuthResponse } from "@/lib/api";
+import { EmptyState, RetryButton } from "@/components/empty-state";
+import { ApiError, checkPseudo, login, register, type AuthResponse } from "@/lib/api";
 
 export interface JoinGardenScreenProps {
+  /** Whether the garden's server can be reached; `onRetry` looks again. */
+  online: boolean;
+  onRetry: () => Promise<boolean>;
   localPseudo: string;
   /** Carried over to the account's blob. */
   identity: Identity;
@@ -14,7 +18,7 @@ export interface JoinGardenScreenProps {
   onCancel: () => void;
 }
 
-export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: JoinGardenScreenProps) {
+export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoined, onCancel }: JoinGardenScreenProps) {
   const [mode, setMode] = useState<"register" | "login">("register");
   const [pseudo, setPseudo] = useState(localPseudo);
   const [password, setPassword] = useState("");
@@ -33,14 +37,13 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
       const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity, country, friend));
       onJoined(pseudo, response);
     } catch (err) {
-      // Tauri plugins reject with plain strings, not Errors.
-      const message = err instanceof Error ? err.message : String(err);
-      if (mode === "register" && message === "pseudo already taken") {
-        const availability = await checkPseudo(pseudo);
-        setSuggestions(availability.suggestions ?? []);
-        setError("That pseudo is already taken for an account — pick a variant below, or edit it yourself.");
+      if (mode === "register" && err instanceof ApiError && err.code === "pseudo already taken") {
+        const availability = await checkPseudo(pseudo).catch(() => null);
+        setSuggestions(availability?.suggestions ?? []);
+        setError("Someone in the garden already goes by that pseudo. Pick one of these, or change it yourself.");
       } else {
-        setError(message);
+        // Tauri plugins reject with plain strings, not Errors.
+        setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       setPending(false);
@@ -49,6 +52,25 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
 
   return (
     <MenuScreen seed={normalizeSeed(pseudo.trim() || localPseudo)}>
+      {!online ? (
+        <div className="toon w-full">
+          <EmptyState
+            face="sad"
+            seed={normalizeSeed(localPseudo)}
+            title="The garden is out of reach"
+            action={
+              <div className="flex flex-col items-center gap-2">
+                <RetryButton onRetry={onRetry} />
+                <Button variant="link" onClick={onCancel}>
+                  Back to the menu
+                </Button>
+              </div>
+            }
+          >
+            Joining needs an internet connection, and the garden can't be reached right now. Your own island keeps living meanwhile.
+          </EmptyState>
+        </div>
+      ) : (
       <form onSubmit={submit} className="toon flex w-full flex-col gap-3 p-5">
         <h2 className="text-xl font-bold">{mode === "login" ? "Log in to your account" : "Join the garden"}</h2>
         {mode === "register" ? (
@@ -116,6 +138,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
           Not now
         </button>
       </form>
+      )}
     </MenuScreen>
   );
 }

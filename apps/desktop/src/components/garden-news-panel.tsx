@@ -1,6 +1,7 @@
 import { Blobatar } from "@blobatar/react";
 import { Baby, Heart, HeartCrack, type LucideIcon, Newspaper, Swords, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { EmptyState, LoadFailed } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { getGardenJournal, type GardenEvent } from "@/lib/api";
 
@@ -26,13 +27,15 @@ function since(ms: number): string {
 /** What's been happening in the garden: couples, breakups, births and big fights. */
 export function GardenNewsPanel({ token, onClose }: { token: string; onClose: () => void }) {
   const [news, setNews] = useState<{ now: number; events: GardenEvent[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  // Bumped by "Try again".
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
     const load = () =>
       getGardenJournal(token).then(
         (r) => live && (setNews(r), setError(null)),
-        (e: unknown) => live && setError(e instanceof Error ? e.message : String(e)),
+        (e: unknown) => live && setError(e),
       );
     void load();
     const id = setInterval(load, REFRESH_MS);
@@ -40,7 +43,7 @@ export function GardenNewsPanel({ token, onClose }: { token: string; onClose: ()
       live = false;
       clearInterval(id);
     };
-  }, [token]);
+  }, [token, attempt]);
 
   return (
     <aside
@@ -56,13 +59,13 @@ export function GardenNewsPanel({ token, onClose }: { token: string; onClose: ()
       </header>
       <div className="overflow-y-auto p-2" aria-live="polite">
         {error && !news ? (
-          <p className="p-1 text-sm text-destructive" role="alert">
-            Couldn't load the news: {error}
-          </p>
+          <LoadFailed error={error} what="news" onRetry={() => setAttempt((n) => n + 1)} />
         ) : !news ? (
           <p className="p-1 text-sm text-muted-foreground">Loading…</p>
         ) : news.events.length === 0 ? (
-          <p className="p-1 text-sm text-muted-foreground">Nothing big yet. Give the garden a little time.</p>
+          <EmptyState face="sleepy" title="All quiet for now">
+            Couples, births, breakups and big fights will show up here. Give the garden a little time.
+          </EmptyState>
         ) : (
           <ul className="flex flex-col gap-1.5">
             {news.events.map((e) => {
