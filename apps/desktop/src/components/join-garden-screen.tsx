@@ -1,14 +1,17 @@
+import type { Identity } from "@blob-land/sim";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { checkPseudo, login, register, type AuthResponse } from "@/lib/api";
 
 export interface JoinGardenScreenProps {
   localPseudo: string;
+  /** Carried over to the account's blob. */
+  identity: Identity;
   onJoined: (pseudo: string, response: AuthResponse) => void;
   onCancel: () => void;
 }
 
-export function JoinGardenScreen({ localPseudo, onJoined, onCancel }: JoinGardenScreenProps) {
+export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: JoinGardenScreenProps) {
   const [mode, setMode] = useState<"register" | "login">("register");
   const [pseudo, setPseudo] = useState(localPseudo);
   const [password, setPassword] = useState("");
@@ -22,7 +25,7 @@ export function JoinGardenScreen({ localPseudo, onJoined, onCancel }: JoinGarden
     setSuggestions([]);
     setPending(true);
     try {
-      const response = await (mode === "login" ? login : register)(pseudo, password);
+      const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity));
       onJoined(pseudo, response);
     } catch (err) {
       const message = err instanceof Error ? err.message : "something went wrong";

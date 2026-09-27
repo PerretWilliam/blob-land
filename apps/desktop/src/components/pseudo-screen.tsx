@@ -1,16 +1,19 @@
+import type { Identity } from "@blob-land/sim";
 import { useState } from "react";
+import { IdentityFields } from "@/components/blob-gender";
 import { Button } from "@/components/ui/button";
 
 export interface PseudoScreenProps {
-  onChosen: (pseudo: string) => void;
+  onChosen: (pseudo: string, identity: Identity) => void;
 }
 
 export function PseudoScreen({ onChosen }: PseudoScreenProps) {
   const [pseudo, setPseudo] = useState("");
+  const [identity, setIdentity] = useState<Identity>({ sex: "none", attraction: "any" });
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (pseudo.trim()) onChosen(pseudo.trim());
+    if (pseudo.trim()) onChosen(pseudo.trim(), identity);
   }
 
   return (
@@ -27,6 +30,7 @@ export function PseudoScreen({ onChosen }: PseudoScreenProps) {
           onChange={(e) => setPseudo(e.target.value)}
           autoFocus
         />
+        <IdentityFields value={identity} onChange={setIdentity} />
         <Button type="submit" disabled={!pseudo.trim()}>
           Continue
         </Button>
