@@ -48,6 +48,16 @@ New art matches the sprite pack: flat bright colours, thick ink outlines, isomet
 
 The app keeps its frame rate with a full island on a modest machine. Changes to the world's drawing or the simulation are measured against the targets in [docs/PERFORMANCE.md](docs/PERFORMANCE.md), with the bench described there.
 
+## Where to start
+
+- **Found a bug?** [Open a bug report](https://github.com/PerretWilliam/blob-land/issues/new?template=bug_report.yml).
+- **Have an idea?** [Suggest a feature](https://github.com/PerretWilliam/blob-land/issues/new?template=feature_request.yml), or talk it through first in [Discussions](https://github.com/PerretWilliam/blob-land/discussions).
+- **Think a rule of the game should change?** [Propose it](https://github.com/PerretWilliam/blob-land/issues/new?template=rule_change.yml) before writing any code.
+- **Found a security problem?** Don't open an issue: see [SECURITY.md](SECURITY.md).
+- **Want to write code?** Issues labelled [good first issue](https://github.com/PerretWilliam/blob-land/labels/good%20first%20issue) are a gentle way in. Say on the issue that you're taking it, so no one else does the same work.
+
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## Local setup
 
 ```bash
@@ -70,7 +80,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/): `fe
 
 ## Before opening a PR
 
-1. Run the tests that apply to what you changed: `pnpm sim:test`, `pnpm api:test`, and `pnpm --filter @blob-land/desktop test`.
+1. Run `pnpm typecheck` and `pnpm test` (CI runs both on every pull request).
 2. If your change affects `packages/sim`, `apps/api`, or `apps/desktop` in a way users or consumers should see in a changelog, add a changeset: `pnpm changeset`, follow the prompts, and commit the generated file in `.changeset/` alongside your change.
 3. Keep commit messages conventional (see above); the commit-msg hook will catch violations locally.
 4. Say in the PR which of the rules above your change touches, if any, and how it keeps to them.

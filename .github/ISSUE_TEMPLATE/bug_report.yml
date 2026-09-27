@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in Blob Land doesn't work the way it should.
+title: "bug: "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. The more we can see of what happened, the faster it gets fixed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect to see instead?
+      placeholder: My blob walked through a wall on the garden's second island, instead of going around it.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we see it too?
+      description: The steps that lead to it, as precisely as you can.
+      placeholder: |
+        1. Open the garden
+        2. Go to the second island
+        3. Watch the blob near the hill
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - My island
+        - The garden
+        - The main menu
+        - Joining or logging in
+        - The journal, family tree, relations or news
+        - The island editor
+        - Somewhere else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Blob Land version
+      description: Or the commit, if you built it yourself.
+      placeholder: 0.2.0
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, recordings or logs
+      description: Anything that shows it. Drag files in here.
