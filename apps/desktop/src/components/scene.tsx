@@ -3,7 +3,7 @@ import { Blobatar } from "@blobatar/react";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ATTRACTION_LABELS, BlobGenderSign, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
 import { Button } from "@/components/ui/button";
 import { CountryField, countryName } from "@/components/country-field";
@@ -480,9 +480,16 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     return () => observer.disconnect();
   }, []);
   // A new layout size: measure it now, before the next frame places anything.
+  // Everything is re-placed for it before that frame paints, too, rather than
+  // on the next one: in between, the camera and blobs would sit where the old
+  // size put them, and the view would jolt.
   useLayoutEffect(() => {
     resRef.current = res;
     measure();
+    if (!camera.current) return;
+    for (const [seed, p] of shown.current) applyPosition(seed, p);
+    applyCamera(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [res]);
   // In the box's own px, like everything inside it.
   const blobSize = res * Math.max(32 / baseZoom, Math.round(((fitPx * 2 * HALF_W) / island.w) * blobScale));
@@ -491,6 +498,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   // Per blob: the anchor (moved), its hopping body and shadow, and its label.
   const els = useRef(new Map<string, { el: HTMLElement; body: HTMLElement | null; shadow: HTMLElement | null }>());
   const labels = useRef(new Map<string, HTMLElement>());
+  // The camera's leftover scale, as last written to labels and map dots.
+  const zoomVar = useRef(1);
   // `phase` drives the gait; `walk` in [0, 1] is how much the blob is walking,
   // eased so a stop settles instead of freezing mid-air; `hop` in [0, 1] is how
   // much of that walk is hopping rather than waddling; `lean` tilts it.
@@ -564,9 +573,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   function arrived(seed: string, still: boolean) {
     for (const el of [els.current.get(seed)?.el, labels.current.get(seed)]) {
       if (!el) continue;
-      el.dataset.still = still ? "1" : "0";
+      if (el.dataset.still !== (still ? "1" : "0")) el.dataset.still = still ? "1" : "0";
       const key = el.dataset.fxKey ?? "";
-      if (!still || el.dataset.synced === key) continue;
+      // No meeting, nothing to sync: getAnimations forces a style recalc, one
+      // per blob walking into view, which is what made zooming out stutter.
+      if (!still || !key || el.dataset.synced === key) continue;
       el.dataset.synced = key;
       for (const a of el.getAnimations({ subtree: true })) if ((a as CSSAnimation).animationName?.startsWith("fx-")) a.startTime = 0;
     }
@@ -617,8 +628,14 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       const z = 1 + (next.z - 1) * CLOUD_PARALLAX;
       clouds.style.transform = `translate(${w / 2 - next.x * z}px, ${h / 2 - next.y * z}px) scale(${z})`;
     }
-    // Labels divide by this to keep their on-screen size while zoomed.
-    cam.style.setProperty("--camera-zoom", String(scale));
+    // Labels and map dots divide by this to keep their on-screen size while
+    // zoomed. Set on each of them, not on the camera: a custom property there
+    // would restyle every sprite on the island each frame of a zoom.
+    if (scale !== zoomVar.current) {
+      zoomVar.current = scale;
+      for (const el of labels.current.values()) el.style.setProperty("--camera-zoom", String(scale));
+      if (inViewRef.current.map) for (const { el } of els.current.values()) el.style.setProperty("--camera-zoom", String(scale));
+    }
     cull();
   }
 
@@ -818,6 +835,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       els.current.delete(seed);
       return;
     }
+    node.style.setProperty("--camera-zoom", String(zoomVar.current));
     els.current.set(seed, {
       el: node,
       body: node.querySelector<HTMLElement>("[data-body]"),
@@ -840,6 +858,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       labels.current.delete(seed);
       return;
     }
+    node.style.setProperty("--camera-zoom", String(zoomVar.current));
     labels.current.set(seed, node);
     const p = shown.current.get(seed);
     if (p) applyPosition(seed, p);
@@ -1024,7 +1043,9 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
 
       </div>
 
-      <div ref={cameraRef} className="absolute inset-0 origin-top-left">
+      {/* Its own layer: a zoom scales what's drawn instead of repainting every
+          sprite each frame (`res` redraws it sharp now and then). */}
+      <div ref={cameraRef} className="absolute inset-0 origin-top-left will-change-transform">
       <div
         ref={islandRef}
         className="absolute top-[54%] left-1/2 -translate-x-1/2 -translate-y-1/2"
@@ -1295,15 +1316,26 @@ function EditGrid({
   );
 }
 
-function SceneBlobView({
-  blob,
-  moment,
-  size,
-  reducedMotion,
-  selected,
-  onSelect,
-  placeRef,
-}: {
+/*
+ * The scene re-renders whenever what's in view changes (often, while zooming
+ * or panning): only re-draw a blob when what it shows changed. Its callbacks
+ * act through refs keyed by its seed, so fresh copies of them don't count.
+ */
+const sameBlobView = (a: SceneBlobViewProps, b: SceneBlobViewProps) =>
+  a.size === b.size &&
+  a.reducedMotion === b.reducedMotion &&
+  a.selected === b.selected &&
+  a.blob.seed === b.blob.seed &&
+  a.blob.label === b.blob.label &&
+  a.blob.expression === b.blob.expression &&
+  a.blob.sex === b.blob.sex &&
+  a.moment?.key === b.moment?.key &&
+  a.moment?.kind === b.moment?.kind &&
+  a.moment?.face === b.moment?.face &&
+  a.moment?.turn === b.moment?.turn &&
+  a.moment?.count === b.moment?.count;
+
+interface SceneBlobViewProps {
   blob: SceneBlob;
   moment: Moment | null;
   size: number;
@@ -1312,7 +1344,17 @@ function SceneBlobView({
   /** `at`: where it was clicked, to reach the blobs standing behind it. */
   onSelect: (at?: { x: number; y: number }) => void;
   placeRef: (node: HTMLElement | null) => void;
-}) {
+}
+
+const SceneBlobView = memo(function SceneBlobView({
+  blob,
+  moment,
+  size,
+  reducedMotion,
+  selected,
+  onSelect,
+  placeRef,
+}: SceneBlobViewProps) {
   // R4: each blob still only animates while it is on screen.
   const [inViewRef, inView] = useInView();
   return (
@@ -1370,7 +1412,7 @@ function SceneBlobView({
       </div>
     </div>
   );
-}
+}, sameBlobView);
 
 const ACTIVITY_ICONS = { sleep: Moon, wake: Sunrise, rest: Coffee, explore: Footprints, discover: Sparkles, meet: Users } as const;
 export const ACTIVITY_LABELS: Record<Activity, string> = {
