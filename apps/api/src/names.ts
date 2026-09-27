@@ -1,30 +1,19 @@
-import { pick, randomRng, type Rng } from "@blob-land/sim";
+import { MAX_NAME_LENGTH, pick, randomRng, type Rng } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
-
-export const MAX_NAME_LENGTH = 24;
 
 /**
  * Account pseudos and children's names are one namespace, compared on
- * normalizeSeed (so "Luna" and "luna " collide). `exceptBlob` lets a child
- * keep its own name when renamed to a variant of it.
- *
- * ponytail: check-then-write, so two different writers (a sign-up and a
- * birth) can race to the same key; the UNIQUE columns only catch same-table
- * races. A shared names table with one UNIQUE key closes it if it ever shows.
+ * normalizeSeed (so "Luna" and "luna " collide), held in D1's blob directory
+ * under one UNIQUE key. `exceptBlob` lets a child keep its own name when
+ * renamed to a variant of it.
  */
 export async function nameTaken(db: D1Database, name: string, exceptBlob?: string): Promise<boolean> {
-  const key = normalizeSeed(name);
-  const hit = await db
-    .prepare(
-      `SELECT 1 FROM users WHERE seed = ?1
-       UNION ALL
-       SELECT 1 FROM blobs WHERE name_key = ?1 AND seed IS NOT ?2
-       LIMIT 1`,
-    )
-    .bind(key, exceptBlob ?? null)
-    .first();
+  const hit = await db.prepare(`SELECT 1 FROM blobs WHERE name_key = ? AND seed IS NOT ?`).bind(normalizeSeed(name), exceptBlob ?? null).first();
   return hit !== null;
 }
+
+/** Whether a write failed on a UNIQUE key: the name was taken in between. */
+export const isTaken = (e: unknown) => e instanceof Error && e.message.includes("UNIQUE");
 
 /** A trimmed name, or null when it's empty, too long, or has nothing a seed can be made of. */
 export function cleanName(raw: unknown): string | null {
@@ -47,12 +36,18 @@ function babyName(rng: Rng): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-/** The first rolled name nobody holds yet. After enough misses, numbered. */
-export async function freeBabyName(db: D1Database, rng: Rng = randomRng): Promise<string> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const name = babyName(rng);
-    if (!(await nameTaken(db, name))) return name;
+/**
+ * Holds the first rolled name nobody has yet for a newborn, in the garden-wide
+ * directory, and returns it. After enough misses, numbered.
+ */
+export async function reserveBabyName(db: D1Database, seed: string, region: number, bornAt: number, rng: Rng = randomRng): Promise<string> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const name = attempt < 20 ? babyName(rng) : `${babyName(rng)}${attempt}`;
+    const { meta } = await db
+      .prepare(`INSERT OR IGNORE INTO blobs (seed, name_key, region, born_at) VALUES (?, ?, ?, ?)`)
+      .bind(seed, normalizeSeed(name), region, bornAt)
+      .run();
+    if (meta.changes > 0) return name;
   }
-  const base = babyName(rng);
-  for (let n = 2; ; n++) if (!(await nameTaken(db, `${base}${n}`))) return `${base}${n}`;
+  throw new Error(`no free name for ${seed}`);
 }

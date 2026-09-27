@@ -1,4 +1,4 @@
-import { activityLog, listNames, segmentAt, type Identity } from "@blob-land/sim";
+import { activityLog, gardenSize, listNames, segmentAt, type Identity } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
@@ -28,8 +28,9 @@ import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { RelationsPanel } from "@/components/relations-panel";
 import { Button } from "@/components/ui/button";
 import { ACTIVITY_LABELS, ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
-import { gardenTime, type GardenBlob, type GardenClock } from "@/lib/api";
+import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import type { LocalLife } from "@/lib/life";
+import { useGardenIsland } from "@/lib/use-garden-island";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
 import { usePrefersReducedMotion } from "@/lib/motion";
 
@@ -42,6 +43,10 @@ export interface GardenScreenProps {
   onCountryChange: (country: string | null) => void;
   account: { pseudo: string; seed: string; token: string } | null;
   blobs: GardenBlob[];
+  /** The region on screen, the player's own, every region, and the island's side, once loaded. */
+  regions: { region: number; home: number; list: GardenRegion[]; size: number } | null;
+  /** Go and see another region's island. */
+  onVisit: (region: number) => void;
   /** The garden's time, which may run faster than the private blob's (dev). */
   gardenClock: GardenClock;
   visible: boolean;
@@ -52,14 +57,11 @@ export interface GardenScreenProps {
   onIslandChange: (island: IslandLayout) => void;
 }
 
-const PAGE_SIZE = 50;
 // How often activities and faces are re-read off the timelines: segments last
 // minutes, so a few seconds of lag is invisible.
 const STATE_TICK_MS = 5_000;
 // How long a newborn sparkles, in garden time.
 const NEWBORN_MS = 30 * 60 * 1000;
-// The shared garden is never edited: everyone sees the same default island.
-const GARDEN_ISLAND = defaultIsland(7);
 
 export function GardenScreen({
   localPseudo,
@@ -69,6 +71,8 @@ export function GardenScreen({
   onCountryChange,
   account,
   blobs,
+  regions,
+  onVisit,
   gardenClock,
   visible,
   onToggleVisibility,
@@ -116,13 +120,13 @@ export function GardenScreen({
     };
   };
   const reducedMotion = usePrefersReducedMotion();
-  const pageCount = Math.max(1, Math.ceil(blobs.length / PAGE_SIZE));
-  const [page, setPage] = useState(0);
-  // Clamp rather than reset to 0, so a garden that shrinks below the current
-  // page doesn't silently yank the visitor back to the first page.
-  useEffect(() => setPage((p) => Math.min(p, pageCount - 1)), [pageCount]);
   // Losing the account (or never having one) means there's no garden to show.
   const inGarden = view === "garden" && account !== null;
+  // The shared garden is never edited: everyone sees the same generated
+  // island, sized by the server for how many live there.
+  const gardenSide = regions?.size ?? gardenSize(blobs.length);
+  const atHome = !regions || regions.region === regions.home;
+  const gardenLayout = useGardenIsland(inGarden ? gardenSide : null);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -131,7 +135,6 @@ export function GardenScreen({
     return () => window.removeEventListener("keydown", onKey);
   }, [menuOpen]);
 
-  const pageBlobs = blobs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   // A taken pseudo forces the account onto a different seed from the private
   // blob — when that happens, show both rather than pretending they're one.
   const accountIsSprout = account !== null && account.seed !== localSeed;
@@ -149,9 +152,8 @@ export function GardenScreen({
   ];
   // The sprout lives in the garden; it shows up here once the garden has loaded.
   if (accountIsSprout && ownGardenBlob) privateBlobs.push(fromGarden(ownGardenBlob, `${account.pseudo} (garden sprout)`));
-  const gardenBlobs: SceneBlob[] = pageBlobs.map((blob) => fromGarden(blob));
-  // Your own blob is always in the garden you're looking at, even when listed on another page.
-  if (ownGardenBlob && !gardenBlobs.some((b) => b.seed === ownGardenBlob.seed)) gardenBlobs.unshift(fromGarden(ownGardenBlob));
+  // Everyone in the region at once: the scene only draws what's in view.
+  const gardenBlobs: SceneBlob[] = inGarden ? blobs.map((blob) => fromGarden(blob)) : [];
 
   function switchView(next: "private" | "garden") {
     setView(next);
@@ -161,7 +163,7 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={GARDEN_ISLAND} blobScale={0.55}
+        gardenLayout && <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={atHome ? account.seed : undefined}
           clock={() => gardenTime(gardenClock)}
           onShowRelations={(seed, name) => {
             setRelationsOf({ seed, name });
@@ -259,19 +261,6 @@ export function GardenScreen({
                 <MenuItem icon={visible ? <Eye /> : <EyeOff />} onClick={onToggleVisibility}>
                   {visible ? "Visible to others" : "Hidden from others"}
                 </MenuItem>
-                {pageCount > 1 ? (
-                  <div className="flex items-center justify-between px-1">
-                    <Button variant="ghost" size="icon-sm" aria-label="Previous page" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                      <ChevronLeft />
-                    </Button>
-                    <span className="text-xs text-muted-foreground">
-                      Page {page + 1} of {pageCount}
-                    </span>
-                    <Button variant="ghost" size="icon-sm" aria-label="Next page" disabled={page >= pageCount - 1} onClick={() => setPage((p) => p + 1)}>
-                      <ChevronRight />
-                    </Button>
-                  </div>
-                ) : null}
               </>
             ) : (
               <MenuItem
@@ -288,6 +277,8 @@ export function GardenScreen({
           </div>
         ) : null}
       </nav>
+
+      {inGarden && regions && regions.list.length > 1 ? <RegionSwitcher regions={regions} onVisit={onVisit} /> : null}
 
       {panel === "journal" ? <JournalPanel segments={life.segments} name={localPseudo} now={now} onClose={() => setPanel(null)} /> : null}
       {panel === "family" ? (
@@ -365,6 +356,36 @@ function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["s
         ))}
       </ol>
     </aside>
+  );
+}
+
+/** The garden's islands, one per region: step through them, and back home. */
+function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScreenProps["regions"]>; onVisit: (region: number) => void }) {
+  const { list, region, home } = regions;
+  const k = list.findIndex((r) => r.region === region);
+  const [prev, next] = [list[k - 1], list[k + 1]];
+  const count = list[k]?.blobs ?? 0;
+  return (
+    <nav
+      aria-label="Islands"
+      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md"
+    >
+      <Button variant="ghost" size="icon-sm" aria-label="Previous island" disabled={!prev} onClick={() => prev && onVisit(prev.region)}>
+        <ChevronLeft />
+      </Button>
+      <p className="min-w-32 text-center text-sm" aria-live="polite">
+        <span className="font-medium">{region === home ? "Your island" : `Island ${region + 1}`}</span>
+        <span className="text-muted-foreground"> · {count} {count === 1 ? "blob" : "blobs"}</span>
+      </p>
+      <Button variant="ghost" size="icon-sm" aria-label="Next island" disabled={!next} onClick={() => next && onVisit(next.region)}>
+        <ChevronRight />
+      </Button>
+      {region !== home ? (
+        <Button variant="secondary" size="sm" onClick={() => onVisit(home)}>
+          <Home /> Home
+        </Button>
+      ) : null}
+    </nav>
   );
 }
 

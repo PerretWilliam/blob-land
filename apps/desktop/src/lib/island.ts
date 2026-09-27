@@ -26,21 +26,6 @@ export const canRamp = (ground: Ground) => ground === "grass" || ground === "san
 /** How many blocks a cell can be stacked above the base level. */
 export const MAX_HEIGHT = 2;
 
-// Decor ids from before the full pack was exported, so older island.json files still load.
-const LEGACY_DECOR: Record<string, DecorKind> = {
-  "tree-poplar": "tree-2",
-  "tree-pine": "tree-4",
-  "tree-oak": "tree-6",
-  "bush-small": "bush-3",
-  "bush-large": "bush-4",
-  rock: "rock-2",
-  rocks: "rock-4",
-  "rock-sand": "rock-sand-2",
-  "rocks-sand": "rock-sand-8",
-  "cactus-tall": "cactus-4",
-  "cactus-short": "cactus-2",
-};
-
 export interface IslandCell {
   ground: Ground;
   decor?: DecorKind;
@@ -48,6 +33,8 @@ export interface IslandCell {
   height?: number;
   /** A slope up to the neighbour one block higher (see `rampDirection`). */
   ramp?: true;
+  /** On a river: a footbridge, straight across it. Walked over, never stopped on. */
+  bridge?: true;
 }
 
 /**
@@ -58,6 +45,10 @@ export interface IslandCell {
 export interface IslandLayout {
   size: number;
   cells: IslandCell[];
+  /** Where blobs sleep, if not the sim's own NEST corner: the garden's
+   * nests, each a square (centre, half side) in ground units. Every blob has
+   * its own one (see `homeNest`). */
+  nests?: { x: number; y: number; r: number }[];
 }
 
 export const ISLAND_SIZE = 4;
@@ -124,13 +115,8 @@ function parseIsland(value: unknown): IslandLayout | null {
     if (height) cell.height = height as number;
     if (ramp) cell.ramp = true;
     if (decor !== undefined) {
-      const kind = DECOR_KINDS.includes(decor as DecorKind)
-        ? (decor as DecorKind)
-        : typeof decor === "string" && Object.prototype.hasOwnProperty.call(LEGACY_DECOR, decor)
-          ? LEGACY_DECOR[decor]
-          : undefined;
-      if (!kind) return null;
-      cell.decor = kind;
+      if (!DECOR_KINDS.includes(decor as DecorKind)) return null;
+      cell.decor = decor as DecorKind;
     }
     parsed.push(cell);
   }
@@ -241,35 +227,78 @@ export function canStopAt(island: IslandLayout, p: { x: number; y: number }): bo
   return !cell || (canPass(cell.ground) && !cell.decor);
 }
 
+/** Which of the layout's nests a blob sleeps in: always the same one while
+ * the island stays the same, and the same as its partner's. */
+export function homeNest(island: IslandLayout, seed: string, partner?: string | null): number {
+  const count = island.nests?.length ?? 0;
+  if (count < 2) return 0;
+  const key = partner && partner < seed ? partner : seed;
+  let h = 0;
+  for (let k = 0; k < key.length; k++) h = (Math.imul(h, 31) + key.charCodeAt(k)) | 0;
+  return (h >>> 0) % count;
+}
+
 /** `p` if a blob can stand there, else the middle of the nearest cell it can
- * stand on — the sim picks points without knowing the terrain. */
-export function snapToGround(island: IslandLayout, p: GroundPoint): GroundPoint {
+ * stand on — the sim picks points without knowing the terrain. On a layout
+ * with its own nests, a sleeping spot in the sim's NEST corner moves into
+ * nest `home` (see `homeNest`). */
+export function snapToGround(island: IslandLayout, p: GroundPoint, home = 0): GroundPoint {
+  const nest = island.nests?.[home % island.nests.length];
+  if (nest && p.x >= NEST.min && p.x <= NEST.max && p.y >= NEST.min && p.y <= NEST.max) {
+    const k = (2 * nest.r) / (NEST.max - NEST.min);
+    p = { x: nest.x - nest.r + (p.x - NEST.min) * k, y: nest.y - nest.r + (p.y - NEST.min) * k };
+  }
   if (canStopAt(island, p)) return p;
-  let best: GroundPoint = p;
-  let bestD = Infinity;
-  for (let j = 0; j < island.size; j++) {
-    for (let i = 0; i < island.size; i++) {
-      const c = { x: (i + 0.5) / island.size, y: (j + 0.5) / island.size };
-      const d = (c.x - p.x) ** 2 + (c.y - p.y) ** 2;
-      if (d < bestD && canStopAt(island, c)) [best, bestD] = [c, d];
+  const [i, j] = cellOf(island.size, p);
+  const n = nearestStops(island)[j * island.size + i]!;
+  return n < 0 ? p : { x: ((n % island.size) + 0.5) / island.size, y: (Math.floor(n / island.size) + 0.5) / island.size };
+}
+
+// Per layout (layouts are immutable): each cell's nearest cell a blob can stop on.
+const nearestCache = new WeakMap<IslandLayout, Int32Array>();
+function nearestStops(island: IslandLayout): Int32Array {
+  let nearest = nearestCache.get(island);
+  if (nearest) return nearest;
+  const { size } = island;
+  const centre = (n: number) => ({ x: ((n % size) + 0.5) / size, y: (Math.floor(n / size) + 0.5) / size });
+  // A breadth-first flood out from every stop at once: each cell gets the
+  // first stop to reach it, the nearest in steps (near enough in distance).
+  nearest = new Int32Array(size * size).fill(-1);
+  const queue: number[] = [];
+  island.cells.forEach((_, n) => {
+    if (canStopAt(island, centre(n))) nearest![n] = n;
+    if (nearest![n] >= 0) queue.push(n);
+  });
+  for (let head = 0; head < queue.length; head++) {
+    const n = queue[head]!;
+    const [i, j] = [n % size, Math.floor(n / size)];
+    for (const [, di, dj] of EDGES) {
+      const [a, b] = [i + di, j + dj];
+      if (a < 0 || b < 0 || a >= size || b >= size || nearest[b * size + a]! >= 0) continue;
+      nearest[b * size + a] = nearest[n]!;
+      queue.push(b * size + a);
     }
   }
-  return best;
+  nearestCache.set(island, nearest);
+  return nearest;
 }
 
 const cellOf = (size: number, p: GroundPoint) =>
   [Math.min(size - 1, Math.max(0, Math.floor(p.x * size))), Math.min(size - 1, Math.max(0, Math.floor(p.y * size)))] as const;
 
 /** Whether a blob may step directly from one orthogonally adjacent cell to
- * another: neither is water, and any height difference is bridged by a ramp
+ * another: neither is water (bar a bridge), and any height difference is bridged by a ramp
  * climbing the right way (see `rampDirection`) — never a bare cliff. */
+// Called millions of times while an island is laid out and routed: no temporary arrays in here.
 export function canStep(island: IslandLayout, i1: number, j1: number, i2: number, j2: number): boolean {
-  const [a, b] = [cellAt(island, i1, j1), cellAt(island, i2, j2)];
-  if (!a || !b || !canPass(a.ground) || !canPass(b.ground)) return false;
+  const a = cellAt(island, i1, j1);
+  const b = cellAt(island, i2, j2);
+  if (!a || !b || !(canPass(a.ground) || a.bridge) || !(canPass(b.ground) || b.bridge)) return false;
   const diff = (b.height ?? 0) - (a.height ?? 0);
   if (Math.abs(diff) > 1) return false;
   if (diff === 0) return true;
-  const edge = EDGES.find(([, di, dj]) => i1 + di === i2 && j1 + dj === j2)?.[0];
+  let edge: Edge | undefined;
+  for (const e of EDGES) if (i1 + e[1] === i2 && j1 + e[2] === j2) edge = e[0];
   if (!edge) return false;
   return diff === 1 ? rampDirection(island, i1, j1) === edge : rampDirection(island, i2, j2) === OPPOSITE_EDGE[edge];
 }
@@ -284,34 +313,63 @@ export function findPath(island: IslandLayout, from: GroundPoint, to: GroundPoin
   const [si, sj] = cellOf(size, from);
   const [ei, ej] = cellOf(size, to);
   if (si === ei && sj === ej) return [from, to];
-  const key = (i: number, j: number) => j * size + i;
-  const prev = new Map<number, number>();
-  const seen = new Set<number>([key(si, sj)]);
-  const queue: [number, number][] = [[si, sj]];
-  let reached = false;
-  for (let head = 0; head < queue.length; head++) {
-    const [i, j] = queue[head]!;
-    if (i === ei && j === ej) {
-      reached = true;
-      break;
-    }
-    for (const [, di, dj] of EDGES) {
-      const [ni, nj] = [i + di, j + dj];
-      if (ni < 0 || nj < 0 || ni >= size || nj >= size || seen.has(key(ni, nj)) || !canStep(island, i, j, ni, nj)) continue;
-      seen.add(key(ni, nj));
-      prev.set(key(ni, nj), key(i, j));
-      queue.push([ni, nj]);
-    }
+  // The scene asks every frame for the same few walks: route each pair of cells once.
+  let cache = pathCache.get(island);
+  if (!cache) pathCache.set(island, (cache = new Map()));
+  const cacheKey = ((sj * size + si) * size + ej) * size + ei;
+  let route = cache.get(cacheKey);
+  if (route === undefined) {
+    if (cache.size > 5000) cache.clear();
+    route = routeCells(island, sj * size + si, ej * size + ei);
+    cache.set(cacheKey, route);
   }
-  if (!reached) return [from, to];
-  const cells: [number, number][] = [[ei, ej]];
-  for (let k = key(ei, ej); k !== key(si, sj); ) {
-    k = prev.get(k)!;
-    cells.push([k % size, Math.floor(k / size)]);
-  }
-  cells.reverse();
-  const waypoints = cells.map(([i, j]) => ({ x: (i + 0.5) / size, y: (j + 0.5) / size }));
+  if (!route) return [from, to];
+  const waypoints = Array.from(route, (n) => ({ x: ((n % size) + 0.5) / size, y: (Math.floor(n / size) + 0.5) / size }));
   waypoints[0] = from;
   waypoints[waypoints.length - 1] = to;
   return waypoints;
+}
+
+// Routes as cell indices (j * size + i), keyed by both ends.
+const pathCache = new WeakMap<IslandLayout, Map<number, Int32Array | null>>();
+// One set of buffers for every search: a route is asked for often, on a big
+// map, and allocating per search is what kept the webview's memory high.
+let search = { prev: new Int32Array(0), seen: new Uint32Array(0), queue: new Int32Array(0), mark: 0 };
+
+/** The cells of the shortest hop-by-hop route from cell `start` to `end`, both included, or null. */
+function routeCells(island: IslandLayout, start: number, end: number): Int32Array | null {
+  const { size } = island;
+  const cells = size * size;
+  if (search.prev.length < cells) search = { prev: new Int32Array(cells), seen: new Uint32Array(cells), queue: new Int32Array(cells), mark: 0 };
+  const { prev, seen, queue } = search;
+  // A new mark per search: no clearing `seen` between them.
+  const mark = ++search.mark;
+  seen[start] = mark;
+  let tail = 0;
+  queue[tail++] = start;
+  let reached = false;
+  for (let head = 0; head < tail; head++) {
+    const n = queue[head]!;
+    if (n === end) {
+      reached = true;
+      break;
+    }
+    const i = n % size;
+    const j = (n - i) / size;
+    for (const e of EDGES) {
+      const ni = i + e[1];
+      const nj = j + e[2];
+      const m = nj * size + ni;
+      if (ni < 0 || nj < 0 || ni >= size || nj >= size || seen[m] === mark || !canStep(island, i, j, ni, nj)) continue;
+      seen[m] = mark;
+      prev[m] = n;
+      queue[tail++] = m;
+    }
+  }
+  if (!reached) return null;
+  let length = 1;
+  for (let k = end; k !== start; k = prev[k]!) length++;
+  const route = new Int32Array(length);
+  for (let k = end, at = length - 1; at >= 0; k = prev[k]!, at--) route[at] = k;
+  return route;
 }

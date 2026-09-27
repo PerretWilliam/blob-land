@@ -238,23 +238,23 @@ function art(kind: InteractionKind, outcome: Outcome): ReactNode {
 }
 
 /**
- * The little show above a blob during a meeting — a speech bubble, hearts,
+ * The little show beside a blob during a meeting — a speech bubble, hearts,
  * music notes, a rain cloud… — drawn toward whoever it's with. It only plays
  * once the blob has arrived (the scene flags that on the anchor with
  * `data-still`), and speakers take turns (`--turn` of `--count`).
  */
-/** `size`: the blob's; `bottom`: how high above its feet the show floats (over its name). */
-export function InteractionFx({ moment, size, bottom }: { moment: Moment; size: number; bottom: number }) {
+/** `size`: the blob's. */
+export function InteractionFx({ moment, size }: { moment: Moment; size: number }) {
   // One ball, one gift, one heart between them: shown by the first of them only.
   const shared = SHARED.has(moment.kind) || (moment.outcome === "bad" && ROMANTIC.has(moment.kind));
   if (shared && moment.turn !== 0) return null;
   const style = {
     "--turn": moment.turn,
     "--count": moment.count,
-    width: size * 0.7,
-    // Leaning toward the others.
-    bottom,
-    left: moment.face * size * 0.28,
+    width: size * 0.6,
+    // Beside its head, on the side of the others, like a comic's speech bubble.
+    bottom: size * 0.45,
+    left: moment.face * size * 0.6,
   } as CSSProperties;
   return (
     <div aria-hidden="true" data-fx={moment.kind} className="fx pointer-events-none absolute -translate-x-1/2" style={style}>
@@ -269,9 +269,10 @@ export function InteractionFx({ moment, size, bottom }: { moment: Moment; size: 
 export type Aura = "newborn" | "heartbroken";
 
 /** A while after something big: a newborn sparkles, a blob just dumped carries a broken heart. */
-export function AuraFx({ aura, size, bottom }: { aura: Aura; size: number; bottom: number }) {
+export function AuraFx({ aura, size }: { aura: Aura; size: number }) {
   return (
-    <div aria-hidden="true" data-aura={aura} className="pointer-events-none absolute -translate-x-1/2" style={{ width: size * 0.7, bottom }}>
+    // Around its head.
+    <div aria-hidden="true" data-aura={aura} className="pointer-events-none absolute -translate-x-1/2" style={{ width: size, bottom: size * 0.3 }}>
       <svg viewBox="0 0 40 36" className="block w-full overflow-visible">
         {aura === "newborn" ? (
           <>

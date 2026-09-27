@@ -33,7 +33,24 @@ export interface GardenResponse {
   now: number;
   /** How fast the garden's clock runs: 1, or more in a sped-up local dev garden. */
   rate: number;
+  /** The region of the garden these blobs live in: the one asked for, else the player's own. */
+  region: number;
+  /** The player's own region. */
+  home: number;
+  /** Every region, and how many blobs live there. */
+  regions: GardenRegion[];
+  /** The region's island side, in cells (see gardenIsland). */
+  size: number;
+  /** How many steps the region has lived: pass it back as `since` to get only what's new. */
+  step: number;
+  /** An answer to `since`: every blob, but only the timeline written since then. */
+  delta: boolean;
   blobs: GardenBlob[];
+}
+
+export interface GardenRegion {
+  region: number;
+  blobs: number;
 }
 
 /** The garden's clock, as last read from the server. */
@@ -69,8 +86,9 @@ export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
   return request(`/pseudo/${encodeURIComponent(pseudo)}`);
 }
 
-export function register(pseudo: string, password: string, identity: Identity, country: string | null = null): Promise<AuthResponse> {
-  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country }) });
+/** `friend`: an account's pseudo, to live on their island. */
+export function register(pseudo: string, password: string, identity: Identity, country: string | null = null, friend = ""): Promise<AuthResponse> {
+  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country, friend }) });
 }
 
 export function setCountry(token: string, country: string | null): Promise<{ ok: true }> {
@@ -85,8 +103,12 @@ export function login(pseudo: string, password: string): Promise<AuthResponse> {
   return request("/auth/login", { method: "POST", body: JSON.stringify({ pseudo, password }) });
 }
 
-export function getGarden(token: string): Promise<GardenResponse> {
-  return request("/garden", { headers: authHeader(token) });
+/** One region of the garden: `region`, or the player's own; `since`, a `step` from an earlier answer about it. */
+export function getGarden(token: string, region?: number, since?: number): Promise<GardenResponse> {
+  const query = new URLSearchParams();
+  if (region !== undefined) query.set("region", String(region));
+  if (since !== undefined) query.set("since", String(since));
+  return request(`/garden${query.size ? `?${query}` : ""}`, { headers: authHeader(token) });
 }
 
 export function setVisibility(token: string, visible: boolean): Promise<{ ok: true }> {

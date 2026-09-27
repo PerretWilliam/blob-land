@@ -126,36 +126,16 @@
     }
   html {
     @apply font-sans;
+    /* A desktop app: the window never bounces or scrolls past its edges. */
+    overscroll-behavior: none;
     }
 }
-/* Clouds drifting across a scene's sky (see components/scene.tsx). */
-@keyframes cloud-drift {
-  from {
-    transform: translateX(-25vw);
-  }
-  to {
-    transform: translateX(105vw);
-  }
-}
-
-/* A blob's gender sign lifts with the blob on hover, as blobatar's own .mo-root:hover does
-   (see components/blob-gender.tsx). */
-[data-body]:hover [data-gender] .mo-root {
-  transform: translateY(-1.5px) scale(1.04);
-}
-
-/* A black outline that follows a blob's silhouette (hover / selected, see components/scene.tsx). */
-@utility blob-outline {
-  filter: drop-shadow(2px 0 0 #000) drop-shadow(-2px 0 0 #000) drop-shadow(0 2px 0 #000) drop-shadow(0 -2px 0 #000);
-}
-
 /*
- * Meetings (see components/interaction-fx.tsx). The effects above a blob and
- * the way its body moves only play once it has arrived: the scene sets
- * data-still on the blob's anchor. Body moves animate the individual
- * translate/rotate/scale properties, which stack under the walk cycle's
- * inline transform instead of replacing it. Speakers take turns: each has a
- * 1.8s slot in a cycle of --count slots, starting at slot --turn.
+ * Meetings (see components/interaction-fx.tsx). The effects above a blob
+ * only play once it has arrived: the scene sets data-still on its label.
+ * Speakers take turns: each has a 1.8s slot in a cycle of --count slots,
+ * starting at slot --turn. (How the body itself moves is drawn by the world,
+ * lib/blob-motion.ts.)
  */
 .fx {
   transition: opacity 0.4s;
@@ -216,34 +196,6 @@
 }
 .fx-drip {
   animation: fx-drip 1.4s ease-in infinite;
-}
-
-[data-still="1"] [data-move="chat"] {
-  animation: fx-nod calc(var(--count) * 1.8s) calc(var(--turn) * 1.8s) infinite both;
-}
-[data-still="1"] [data-move="argue"] {
-  animation: fx-shake 1.2s infinite;
-}
-[data-still="1"] :is([data-move="play"], [data-move="parent_play"]) {
-  animation: fx-hop 0.7s infinite;
-}
-[data-still="1"] [data-move="dance"] {
-  animation: fx-sway 0.9s ease-in-out infinite alternate;
-}
-[data-still="1"] :is([data-move="hug"], [data-move="kiss"]) {
-  animation: fx-lean 0.6s ease-out forwards;
-}
-[data-still="1"] :is([data-move="gift"], [data-move="make_up"]) {
-  animation: fx-offer 0.6s ease-out forwards;
-}
-[data-still="1"] [data-move="flirt"] {
-  animation: fx-wiggle 1.2s ease-in-out infinite alternate;
-}
-[data-still="1"] [data-move="sulk"] {
-  animation: fx-slump 0.8s ease-out forwards;
-}
-[data-still="1"] [data-move="ignore"] {
-  animation: fx-turn-away 0.6s ease-out forwards;
 }
 
 @keyframes fx-turn {
@@ -317,45 +269,9 @@
   100% { opacity: 0; translate: 0 6px; }
 }
 
-@keyframes fx-nod {
-  0%, 44%, 100% { rotate: 0deg; }
-  10%, 26% { rotate: 3deg; }
-  18%, 34% { rotate: -2deg; }
-}
-@keyframes fx-shake {
-  0%, 35%, 100% { translate: 0 0; }
-  5%, 15%, 25% { translate: -3% 0; }
-  10%, 20%, 30% { translate: 3% 0; }
-}
-@keyframes fx-hop {
-  0%, 100% { translate: 0 0; animation-timing-function: ease-out; }
-  50% { translate: 0 -12%; animation-timing-function: ease-in; }
-}
-@keyframes fx-sway {
-  from { rotate: -8deg; translate: -3% 0; }
-  to { rotate: 8deg; translate: 3% -4%; }
-}
-@keyframes fx-lean {
-  to { rotate: calc(var(--face) * 9deg); translate: calc(var(--face) * 12%) 0; }
-}
-@keyframes fx-offer {
-  to { rotate: calc(var(--face) * 5deg); translate: calc(var(--face) * 5%) 0; }
-}
-@keyframes fx-wiggle {
-  from { rotate: -4deg; }
-  to { rotate: 4deg; }
-}
-@keyframes fx-slump {
-  to { rotate: calc(var(--face) * -4deg); translate: 0 4%; scale: 1.04 0.94; }
-}
-@keyframes fx-turn-away {
-  to { rotate: calc(var(--face) * -8deg); translate: calc(var(--face) * -4%) 0; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .fx *,
-  [data-aura] *,
-  [data-move] {
+  [data-aura] * {
     animation: none !important;
   }
 }

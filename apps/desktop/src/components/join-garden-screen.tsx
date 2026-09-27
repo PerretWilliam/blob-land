@@ -1,4 +1,4 @@
-import type { Identity } from "@blob-land/sim";
+import { MAX_NAME_LENGTH, type Identity } from "@blob-land/sim";
 import { useState } from "react";
 import { CountryField } from "@/components/country-field";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
   const [pseudo, setPseudo] = useState(localPseudo);
   const [password, setPassword] = useState("");
   const [country, setCountry] = useState<string | null>(null);
+  const [friend, setFriend] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -27,7 +28,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
     setSuggestions([]);
     setPending(true);
     try {
-      const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity, country));
+      const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity, country, friend));
       onJoined(pseudo, response);
     } catch (err) {
       // Tauri plugins reject with plain strings, not Errors.
@@ -56,6 +57,7 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
         <input
           className="rounded-md border bg-transparent px-3 py-2 text-sm"
           placeholder="pseudo"
+          maxLength={MAX_NAME_LENGTH}
           value={pseudo}
           onChange={(e) => setPseudo(e.target.value)}
           autoFocus
@@ -67,7 +69,18 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        {mode === "register" ? <CountryField value={country} onChange={setCountry} /> : null}
+        {mode === "register" ? (
+          <>
+            <CountryField value={country} onChange={setCountry} />
+            <input
+              className="rounded-md border bg-transparent px-3 py-2 text-sm"
+              placeholder="a friend's pseudo, to live on their island (optional)"
+              maxLength={MAX_NAME_LENGTH}
+              value={friend}
+              onChange={(e) => setFriend(e.target.value)}
+            />
+          </>
+        ) : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {suggestions.length > 0 ? (
           <div className="flex flex-wrap gap-2">

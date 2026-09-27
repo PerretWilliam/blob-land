@@ -1,20 +1,19 @@
-import { seededRng } from "@blob-land/sim";
-import { env, SELF } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
-import schemaSql from "../schema.sql?raw";
+import { seededRng, type Rng } from "@blob-land/sim";
+import { createScheduledController, env, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
 import { gardenNow } from "../src/clock";
-import { advanceGarden } from "../src/garden";
+import { LOOKAHEAD } from "../src/garden";
+import worker, { placeAccount } from "../src/index";
+import type { Region } from "../src/region";
 
-beforeAll(async () => {
-  // Strip `-- comment` text first: a comment can itself contain a `;` (see
-  // schema.sql), which would otherwise split a statement in half.
-  const withoutComments = schemaSql.replace(/--.*$/gm, "");
-  const statements = withoutComments
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  await env.DB.batch(statements.map((s) => env.DB.prepare(s)));
-});
+const stub = (n: number) => env.REGION.get(env.REGION.idFromName(String(n)));
+/** Runs `fn` on region `n`'s own SQLite. */
+const inRegion = <T>(n: number, fn: (sql: SqlStorage) => T) => runInDurableObject(stub(n), (_: Region, state) => fn(state.storage.sql));
+/** Lives every region forward to `until`, as their alarms would. */
+async function stepAll(now = Date.now(), rng?: Rng, until = now + LOOKAHEAD) {
+  const { results } = await env.DB.prepare(`SELECT DISTINCT region FROM blobs`).all<{ region: number }>();
+  for (const { region } of results) await runInDurableObject(stub(region), (r: Region) => r.live(now, until, rng ?? Math.random));
+}
 
 const PASSWORD = "correct horse battery staple";
 
@@ -22,7 +21,7 @@ async function jsonAs<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string } = {}) {
+async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string; friend?: string } = {}) {
   const res = await SELF.fetch("https://api.test/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -45,11 +44,17 @@ async function login(pseudo: string) {
 const DAY = 24 * 60 * 60 * 1000;
 
 interface GardenBody {
+  step: number;
+  delta: boolean;
+  region: number;
+  home: number;
+  size: number;
+  regions: { region: number; blobs: number }[];
   blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; partner: string | null; segments: { start: number; end: number }[] }[];
 }
 
-async function garden(token: string): Promise<GardenBody> {
-  const res = await SELF.fetch("https://api.test/garden", { headers: { authorization: `Bearer ${token}` } });
+async function garden(token: string, query = ""): Promise<GardenBody> {
+  const res = await SELF.fetch(`https://api.test/garden${query}`, { headers: { authorization: `Bearer ${token}` } });
   expect(res.status).toBe(200);
   return jsonAs<GardenBody>(res);
 }
@@ -65,16 +70,101 @@ describe("blob-land API", () => {
     });
     expect(ping.status).toBe(200);
 
-    // Registered but not lived yet: listed, with no timeline until the world step runs.
-    const before = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
-    expect(before).toMatchObject({ sex: "none", attraction: "any", country: null, segments: [] });
-
-    await advanceGarden(env.DB, Date.now());
+    // Living from the moment it joins: listed, with a timeline already.
     const after = (await garden(token)).blobs.find((b) => b.pseudo === "wanderer")!;
+    expect(after).toMatchObject({ sex: "none", attraction: "any", country: null });
     expect(after.segments.length).toBeGreaterThan(0);
     // Chained: each segment starts where the one before ended.
     for (let i = 1; i < after.segments.length; i++) expect(after.segments[i]!.start).toBe(after.segments[i - 1]!.end);
     expect(after.segments.at(-1)!.end).toBeGreaterThan(Date.now());
+  });
+
+  it("keeps each region to itself: lived on its own alarm, and served on its own", async () => {
+    const home = await register("homebody");
+    // A second region, with one blob in it.
+    const populate = await SELF.fetch("https://api.test/__dev/populate", { method: "POST", body: JSON.stringify({ count: 1 }) });
+    expect(await jsonAs<{ regions: number[] }>(populate)).toEqual({ regions: [1] });
+    // Each region lives on its own alarm.
+    for (const n of [0, 1]) expect(await runDurableObjectAlarm(stub(n))).toBe(true);
+
+    const mine = await garden(home.token);
+    const theirs = await garden(home.token, "?region=1");
+    expect(mine.blobs.map((b) => b.seed)).toContain(home.seed);
+    expect(theirs.blobs).toHaveLength(1);
+    expect(mine.blobs.map((b) => b.seed)).not.toContain(theirs.blobs[0]!.seed);
+    // Both regions were lived.
+    expect(theirs.blobs[0]!.segments.length).toBeGreaterThan(0);
+    expect(mine.blobs.find((b) => b.seed === home.seed)!.segments.length).toBeGreaterThan(0);
+    // Visiting: still home is home, and every region is listed with its island.
+    expect(theirs).toMatchObject({ region: 1, home: 0, size: 24 });
+    expect(theirs.regions.map((r) => r.region)).toEqual([0, 1]);
+    expect(theirs.regions[1]!.blobs).toBe(1);
+    // A region no one lives in is empty; nonsense is refused.
+    expect((await garden(home.token, "?region=7")).blobs).toEqual([]);
+    const bad = await SELF.fetch("https://api.test/garden?region=-1", { headers: { authorization: `Bearer ${home.token}` } });
+    expect(bad.status).toBe(400);
+
+    // An alarm whose retries all failed is gone: the cron sets it again.
+    await runInDurableObject(stub(1), (_: Region, state) => state.storage.deleteAlarm());
+    await worker.scheduled(createScheduledController(), env);
+    expect(await runInDurableObject(stub(1), (_: Region, state) => state.storage.getAlarm())).not.toBeNull();
+  });
+
+  it("sends only what's new since an earlier answer, and shows hidden players to themselves", async () => {
+    const shy = await register("shy");
+    const friend = await register("friendly");
+    await stepAll();
+    const full = await garden(friend.token);
+    expect(full.delta).toBe(false);
+    const hide = await SELF.fetch("https://api.test/me/visibility", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${shy.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ visible: false }),
+    });
+    expect(hide.status).toBe(200);
+    expect((await garden(friend.token)).blobs.map((b) => b.seed)).not.toContain(shy.seed);
+    expect((await garden(shy.token)).blobs.map((b) => b.seed)).toContain(shy.seed);
+
+    // Nothing lived since: the same blobs, no timeline to send.
+    const same = await garden(friend.token, `?since=${full.step}`);
+    expect(same).toMatchObject({ delta: true, step: full.step });
+    expect(same.blobs.every((b) => b.segments.length === 0)).toBe(true);
+    // A step later: only the new stretch, picking up where the last one ended.
+    const last = full.blobs.find((b) => b.seed === friend.seed)!.segments.at(-1)!;
+    await stepAll(Date.now(), undefined, last.end + LOOKAHEAD);
+    const next = await garden(friend.token, `?since=${full.step}`);
+    expect(next.step).toBe(full.step + 1);
+    const fresh = next.blobs.find((b) => b.seed === friend.seed)!.segments;
+    expect(fresh[0]!.start).toBe(last.end);
+    // A step number from the future (a region restored from backup) gets everything again.
+    expect((await garden(friend.token, `?since=${next.step + 5}`)).delta).toBe(false);
+  });
+
+  it("sends new accounts to the first region with room, and opens the next when all are full", async () => {
+    const { region } = await garden((await register("newcomer")).token);
+    expect(region).toBe(0);
+    // With room for one more, the next account still lands in region 0; once
+    // it's full, the one after opens region 1.
+    const count = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM blobs WHERE region = 0`).first<number>("n"))!;
+    const join = async (seed: string) => {
+      const id = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO users (id, pseudo, seed, password_hash, password_salt, last_seen_at, created_at) VALUES (?, ?, ?, 'x', 'x', 0, 0)`).bind(id, seed, seed),
+        placeAccount(env.DB, id, seed, Date.now(), null, count + 1),
+      ]);
+      return env.DB.prepare(`SELECT region FROM blobs WHERE seed = ?`).bind(seed).first<number>("region");
+    };
+    expect(await join("filler")).toBe(0);
+    expect(await join("pioneer")).toBe(1);
+    // A friend's island wins over the first one with room; an unknown friend is refused.
+    const buddy = await register("buddy", { friend: "Pioneer" });
+    expect((await garden(buddy.token)).region).toBe(1);
+    const lost = await SELF.fetch("https://api.test/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pseudo: "lonely", password: PASSWORD, friend: "nobody-at-all" }),
+    });
+    expect(lost.status).toBe(404);
   });
 
   it("takes a sex and attraction at sign-up, and lets the player change them", async () => {
@@ -128,39 +218,48 @@ describe("blob-land API", () => {
     const alice = await register("alice", { sex: "female", attraction: "men" });
     const bob = await register("bob", { sex: "male", attraction: "women" });
     // Head start: they already adore each other, so this doesn't take a simulated year.
-    await env.DB.prepare(
-      `INSERT OR REPLACE INTO relationships (seed_a, seed_b, friendship, romance, tension, chemistry, status, meetings, last_met_at)
-       VALUES (?, ?, 80, 90, 0, 1, 'crush', 10, ?)`,
-    )
-      .bind(alice.seed, bob.seed, Date.now())
-      .run();
+    const [a, b] = [alice.seed, bob.seed].sort();
+    await inRegion(0, (sql) =>
+      sql.exec(
+        `INSERT OR REPLACE INTO relationships (seed_a, seed_b, friendship, romance, tension, chemistry, status, meetings, last_met_at)
+         VALUES (?, ?, 80, 90, 0, 1, 'crush', 10, ?)`,
+        a!,
+        b!,
+        Date.now(),
+      ),
+    );
 
     // Live the garden forward a day at a time until a child is born.
     const rng = seededRng(7);
     const start = Date.now();
     let childSeed: string | undefined;
     for (let d = 1; d <= 60 && !childSeed; d++) {
-      await advanceGarden(env.DB, start + d * DAY, rng, start + d * DAY);
-      childSeed = (await env.DB.prepare(`SELECT seed FROM blobs WHERE parent_union_id IS NOT NULL LIMIT 1`).first<{ seed: string }>())?.seed;
+      await stepAll(start + d * DAY, rng, start + d * DAY);
+      // Theirs: the tests share one garden, where other couples may have children too.
+      childSeed = await inRegion(
+        0,
+        (sql) =>
+          sql
+            .exec<{ seed: string }>(`SELECT k.seed FROM blobs k JOIN unions u ON u.id = k.parent_union_id WHERE u.seed_a = ? AND u.seed_b = ? LIMIT 1`, a!, b!)
+            .toArray()[0]?.seed,
+      );
     }
     expect(childSeed).toBeDefined();
 
-    const union = await env.DB.prepare(`SELECT seed_a, seed_b FROM unions LIMIT 1`).first<{ seed_a: string; seed_b: string }>();
-    expect([union!.seed_a, union!.seed_b].sort()).toEqual([alice.seed, bob.seed].sort());
     // Parents and child show up in each other's relationships, as family.
     const rels = await jsonAs<{ relationships: { seed: string; status: string }[] }>(
       await SELF.fetch(`https://api.test/blobs/${encodeURIComponent(alice.seed)}/relationships`),
     );
     expect(rels.relationships.find((r) => r.seed === bob.seed)).toBeDefined();
 
-    const kin = await env.DB.prepare(`SELECT kin FROM relationships WHERE (seed_a = ?1 OR seed_b = ?1) AND kin = 'parent'`).bind(childSeed).all();
-    expect(kin.results).toHaveLength(2);
+    const kin = await inRegion(0, (sql) => sql.exec(`SELECT kin FROM relationships WHERE (seed_a = ?1 OR seed_b = ?1) AND kin = 'parent'`, childSeed!).toArray());
+    expect(kin).toHaveLength(2);
 
     // /tree hides blobs born "in the future" (the step lives ahead of now); ask as of then.
-    await env.DB.prepare(`UPDATE blobs SET born_at = ? WHERE seed = ?`).bind(Date.now() - 1000, childSeed).run();
+    await inRegion(0, (sql) => sql.exec(`UPDATE blobs SET born_at = ? WHERE seed = ?`, Date.now() - 1000, childSeed!));
 
     // The garden's news tells of the couple and the birth, once they've happened.
-    await env.DB.prepare(`UPDATE unions SET started_at = ?`).bind(Date.now() - 2000).run();
+    await inRegion(0, (sql) => sql.exec(`UPDATE unions SET started_at = ? WHERE seed_a = ? AND seed_b = ?`, Date.now() - 2000, a!, b!));
     const journal = await jsonAs<{ events: { kind: string; c: string | null }[] }>(
       await SELF.fetch("https://api.test/garden/journal", { headers: { Authorization: `Bearer ${alice.token}` } }),
     );

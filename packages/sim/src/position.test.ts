@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstSegment, liveThrough, nextSolo, type Segment } from "./life";
-import { NEST, positionOn } from "./position";
+import { gardenSize, legIn, MAX_GARDEN, MIN_GARDEN, NEST, positionOn, REGION_CAP } from "./position";
 import { seededRng } from "./rng";
 
 const T0 = Date.UTC(2026, 8, 25, 8);
@@ -48,5 +48,37 @@ describe("positionOn", () => {
   it("snaps every stop onto standable ground", () => {
     const westOnly = (p: { x: number; y: number }) => ({ x: Math.min(p.x, 0.5), y: p.y });
     for (let t = T0; t < T0 + 48 * HOUR; t += 45_000) expect(positionOn(segs, t, westOnly).x).toBeLessThanOrEqual(0.5);
+  });
+});
+
+describe("gardenSize", () => {
+  it("grows with the garden, in steps, within bounds", () => {
+    expect(gardenSize(1)).toBe(MIN_GARDEN);
+    expect(gardenSize(60)).toBeGreaterThan(MIN_GARDEN);
+    expect(gardenSize(60) % 8).toBe(0);
+    expect(gardenSize(10_000)).toBe(MAX_GARDEN);
+    // A full region is just about as big as an island gets.
+    expect(gardenSize(REGION_CAP)).toBeGreaterThanOrEqual(MAX_GARDEN - 8);
+  });
+});
+
+describe("legIn", () => {
+  const meet: Segment = { start: T0, end: T0 + 8 * 60_000, activity: "meet", expression: "idle", x: 0.5, y: 0.5, rng: 1, with: ["b"], detail: "chat:good" };
+  const arrival = (from: { x: number; y: number }) => {
+    let t = T0;
+    while (legIn(meet, from, t, undefined, 16).e < 1) t += 1000;
+    return (t - T0) / 1000;
+  };
+
+  it("hurries to a meeting the more the farther it is, within a cap", () => {
+    const near = arrival({ x: 0.48, y: 0.5 });
+    const mid = arrival({ x: 0.3, y: 0.5 });
+    const far = arrival({ x: 0.05, y: 0.5 });
+    // Near: a plain stroll, soon there. Farther: there in about the same time, walking faster.
+    expect(near).toBeLessThan(20);
+    expect(mid).toBeLessThanOrEqual(46);
+    // Very far: the cap on speed shows, it takes longer, but still within the meeting.
+    expect(far).toBeGreaterThan(mid);
+    expect(far).toBeLessThan(8 * 60);
   });
 });

@@ -1,11 +1,11 @@
-import { notable, type Identity } from "@blob-land/sim";
+import { notable, type Identity, type Segment } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GardenScreen } from "@/components/garden-screen";
 import { JoinGardenScreen } from "@/components/join-garden-screen";
 import { PseudoScreen } from "@/components/pseudo-screen";
-import { getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock } from "@/lib/api";
+import { gardenTime, getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { loadState, saveState, type AppState } from "@/lib/state";
@@ -13,6 +13,8 @@ import { loadState, saveState, type AppState } from "@/lib/state";
 const PING_INTERVAL_MS = 60_000;
 // A sped-up dev garden is lived only minutes ahead of now, in real time: refresh often.
 const FAST_GARDEN_REFRESH_MS = 10_000;
+// Played timeline kept per blob, in garden time: what the API sends in a full answer.
+const SEGMENT_HISTORY_MS = 15 * 60_000;
 // How often the private blob's life is lived a bit further and saved.
 const LIFE_TICK_MS = 60_000;
 
@@ -22,6 +24,9 @@ export default function App() {
   const [joining, setJoining] = useState(false);
   const [blobs, setBlobs] = useState<GardenBlob[]>([]);
   const [gardenClock, setGardenClock] = useState<GardenClock>(() => ({ at: Date.now(), readAt: Date.now(), rate: 1 }));
+  // Which region's island is on screen (null: the player's own), and what the server says about the regions.
+  const [visiting, setVisiting] = useState<number | null>(null);
+  const [regions, setRegions] = useState<{ region: number; home: number; list: GardenRegion[]; size: number } | null>(null);
   const [island, setIsland] = useState<IslandLayout>(() => defaultIsland(ISLAND_SIZE));
   const saveIslandTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -38,10 +43,33 @@ export default function App() {
     saveIslandTimer.current = setTimeout(() => void saveIsland(next), 400);
   }
 
-  const refreshGarden = useCallback(async (token: string) => {
-    const { blobs, now, rate } = await getGarden(token);
+  const visitingRef = useRef(visiting);
+  visitingRef.current = visiting;
+  // What the last answer held, so the next asks only for what's new since.
+  const known = useRef<{ asked: number | undefined; step: number; segments: Map<string, Segment[]> } | null>(null);
+  const refreshGarden = useCallback(async (token: string): Promise<void> => {
+    const asked = visitingRef.current ?? undefined;
+    const last = known.current?.asked === asked ? known.current : null;
+    const { blobs: sent, now, rate, region, home, regions: list, size, step, delta } = await getGarden(token, asked, last?.step);
+    // The player moved on to another island while this one was loading.
+    if ((visitingRef.current ?? undefined) !== asked) return;
+    let blobs = sent;
+    if (delta && last) {
+      // Someone new (born, joined, back from hiding): the timeline they've
+      // already lived isn't in an answer about what's new, so ask for all.
+      if (sent.some((b) => !last.segments.has(b.seed))) {
+        known.current = null;
+        return refreshGarden(token);
+      }
+      blobs = sent.map((b) => ({ ...b, segments: [...last.segments.get(b.seed)!.filter((s) => s.end > now - SEGMENT_HISTORY_MS), ...b.segments] }));
+    }
+    known.current = { asked, step, segments: new Map(blobs.map((b) => [b.seed, b.segments])) };
     setBlobs(blobs);
-    setGardenClock({ at: now, readAt: Date.now(), rate: rate ?? 1 });
+    setRegions({ region, home, list, size });
+    // Kept running as is unless it drifted: re-anchoring on every answer would
+    // move the whole garden by the request's latency (times the rate, in dev).
+    const fresh = { at: now, readAt: Date.now(), rate: rate ?? 1 };
+    setGardenClock((prev) => (prev.rate === fresh.rate && Math.abs(gardenTime(prev) - now) < 1000 * fresh.rate ? prev : fresh));
   }, []);
 
   // Catch the private blob up on the time the app was closed, and notify
@@ -94,7 +122,7 @@ export default function App() {
         .catch(() => {});
     }, fast ? FAST_GARDEN_REFRESH_MS : PING_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [appState?.account?.token, refreshGarden, fast]);
+  }, [appState?.account?.token, refreshGarden, fast, visiting]);
 
   function handlePseudoChosen(pseudo: string, identity: Identity) {
     const now = Date.now();
@@ -171,6 +199,8 @@ export default function App() {
       onCountryChange={handleCountryChange}
       account={appState.account}
       blobs={blobs}
+      regions={regions}
+      onVisit={(region) => setVisiting(region === regions?.home ? null : region)}
       gardenClock={gardenClock}
       visible={appState.settings.visible}
       onToggleVisibility={handleToggleVisibility}

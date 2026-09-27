@@ -12,6 +12,21 @@ export interface GroundPoint {
  * Exported so the renderer draws it where blobs sleep. */
 export const NEST = { min: 0.03, max: 0.13 } as const;
 
+/*
+ * The public garden's island side, in cells, for a region of `blobs` blobs.
+ * The server says it (every client then draws the same island), and it grows
+ * in steps of 8 so the map only changes now and then.
+ */
+export const MIN_GARDEN = 24;
+export const MAX_GARDEN = 128;
+export function gardenSize(blobs: number): number {
+  const side = Math.ceil((6 * Math.sqrt(Math.max(1, blobs))) / 8) * 8;
+  return Math.min(MAX_GARDEN, Math.max(MIN_GARDEN, side));
+}
+/** New accounts join the first region with fewer blobs than this: about
+ * when its island reaches MAX_GARDEN. Children still go on being born into it. */
+export const REGION_CAP = 450;
+
 /** Moves a point the sim picked onto ground the blob can stand on. The sim
  * doesn't know the terrain (water, trees…); the renderer does. */
 export type Snap = (p: GroundPoint) => GroundPoint;
@@ -20,6 +35,10 @@ export type Snap = (p: GroundPoint) => GroundPoint;
 const LEG_MS = 45_000;
 // Ground units per ms when walking to a single spot (rest, meet, bed).
 const STROLL = 0.02 / 1000;
+// To a meeting, blobs hurry the more the farther it is: they aim to be there
+// in HURRY_MS, but walk no slower than a stroll nor faster than HURRY_MAX strolls.
+const HURRY_MS = 45_000;
+const HURRY_MAX = 5;
 
 const smoothstep = (p: number) => p * p * (3 - 2 * p);
 const same: Snap = (p) => p;
@@ -29,13 +48,18 @@ const same: Snap = (p) => p;
  * along (`e`, eased, in [0, 1]). An explore is a string of stops replayed
  * from `seg.rng` (the same on every client), ending on the segment's stored
  * point; anything else is one stroll to it, then standing still.
+ *
+ * `zoom` is how many times bigger the ground is than a small island's: the
+ * stroll slows by as much (so blobs keep their pace across the tiles) and
+ * explore stops stay that much nearer each other instead of criss-crossing
+ * the whole map.
  */
-export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = same): { from: GroundPoint; to: GroundPoint; e: number } {
+export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = same, zoom = 1): { from: GroundPoint; to: GroundPoint; e: number } {
   const end = snap({ x: seg.x, y: seg.y });
   const local = Math.max(0, t - seg.start);
   const length = Math.max(1, seg.end - seg.start);
   if (seg.activity !== "explore") {
-    const walk = Math.min(length, Math.hypot(end.x - from.x, end.y - from.y) / STROLL);
+    const walk = walkMs(seg, from, end, zoom);
     return { from, to: end, e: walk <= 0 ? 1 : smoothstep(Math.min(1, local / walk)) };
   }
   const legs = Math.max(1, Math.round(length / LEG_MS));
@@ -47,10 +71,19 @@ export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = s
   let prev = from;
   for (let i = 0; ; i++) {
     const [x, y, walk] = [0.03 + rng() * 0.94, 0.03 + rng() * 0.94, 0.6 + 0.4 * rng()];
-    const stop = i === legs - 1 ? end : snap({ x, y });
+    const near = (v: number, from: number) => Math.min(0.97, Math.max(0.03, from + (v - 0.5) / zoom));
+    const stop = i === legs - 1 ? end : snap(zoom === 1 ? { x, y } : { x: near(x, prev.x), y: near(y, prev.y) });
     if (i === k) return { from: prev, to: stop, e: smoothstep(Math.min(1, (local - k * legMs) / legMs / walk)) };
     prev = stop;
   }
+}
+
+/** How long a blob takes to walk to `end` at the start of `seg` (not an
+ * explore): a stroll, or to a meeting a hurry that grows with the distance. */
+export function walkMs(seg: Segment, from: GroundPoint, end: GroundPoint, zoom = 1): number {
+  const distance = Math.hypot(end.x - from.x, end.y - from.y) * zoom;
+  const speed = seg.activity === "meet" ? Math.min(HURRY_MAX * STROLL, Math.max(STROLL, distance / HURRY_MS)) : STROLL;
+  return Math.min(Math.max(1, seg.end - seg.start), distance / speed);
 }
 
 /** The segment running at `t` (the last one begun), and where the blob stood

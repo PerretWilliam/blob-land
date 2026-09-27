@@ -183,7 +183,8 @@ function pickCompany(world: World, group: WorldBlob[], t: number, rng: Rng): Wor
     if (!canSocialize(c.last, c.vitals, c.last.end, c.personality.chronotype)) continue;
     // Geometric mean: one rival already there is enough to put a blob off joining.
     const liking = Math.exp(mean(group.map((m) => Math.log(MEET_WEIGHT[world.relationships.get(pairKey(m.seed, c.seed))?.status ?? "strangers"]))));
-    const near = 1 / (1 + 4 * Math.hypot(c.last.x - cx, c.last.y - cy));
+    // Neighbours by far: a tenth of the garden away halves the draw, a third all but rules it out.
+    const near = 1 / (1 + (Math.hypot(c.last.x - cx, c.last.y - cy) / 0.1) ** 2);
     weights[c.seed] = liking * near * (0.3 + c.personality.sociability);
   }
   if (Object.keys(weights).length === 0) return undefined;
