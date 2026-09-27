@@ -7,7 +7,7 @@ import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
 import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
-import { advanceGarden, newAccountBlob, regionForNewAccount } from "./garden";
+import { advanceGarden, newAccountBlob } from "./garden";
 import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
 import { familyTree, nameOf } from "./tree";
 
@@ -98,7 +98,7 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
       `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, country, last_seen_at, created_at)
        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     ).bind(id, pseudo, seed, hash, salt, country, now, now),
-    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env), await regionForNewAccount(c.env.DB)),
+    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env)),
   ]);
 
   const token = await sign({ sub: id, exp: Math.floor(now / 1000) + 60 * 60 * 24 * 30 }, c.env.JWT_SECRET, "HS256");

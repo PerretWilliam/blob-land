@@ -3,7 +3,7 @@ import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import schemaSql from "../schema.sql?raw";
 import { gardenNow } from "../src/clock";
-import { advanceGarden, regionForNewAccount } from "../src/garden";
+import { advanceGarden, newAccountBlob } from "../src/garden";
 
 beforeAll(async () => {
   // Strip `-- comment` text first: a comment can itself contain a `;` (see
@@ -113,9 +113,23 @@ describe("blob-land API", () => {
   it("sends new accounts to the first region with room, and opens the next when all are full", async () => {
     const { region } = await garden((await register("newcomer")).token);
     expect(region).toBe(0);
+    // With room for one more, the next account still lands in region 0; once
+    // it's full, the one after opens region 1.
     const count = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM blobs WHERE region = 0`).first<number>("n"))!;
-    expect(await regionForNewAccount(env.DB, count + 1)).toBe(0);
-    expect(await regionForNewAccount(env.DB, count)).toBe(1);
+    const join = async (seed: string) => {
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, last_seen_at, created_at) VALUES (?, ?, ?, 'x', 'x', 0, 0)`,
+      )
+        .bind(id, seed, seed)
+        .run();
+      await newAccountBlob(env.DB, id, seed, { sex: "none", attraction: "any" }, Date.now(), seededRng(1), count + 1).run();
+      return env.DB.prepare(`SELECT region FROM blobs WHERE seed = ?`).bind(seed).first<number>("region");
+    };
+    expect(await join("filler")).toBe(0);
+    expect(await join("pioneer")).toBe(1);
+    // Back home, so later tests share one garden.
+    await env.DB.prepare(`UPDATE blobs SET region = 0 WHERE seed = 'pioneer'`).run();
   });
 
   it("takes a sex and attraction at sign-up, and lets the player change them", async () => {

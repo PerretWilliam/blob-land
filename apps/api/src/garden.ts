@@ -68,30 +68,22 @@ interface UnionRow {
 }
 
 /**
- * The region a new account's blob moves into: the first one with room, so
- * each fills up (and gets lively) before the next opens.
- *
- * ponytail: two sign-ups at the same moment can both take a region's last
- * place, a blob or two over `cap`; nothing breaks. Let players pick a friend's
- * region when there's a way to have friends before signing up.
+ * A new account's blob, grown up and ready to live from `now`. It moves into
+ * the first region with fewer than `cap` blobs, so each fills up (and gets
+ * lively) before the next opens, or opens the next when all are full. Picked
+ * inside the insert: D1 runs writes one at a time, so two sign-ups can't
+ * both take a region's last place.
  */
-export async function regionForNewAccount(db: D1Database, cap = REGION_CAP): Promise<number> {
-  const open = await db
-    .prepare(`SELECT region FROM blobs GROUP BY region HAVING COUNT(*) < ? ORDER BY region LIMIT 1`)
-    .bind(cap)
-    .first<number>("region");
-  if (open !== null) return open;
-  return (await db.prepare(`SELECT COALESCE(MAX(region) + 1, 0) AS next FROM blobs`).first<number>("next")) ?? 0;
-}
-
-/** A new account's blob, grown up and ready to live from `now`, in `region`. */
-export function newAccountBlob(db: D1Database, userId: string, seed: string, identity: Identity, now: number, region: number, rng: Rng = randomRng) {
+export function newAccountBlob(db: D1Database, userId: string, seed: string, identity: Identity, now: number, rng: Rng = randomRng, cap = REGION_CAP) {
   return db
     .prepare(
       `INSERT INTO blobs (seed, owner_user_id, born_at, adult_at, sex, attraction, personality, energy, mood, last, region)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0.9, 0.15, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0.9, 0.15, ?, COALESCE(
+         (SELECT region FROM blobs GROUP BY region HAVING COUNT(*) < ? ORDER BY region LIMIT 1),
+         (SELECT COALESCE(MAX(region) + 1, 0) FROM blobs)
+       ))`,
     )
-    .bind(seed, userId, now, now, identity.sex, identity.attraction, JSON.stringify(randomPersonality(rng)), JSON.stringify(firstSegment(now, rng)), region);
+    .bind(seed, userId, now, now, identity.sex, identity.attraction, JSON.stringify(randomPersonality(rng)), JSON.stringify(firstSegment(now, rng)), cap);
 }
 
 /** One region's blobs, with the relationships and couples they're in. A
