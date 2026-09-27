@@ -5,6 +5,7 @@ import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thin
 import { Coffee, Footprints, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ATTRACTION_LABELS, BlobGenderSign, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
+import { InteractionFx, momentAt, type Moment } from "@/components/interaction-fx";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
 import DECOR_WIDTHS from "@/assets/iso/widths.json";
@@ -270,11 +271,13 @@ const FREE = new Set<Activity>(["explore", "rest", "discover"]);
  */
 function targets(layout: IslandLayout, blobs: SceneBlob[], t: number): GroundPoint[] {
   const snap = (p: GroundPoint) => snapToGround(layout, p);
+  const segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]));
   const ps = blobs.map((b) => {
     const at = segmentAt(b.segments, t, snap);
     if (!at) return { x: 0.5, y: 0.5 };
     if (t >= at.seg.end) return snap({ x: at.seg.x, y: at.seg.y });
-    const { from, to, e } = legIn(at.seg, at.from, t, snap);
+    const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, t, segmentsOf, snap) : null;
+    const { from, to, e } = legIn(at.seg, at.from, t, spot ? () => spot : snap);
     return alongPath(findPath(layout, from, to), e);
   });
   const index = new Map(blobs.map((b, i) => [b.seed, i]));
@@ -290,6 +293,21 @@ function targets(layout: IslandLayout, blobs: SceneBlob[], t: number): GroundPoi
     ps[j] = { x: mid.x + PAIR_GAP, y: mid.y - PAIR_GAP };
   });
   return ps;
+}
+
+/**
+ * Where a blob stands in a meeting: the spot the sim gave it, moved along
+ * with the whole gathering if its middle isn't somewhere blobs can stand (a
+ * tree, water). Snapping each blob on its own would scatter them.
+ *
+ * ponytail: the walk into the next segment starts from the unmoved spot, a
+ * small hop when a gathering had to move; carry the offset over if it shows.
+ */
+function meetingSpot(seg: Segment, t: number, segmentsOf: Map<string, Segment[]>, snap: (p: GroundPoint) => GroundPoint): GroundPoint {
+  const spots = [seg, ...(seg.with ?? []).flatMap((s) => segmentAt(segmentsOf.get(s) ?? [], t)?.seg ?? [])].filter((x) => x.end === seg.end);
+  const mid = { x: spots.reduce((a, x) => a + x.x, 0) / spots.length, y: spots.reduce((a, x) => a + x.y, 0) / spots.length };
+  const moved = snap(mid);
+  return { x: moved.x + seg.x - mid.x, y: moved.y + seg.y - mid.y };
 }
 
 /*
@@ -419,6 +437,23 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   }
 
   /*
+   * Flags whether a blob has stopped walking, which starts its meeting
+   * effects (see index.css). On arrival at a new meeting, its effects' clocks
+   * are set to the page's time origin, so everyone at the meeting is in step:
+   * speakers take turns instead of talking over each other.
+   */
+  function arrived(seed: string, still: boolean) {
+    for (const el of [els.current.get(seed)?.el, labels.current.get(seed)]) {
+      if (!el) continue;
+      el.dataset.still = still ? "1" : "0";
+      const key = el.dataset.fxKey ?? "";
+      if (!still || el.dataset.synced === key) continue;
+      el.dataset.synced = key;
+      for (const a of el.getAnimations({ subtree: true })) if ((a as CSSAnimation).animationName?.startsWith("fx-")) a.startTime = 0;
+    }
+  }
+
+  /*
    * The camera scales the whole world (island, blobs, labels — not the sky)
    * around a focus point: the selected blob, or the middle of the scene. It
    * eases like everything else, so following a walking blob stays smooth.
@@ -471,7 +506,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           : to;
         shown.current.set(b.seed, p);
         applyPosition(b.seed, p);
-        if (snap || !prev) return;
+        if (snap || !prev) return arrived(b.seed, true);
         // Screen-space direction: +x on screen is ground (x - y).
         const [dx, dy] = [p.x - prev.x, p.y - prev.y];
         const dist = Math.hypot(dx, dy);
@@ -485,6 +520,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         if (g.walk > 0.01) g.phase += dt * Math.PI * HOP_HZ;
         gait.current.set(b.seed, g);
         applyGait(b.seed, g);
+        arrived(b.seed, g.walk < 0.15);
       });
       applyCamera(kCamera);
     };
@@ -552,6 +588,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     i: n % island.cols,
     j: Math.floor(n / island.cols),
   })).sort((a, b) => a.i + a.j - (b.i + b.j));
+
+  // Meetings as of this render; the garden re-renders on its own clock.
+  const now = Date.now();
+  const segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]));
+  const moments = new Map(blobs.map((b) => [b.seed, momentAt(b.seed, b.segments, now, (seed) => segmentsOf.get(seed))]));
 
   const nestMid = (NEST.min + NEST.max) / 2;
   const nestW = (NEST.max - NEST.min) * tiles * 2 * HALF_W + 40;
@@ -660,6 +701,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           <SceneBlobView
             key={blob.seed}
             blob={blob}
+            moment={moments.get(blob.seed) ?? null}
             size={blob.young ? Math.round(blobSize * 0.7) : blobSize}
             reducedMotion={reducedMotion}
             selected={blob.seed === selected}
@@ -668,15 +710,21 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           />
         ))}
 
-        {/* Names float above everything — blobs, trees, the edit grid — and
-            don't hop, so they stay readable. Placed by the same loop. */}
-        {blobs.map((blob) => (
+        {/* Names — and meeting effects — float above everything (blobs,
+            trees, the edit grid) and don't hop, so they stay readable.
+            Placed by the same loop. */}
+        {blobs.map((blob) => {
+          const moment = moments.get(blob.seed);
+          const size = blob.young ? Math.round(blobSize * 0.7) : blobSize;
+          return (
           <div
             key={blob.seed}
             ref={(node) => placeLabel(blob.seed, node)}
             className="pointer-events-none absolute top-0 left-0 will-change-transform"
             style={{ zIndex: 200_000 }}
+            data-fx-key={moment?.key}
           >
+            {moment ? <InteractionFx moment={moment} size={size} /> : null}
             <p
               className="absolute flex origin-bottom items-center gap-1 whitespace-nowrap rounded-full bg-black/35 px-2 py-0.5 text-xs font-medium text-white"
               style={{ bottom: blobSize * 0.84, transform: "translateX(-50%) scale(calc(1 / var(--camera-zoom, 1)))" }}
@@ -686,7 +734,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
               {blob.activity ? <ActivityIcon activity={blob.activity} /> : null}
             </p>
           </div>
-        ))}
+          );
+        })}
       </div>
       </div>
 
@@ -823,6 +872,7 @@ function EditGrid({
 
 function SceneBlobView({
   blob,
+  moment,
   size,
   reducedMotion,
   selected,
@@ -830,6 +880,7 @@ function SceneBlobView({
   placeRef,
 }: {
   blob: SceneBlob;
+  moment: Moment | null;
   size: number;
   reducedMotion: boolean;
   selected: boolean;
@@ -846,6 +897,7 @@ function SceneBlobView({
         inViewRef(node);
       }}
       className="absolute top-0 left-0 will-change-transform"
+      data-fx-key={moment?.key}
     >
       <span
         aria-hidden="true"
@@ -855,8 +907,11 @@ function SceneBlobView({
       />
       <div className="absolute -translate-x-1/2" style={{ bottom: -size * 0.2, width: size }}>
         {/* The walk cycle transforms this wrapper, never the blobatar itself. */}
+        {/* The meeting moves it too (index.css), stacked under the walk cycle. */}
         <div
           data-body
+          data-move={moment?.kind}
+          style={moment ? ({ "--face": moment.face, "--turn": moment.turn, "--count": moment.count } as CSSProperties) : undefined}
           role="button"
           tabIndex={0}
           aria-label={`Follow ${blob.label}`}
