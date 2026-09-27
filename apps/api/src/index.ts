@@ -9,6 +9,7 @@ import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
 import { advanceGarden, LOOKAHEAD, newAccountBlob } from "./garden";
 import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
+import { stepRegion } from "./region";
 import { familyTree, nameOf } from "./tree";
 
 type Vars = { userId: string };
@@ -340,6 +341,6 @@ export default {
   async scheduled(_controller, env) {
     const now = await gardenNow(env);
     const until = now + LOOKAHEAD;
-    await advanceGarden(env.DB, now, undefined, until, (region) => env.REGION.get(env.REGION.idFromName(String(region))).step(region, now, until));
+    await advanceGarden(env.DB, now, undefined, until, (region) => stepRegion(env, region, now, until));
   },
 } satisfies ExportedHandler<Env>;

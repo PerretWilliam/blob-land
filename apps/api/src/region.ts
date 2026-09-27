@@ -6,16 +6,26 @@ import { advanceRegion } from "./garden";
 /**
  * One region's writer: each region steps in its own object, with its own
  * time and CPU budget, so the cron run only fans out and the garden can
- * hold as many regions as it likes.
+ * hold as many regions as it likes. Called through fetch, not RPC: wrangler
+ * 3's local dev middleware breaks on RPC calls to a Durable Object.
  */
 export class Region extends DurableObject<Env> {
   // One step at a time: a run that overruns the next cron never has two
   // steps roll the same stretch of time differently.
   private running: Promise<void> = Promise.resolve();
 
-  step(region: number, now: number, until: number): Promise<void> {
+  async fetch(request: Request): Promise<Response> {
+    const { region, now, until } = await request.json<{ region: number; now: number; until: number }>();
     const run = this.running.then(() => advanceRegion(this.env.DB, region, now, randomRng, until));
     this.running = run.catch(() => {});
-    return run;
+    await run;
+    return new Response(null, { status: 204 });
   }
+}
+
+/** Steps `region` in its own Region object. */
+export async function stepRegion(env: Env, region: number, now: number, until: number): Promise<void> {
+  const stub = env.REGION.get(env.REGION.idFromName(String(region)));
+  const res = await stub.fetch("https://region/step", { method: "POST", body: JSON.stringify({ region, now, until }) });
+  if (!res.ok) throw new Error(`region ${region} step failed: ${res.status}`);
 }
