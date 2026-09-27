@@ -63,10 +63,22 @@ describe("gardenSize", () => {
 });
 
 describe("legIn", () => {
-  it("gets a blob to its meeting within its first third, however far", () => {
-    const meet: Segment = { start: T0, end: T0 + 6 * 60_000, activity: "meet", expression: "idle", x: 0.9, y: 0.9, rng: 1, with: ["b"], detail: "chat:good" };
-    const at = (share: number) => legIn(meet, { x: 0.1, y: 0.1 }, T0 + share * 6 * 60_000, undefined, 16).e;
-    expect(at(0.2)).toBeLessThan(1);
-    expect(at(0.35)).toBe(1);
+  const meet: Segment = { start: T0, end: T0 + 8 * 60_000, activity: "meet", expression: "idle", x: 0.5, y: 0.5, rng: 1, with: ["b"], detail: "chat:good" };
+  const arrival = (from: { x: number; y: number }) => {
+    let t = T0;
+    while (legIn(meet, from, t, undefined, 16).e < 1) t += 1000;
+    return (t - T0) / 1000;
+  };
+
+  it("hurries to a meeting the more the farther it is, within a cap", () => {
+    const near = arrival({ x: 0.48, y: 0.5 });
+    const mid = arrival({ x: 0.3, y: 0.5 });
+    const far = arrival({ x: 0.05, y: 0.5 });
+    // Near: a plain stroll, soon there. Farther: there in about the same time, walking faster.
+    expect(near).toBeLessThan(20);
+    expect(mid).toBeLessThanOrEqual(46);
+    // Very far: the cap on speed shows, it takes longer, but still within the meeting.
+    expect(far).toBeGreaterThan(mid);
+    expect(far).toBeLessThan(8 * 60);
   });
 });

@@ -1,4 +1,4 @@
-import { daylight, flagOf, legIn, NEST, segmentAt, type Activity, type Attraction, type GroundPoint, type Identity, type Segment, type Sex } from "@blob-land/sim";
+import { daylight, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Identity, type Segment, type Sex } from "@blob-land/sim";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
@@ -161,9 +161,7 @@ export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, seg
     // Each to its own nest at night.
     const home = homeNest(layout, b.seed, b.partner);
     const snap = (p: GroundPoint) => snapToGround(layout, p, home);
-    // Where a segment leaves the blob: for a meeting, its place in the
-    // gathering as drawn, not the sim's own point for it (see meetingSpot).
-    const endOf = (seg: Segment) => (seg.activity === "meet" ? meetingSpot(seg, segmentsOf, snap, zoom) : snap({ x: seg.x, y: seg.y }));
+    const endOf = (seg: Segment) => endPoint(seg, segmentsOf, snap, zoom);
     const at = segmentAt(b.segments, t, snap);
     if (!at) return { x: 0.5, y: 0.5 };
     if (t >= at.seg.end) return endOf(at.seg);
@@ -171,9 +169,7 @@ export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, seg
     const start = before ? endOf(before) : at.from;
     const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, segmentsOf, snap, zoom) : null;
     const { from, to, e } = legIn(at.seg, start, t, spot ? () => spot : snap, zoom);
-    // The show waits for everyone: an early one stands there quietly till the others set off.
-    const waiting = spot !== null && (e < 1 || gathering(at.seg, segmentsOf).some((x) => x.start > t));
-    return { ...alongPath(findPath(layout, from, to), e), comingToMeet: waiting };
+    return { ...alongPath(findPath(layout, from, to), e), comingToMeet: spot !== null && !allThere(layout, at.seg, b.segments, t, segmentsOf, zoom) };
   });
   const index = new Map(blobs.map((b, i) => [b.seed, i]));
   const clamp = (v: number) => Math.min(1 - gap, Math.max(gap, v));
@@ -188,6 +184,30 @@ export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, seg
     ps[j] = { x: mid.x + gap, y: mid.y - gap };
   });
   return ps;
+}
+
+/** Where a segment leaves its blob: for a meeting, its place in the gathering
+ * as drawn, not the sim's own point for it (see meetingSpot). */
+function endPoint(seg: Segment, segmentsOf: Map<string, Segment[]>, snap: (p: GroundPoint) => GroundPoint, zoom: number): GroundPoint {
+  return seg.activity === "meet" ? meetingSpot(seg, segmentsOf, snap, zoom) : snap({ x: seg.x, y: seg.y });
+}
+
+/**
+ * Whether everyone at the gathering `seg` is part of has arrived by `t`: no
+ * one talks to someone still finishing another meeting, or still on the way.
+ * A member whose timeline isn't here (hidden) counts as never arriving.
+ */
+function allThere(layout: IslandLayout, seg: Segment, mine: Segment[], t: number, segmentsOf: Map<string, Segment[]>, zoom: number): boolean {
+  const snap = (p: GroundPoint) => snapToGround(layout, p);
+  const members = gathering(seg, segmentsOf);
+  if (members.length < (seg.with?.length ?? 0) + 1) return false;
+  return members.every((x, i) => {
+    if (x.start > t) return false;
+    const own = i === 0 ? mine : segmentsOf.get(seg.with![i - 1]!)!;
+    const before = own[own.indexOf(x) - 1];
+    const from = before ? endPoint(before, segmentsOf, snap, zoom) : snap({ x: x.x, y: x.y });
+    return x.start + walkMs(x, from, meetingSpot(x, segmentsOf, snap, zoom), zoom) <= t;
+  });
 }
 
 /** Everyone's segment of the gathering `seg` is part of (the ones the timelines hold), its own first. */
@@ -431,10 +451,16 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     if (!el) return;
     if (el.dataset.still !== (still ? "1" : "0")) el.dataset.still = still ? "1" : "0";
     const key = el.dataset.fxKey ?? "";
-    // No meeting, nothing to sync: getAnimations forces a style recalc.
     if (!still || !key || el.dataset.synced === key) return;
     el.dataset.synced = key;
-    for (const a of el.getAnimations({ subtree: true })) if ((a as CSSAnimation).animationName?.startsWith("fx-")) a.startTime = 0;
+    toSync.current.push(el);
+  }
+  // Labels whose meeting clocks are to be set, all at once after the frame's
+  // writes: getAnimations forces a style recalc, one per label if interleaved.
+  const toSync = useRef<HTMLElement[]>([]);
+  function syncMeetings() {
+    for (const el of toSync.current) for (const a of el.getAnimations({ subtree: true })) if ((a as CSSAnimation).animationName?.startsWith("fx-")) a.startTime = 0;
+    toSync.current = [];
   }
 
   /*
@@ -559,8 +585,9 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     syncViews();
   }
 
-  // Meetings as of this render.
-  const moments = new Map(blobs.map((b) => [b.seed, momentAt(b.seed, b.segments, now, (seed) => segmentsOfRef.current.get(seed))]));
+  // Meetings as of this render, for the blobs drawn: in view, followed, or the player's own.
+  const drawn = blobs.filter((b) => inView.blobs.has(b.seed) || b.seed === selected || b.seed === startAt);
+  const moments = new Map(drawn.map((b) => [b.seed, momentAt(b.seed, b.segments, now, (seed) => segmentsOfRef.current.get(seed))]));
   const momentsRef = useRef(moments);
   momentsRef.current = moments;
 
@@ -796,6 +823,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         dirty.current = true;
       }
       applyCamera(kCamera);
+      syncMeetings();
       hover(now);
       const light = daylight(clockRef.current());
       if (Math.abs(light - lastLight) > 0.002) {

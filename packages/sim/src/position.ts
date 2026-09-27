@@ -35,8 +35,10 @@ export type Snap = (p: GroundPoint) => GroundPoint;
 const LEG_MS = 45_000;
 // Ground units per ms when walking to a single spot (rest, meet, bed).
 const STROLL = 0.02 / 1000;
-// Blobs hurry to a meeting: there within this share of it, however far, so they spend it together.
-const MEET_ARRIVAL = 0.35;
+// To a meeting, blobs hurry the more the farther it is: they aim to be there
+// in HURRY_MS, but walk no slower than a stroll nor faster than HURRY_MAX strolls.
+const HURRY_MS = 45_000;
+const HURRY_MAX = 5;
 
 const smoothstep = (p: number) => p * p * (3 - 2 * p);
 const same: Snap = (p) => p;
@@ -57,7 +59,7 @@ export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = s
   const local = Math.max(0, t - seg.start);
   const length = Math.max(1, seg.end - seg.start);
   if (seg.activity !== "explore") {
-    const walk = Math.min(length * (seg.activity === "meet" ? MEET_ARRIVAL : 1), (Math.hypot(end.x - from.x, end.y - from.y) * zoom) / STROLL);
+    const walk = walkMs(seg, from, end, zoom);
     return { from, to: end, e: walk <= 0 ? 1 : smoothstep(Math.min(1, local / walk)) };
   }
   const legs = Math.max(1, Math.round(length / LEG_MS));
@@ -74,6 +76,14 @@ export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = s
     if (i === k) return { from: prev, to: stop, e: smoothstep(Math.min(1, (local - k * legMs) / legMs / walk)) };
     prev = stop;
   }
+}
+
+/** How long a blob takes to walk to `end` at the start of `seg` (not an
+ * explore): a stroll, or to a meeting a hurry that grows with the distance. */
+export function walkMs(seg: Segment, from: GroundPoint, end: GroundPoint, zoom = 1): number {
+  const distance = Math.hypot(end.x - from.x, end.y - from.y) * zoom;
+  const speed = seg.activity === "meet" ? Math.min(HURRY_MAX * STROLL, Math.max(STROLL, distance / HURRY_MS)) : STROLL;
+  return Math.min(Math.max(1, seg.end - seg.start), distance / speed);
 }
 
 /** The segment running at `t` (the last one begun), and where the blob stood

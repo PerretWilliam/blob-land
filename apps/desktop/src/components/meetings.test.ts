@@ -45,4 +45,17 @@ describe("a meeting", () => {
     const after = at(T0 + 8 * MIN + 1)[0]!;
     expect(apart(before, after)).toBeLessThan(0.05);
   });
+
+  it("stays quiet while a member is still on its way from far off", () => {
+    const far = blob("far", [
+      seg({ start: T0 - 10 * MIN, end: T0 + 3 * MIN, activity: "rest", x: 0.95, y: 0.1 }),
+      seg({ start: T0 + 3 * MIN, end: T0 + 8 * MIN, activity: "meet", x: 0.5 + RING, y: 0.5, with: ["a"], detail: "chat:good" }),
+    ]);
+    const host = blob("a", a.segments.map((x) => (x.activity === "meet" ? { ...x, with: ["far"] } : x)));
+    const quiet = targets(layout, [host, far], T0 + 3.5 * MIN);
+    expect(quiet[0]!.comingToMeet).toBe(true);
+    const talking = targets(layout, [host, far], T0 + 7 * MIN);
+    expect(talking[0]!.comingToMeet).toBe(false);
+    expect(apart(talking[0]!, talking[1]!)).toBeLessThan(1.5);
+  });
 });
