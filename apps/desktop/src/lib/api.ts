@@ -147,3 +147,20 @@ export interface Relation {
 export function getRelationships(seed: string): Promise<{ relationships: Relation[] }> {
   return request(`/blobs/${encodeURIComponent(seed)}/relationships`);
 }
+
+/** GET /garden/journal — the garden's news, newest first. */
+export interface GardenEvent {
+  at: number;
+  kind: "couple" | "breakup" | "birth" | "fight";
+  a: string;
+  aName: string | null;
+  b: string;
+  bName: string | null;
+  /** The newborn, for a birth. */
+  c: string | null;
+  cName: string | null;
+}
+
+export function getGardenJournal(token: string): Promise<{ now: number; events: GardenEvent[] }> {
+  return request("/garden/journal", { headers: authHeader(token) });
+}

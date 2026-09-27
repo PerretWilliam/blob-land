@@ -159,6 +159,14 @@ describe("blob-land API", () => {
     // /tree hides blobs born "in the future" (the step lives ahead of now); ask as of then.
     await env.DB.prepare(`UPDATE blobs SET born_at = ? WHERE seed = ?`).bind(Date.now() - 1000, childSeed).run();
 
+    // The garden's news tells of the couple and the birth, once they've happened.
+    await env.DB.prepare(`UPDATE unions SET started_at = ?`).bind(Date.now() - 2000).run();
+    const journal = await jsonAs<{ events: { kind: string; c: string | null }[] }>(
+      await SELF.fetch("https://api.test/garden/journal", { headers: { Authorization: `Bearer ${alice.token}` } }),
+    );
+    expect(journal.events.map((e) => e.kind)).toEqual(expect.arrayContaining(["couple", "birth"]));
+    expect(journal.events.find((e) => e.kind === "birth")!.c).toBe(childSeed);
+
     const tree = await SELF.fetch(`https://api.test/tree/${encodeURIComponent(alice.seed)}`);
     expect(tree.status).toBe(200);
     const treeBody = await jsonAs<{ children: { seed: string; name: string; parents: { seed: string }[] }[] }>(tree);

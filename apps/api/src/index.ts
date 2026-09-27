@@ -245,6 +245,39 @@ app.get("/blobs/:seed/relationships", async (c) => {
   return c.json({ relationships: results });
 });
 
+// Shown only when the blob isn't an account hidden from the garden.
+const shown = (alias: string) => `NOT EXISTS (SELECT 1 FROM users WHERE id = ${alias}.owner_user_id AND visible_in_garden = 0)`;
+const JOURNAL_SIZE = 60;
+
+// The garden's news, newest first: couples forming and splitting, births, and
+// the fights everyone heard about. Only what has happened by now — the world
+// step lives a little ahead. Fights are kept as long as interactions are (3 days).
+app.get("/garden/journal", requireAuth, async (c) => {
+  const now = await gardenNow(c.env);
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM (
+       SELECT u.started_at AS at, 'couple' AS kind, a.seed AS a, ${nameOf("a")} AS aName, b.seed AS b, ${nameOf("b")} AS bName, NULL AS c, NULL AS cName
+       FROM unions u JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
+       WHERE u.started_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+       UNION ALL
+       SELECT u.ended_at, 'breakup', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, NULL, NULL
+       FROM unions u JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
+       WHERE u.ended_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+       UNION ALL
+       SELECT k.born_at, 'birth', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, k.seed, ${nameOf("k")}
+       FROM blobs k JOIN unions u ON u.id = k.parent_union_id JOIN blobs a ON a.seed = u.seed_a JOIN blobs b ON b.seed = u.seed_b
+       WHERE k.born_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+       UNION ALL
+       SELECT i.ended_at, 'fight', a.seed, ${nameOf("a")}, b.seed, ${nameOf("b")}, NULL, NULL
+       FROM interactions i JOIN blobs a ON a.seed = i.seed_a JOIN blobs b ON b.seed = i.seed_b
+       WHERE i.kind = 'argue' AND i.outcome = 'bad' AND i.ended_at <= ?1 AND ${shown("a")} AND ${shown("b")}
+     ) ORDER BY at DESC LIMIT ?2`,
+  )
+    .bind(now, JOURNAL_SIZE)
+    .all();
+  return c.json({ now, events: results });
+});
+
 // Genealogy is part of the public garden layer, not the private one — no auth.
 app.get("/tree/:seed", async (c) => {
   const tree = await familyTree(c.env.DB, c.req.param("seed"), await gardenNow(c.env));
