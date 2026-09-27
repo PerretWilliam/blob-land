@@ -146,27 +146,34 @@ function alongPath(path: GroundPoint[], e: number): GroundPoint {
 // Free to wander off with a partner: not asleep, not busy with someone else.
 const FREE = new Set<Activity>(["explore", "rest", "discover"]);
 
+/** Where a blob should stand, and whether it's still on its way to a meeting (its show waits till it's there). */
+type Target = GroundPoint & { comingToMeet?: boolean };
+
 /**
  * Where each blob should stand at `t`, played back from its timeline and
  * routed around cliffs and water. A couple who are both free walks together,
  * converging on the midpoint of their two own positions.
  */
-/** Where a blob should stand, and whether it's still on its way to a meeting (its show waits till it's there). */
-type Target = GroundPoint & { comingToMeet?: boolean };
-
-function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]))): Target[] {
+export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]))): Target[] {
   const zoom = walkZoom(layout.size);
   const gap = PAIR_GAP / zoom;
   const ps = blobs.map((b): Target => {
     // Each to its own nest at night.
     const home = homeNest(layout, b.seed, b.partner);
     const snap = (p: GroundPoint) => snapToGround(layout, p, home);
+    // Where a segment leaves the blob: for a meeting, its place in the
+    // gathering as drawn, not the sim's own point for it (see meetingSpot).
+    const endOf = (seg: Segment) => (seg.activity === "meet" ? meetingSpot(seg, segmentsOf, snap, zoom) : snap({ x: seg.x, y: seg.y }));
     const at = segmentAt(b.segments, t, snap);
     if (!at) return { x: 0.5, y: 0.5 };
-    if (t >= at.seg.end) return snap({ x: at.seg.x, y: at.seg.y });
-    const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, t, segmentsOf, snap, zoom) : null;
-    const { from, to, e } = legIn(at.seg, at.from, t, spot ? () => spot : snap, zoom);
-    return { ...alongPath(findPath(layout, from, to), e), comingToMeet: spot !== null && e < 1 };
+    if (t >= at.seg.end) return endOf(at.seg);
+    const before = b.segments[b.segments.indexOf(at.seg) - 1];
+    const start = before ? endOf(before) : at.from;
+    const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, segmentsOf, snap, zoom) : null;
+    const { from, to, e } = legIn(at.seg, start, t, spot ? () => spot : snap, zoom);
+    // The show waits for everyone: an early one stands there quietly till the others set off.
+    const waiting = spot !== null && (e < 1 || gathering(at.seg, segmentsOf).some((x) => x.start > t));
+    return { ...alongPath(findPath(layout, from, to), e), comingToMeet: waiting };
   });
   const index = new Map(blobs.map((b, i) => [b.seed, i]));
   const clamp = (v: number) => Math.min(1 - gap, Math.max(gap, v));
@@ -183,18 +190,21 @@ function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf
   return ps;
 }
 
+/** Everyone's segment of the gathering `seg` is part of (the ones the timelines hold), its own first. */
+function gathering(seg: Segment, segmentsOf: Map<string, Segment[]>): Segment[] {
+  return [seg, ...(seg.with ?? []).flatMap((s) => segmentsOf.get(s)?.find((x) => x.activity === "meet" && x.end === seg.end) ?? [])];
+}
+
 /**
- * Where a blob stands in a meeting: the spot the sim gave it, moved along
- * with the whole gathering if its middle isn't somewhere blobs can stand (a
- * tree, water). Snapping each blob on its own would scatter them. The sim's
- * ring is in garden units: shrunk by `zoom`, like a couple's gap, so a
- * gathering stands as close on a big island as on a small one.
- *
- * ponytail: the walk into the next segment starts from the unmoved spot, a
- * small hop when a gathering had to move; carry the offset over if it shows.
+ * Where a blob stands in a meeting: its place in the sim's ring, around the
+ * middle of the whole gathering — everyone's, even those not on their way
+ * yet, so the middle never moves while it lasts — moved as one if that
+ * middle isn't somewhere blobs can stand (a tree, water). The sim's ring is
+ * in garden units: shrunk by `zoom`, like a couple's gap, so a gathering
+ * stands as close on a big island as on a small one.
  */
-function meetingSpot(seg: Segment, t: number, segmentsOf: Map<string, Segment[]>, snap: (p: GroundPoint) => GroundPoint, zoom: number): GroundPoint {
-  const spots = [seg, ...(seg.with ?? []).flatMap((s) => segmentAt(segmentsOf.get(s) ?? [], t)?.seg ?? [])].filter((x) => x.end === seg.end);
+function meetingSpot(seg: Segment, segmentsOf: Map<string, Segment[]>, snap: (p: GroundPoint) => GroundPoint, zoom: number): GroundPoint {
+  const spots = gathering(seg, segmentsOf);
   const mid = { x: spots.reduce((a, x) => a + x.x, 0) / spots.length, y: spots.reduce((a, x) => a + x.y, 0) / spots.length };
   const moved = snap(mid);
   return { x: moved.x + (seg.x - mid.x) / zoom, y: moved.y + (seg.y - mid.y) / zoom };
