@@ -10,17 +10,29 @@ The app is usable with zero network calls and no account: on first launch, picki
 
 A child born from a union gets its own row in the `blobs` table, addressable and displayable independently of the union or its parents. There's no ownership relationship — a child isn't "attached" to an account.
 
-## A union ends at birth, not through a separate action
+## Random, stored, played back — not deterministic
 
-`unions.ended_at` is set in the same write as the child's birth. There is no `/unions/end` endpoint and no concept of a union ending for any other reason in this version — the model doesn't have a "breakup," only a birth that closes the union.
+Blobs used to be a formula of (seed, time): the same inputs always gave the same day, which made them predictable. Now every choice — when to sleep, where to walk, who to meet, how it goes — is rolled with real randomness (Web Crypto) and stored as segments. Clients never recompute a blob's life; they play back the stored segments, each carrying its own 32-bit `rng` so the walk inside it replays identically for everyone watching. Randomness is kept believable by structure, not by determinism: allowed transitions (a blob wakes before doing anything else), minimum durations, slow-moving energy and mood, and relationship axes that move by a capped step per meeting. The one thing still derived from the seed is a blob's look, because that is its identity.
+
+## One writer for the garden: a cron world step
+
+The Worker's cron trigger (every 5 minutes) is the only thing that lives the garden forward, 30 minutes ahead of now so clients always have something to play. Requests only read. A single writer means no two requests can roll the same stretch of time differently, with no locking. A garden that was asleep longer than 2 days skips the gap instead of living it.
+
+## Relationships gate interactions
+
+Each pair has friendship, romance and tension, plus a chemistry rolled once when they first meet. The status (friends, best friends, crush, lovers, complicated, rivals, ex, family…) is read off those with hysteresis, and the status decides which interactions are even possible — rivals argue, sulk or ignore each other; they never hug. Romance only grows between blobs mutually attracted to each other's sex, never within a family, and only between grown-ups.
+
+## Couples form and break up; children grow up
+
+A union starts when a relationship is in love enough, and ends when the couple breaks up (they become exes), not at a birth. Children can be born while a couple is together, after a cooldown, less often as the garden fills up. Children grow up after 8–12 days and can then fall in love and have children of their own; unions are between blob seeds, not accounts, for that reason.
+
+## Sex and attraction are the player's choice
+
+A blob is female, male or neither, and is drawn to women, men or anyone. The player picks both for their own blob (and can change them); children roll theirs at birth. A blob with no sex draws only those drawn to anyone. The sex shows as a sign on the blob — a bow or a bowler hat — measured onto its silhouette, since blobs come in ten shapes.
 
 ## UTC everywhere
 
-All timestamps are epoch milliseconds, and all day-boundary logic (schedules, presence windows, deterministic daily rolls) operates in UTC. This keeps `packages/sim`'s output identical on the desktop client and the Worker regardless of the user's local timezone.
-
-## 24-hour presence window
-
-A user counts as "present" (eligible for pairing) if their `last_seen_at` is within the last 24 hours. The desktop client pings the API every 60 seconds while open, which comfortably keeps an active user inside that window without needing a persistent connection.
+All timestamps are epoch milliseconds, and time-of-day logic (the pull of night toward bed, the sky's daylight) operates in UTC, the same on the desktop client and the Worker regardless of the user's local timezone.
 
 ## Account seed can differ from the local blob's seed
 
