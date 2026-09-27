@@ -8,7 +8,7 @@ import { hashPassword, verifyPassword } from "./auth";
 import type { Env } from "./env";
 import { advanceGarden, newAccountBlob } from "./garden";
 import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
-import { familyTree } from "./tree";
+import { familyTree, nameOf } from "./tree";
 
 type Vars = { userId: string };
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -225,6 +225,21 @@ app.patch("/blobs/:seed/name", requireAuth, async (c) => {
     return c.json({ error: "name already taken" }, 409);
   }
   return c.json({ ok: true, name });
+});
+
+// How one blob gets on with everyone it has met: public, like the family tree.
+// Accounts hidden from the garden stay hidden here too.
+app.get("/blobs/:seed/relationships", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT o.seed, ${nameOf("o")} AS name, r.status, r.friendship, r.romance, r.tension, r.kin, r.meetings, r.last_met_at AS lastMetAt
+     FROM relationships r
+     JOIN blobs o ON o.seed = CASE WHEN r.seed_a = ?1 THEN r.seed_b ELSE r.seed_a END
+     LEFT JOIN users u ON u.id = o.owner_user_id
+     WHERE (r.seed_a = ?1 OR r.seed_b = ?1) AND o.born_at <= ?2 AND (u.id IS NULL OR u.visible_in_garden = 1)`,
+  )
+    .bind(c.req.param("seed"), Date.now())
+    .all();
+  return c.json({ relationships: results });
 });
 
 // Genealogy is part of the public garden layer, not the private one — no auth.

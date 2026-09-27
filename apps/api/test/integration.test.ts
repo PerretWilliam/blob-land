@@ -146,6 +146,12 @@ describe("blob-land API", () => {
 
     const union = await env.DB.prepare(`SELECT seed_a, seed_b FROM unions LIMIT 1`).first<{ seed_a: string; seed_b: string }>();
     expect([union!.seed_a, union!.seed_b].sort()).toEqual([alice.seed, bob.seed].sort());
+    // Parents and child show up in each other's relationships, as family.
+    const rels = await jsonAs<{ relationships: { seed: string; status: string }[] }>(
+      await SELF.fetch(`https://api.test/blobs/${encodeURIComponent(alice.seed)}/relationships`),
+    );
+    expect(rels.relationships.find((r) => r.seed === bob.seed)).toBeDefined();
+
     const kin = await env.DB.prepare(`SELECT kin FROM relationships WHERE (seed_a = ?1 OR seed_b = ?1) AND kin = 'parent'`).bind(childSeed).all();
     expect(kin.results).toHaveLength(2);
 

@@ -32,7 +32,7 @@ const MAX_DEPTH = 10;
 
 // A blob's display name: a child's own, or its account's pseudo.
 const NAME = `COALESCE(%.name, (SELECT pseudo FROM users WHERE id = %.owner_user_id))`;
-const nameOf = (alias: string) => NAME.replaceAll("%", alias);
+export const nameOf = (alias: string) => NAME.replaceAll("%", alias);
 
 /** Walks the genealogy from `seed` down through `unions`/`blobs` via a
  * recursive CTE, plus the direct parents if `seed` is itself a child. */
