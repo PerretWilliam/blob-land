@@ -28,7 +28,8 @@ export function JoinGardenScreen({ localPseudo, identity, onJoined, onCancel }: 
       const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity));
       onJoined(pseudo, response);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "something went wrong";
+      // Tauri plugins reject with plain strings, not Errors.
+      const message = err instanceof Error ? err.message : String(err);
       if (mode === "register" && message === "pseudo already taken") {
         const availability = await checkPseudo(pseudo);
         setSuggestions(availability.suggestions ?? []);
