@@ -258,20 +258,12 @@ export async function step(storage: DurableObjectStorage, db: D1Database, now: n
   const world = loadWorld(sql);
   if (world.blobs.size === 0) return false;
   const region = regionNumber(sql)!;
-  // Blobs from before chronotypes get one, rolled once and stored.
-  const chronotyped: WorldBlob[] = [];
-  for (const blob of world.blobs.values()) {
-    if (blob.personality.chronotype !== undefined) continue;
-    blob.personality = { ...blob.personality, chronotype: rng() };
-    chronotyped.push(blob);
-  }
   const lived = stepWorld(world, until, rng, MAX_CATCH_UP);
   const names: string[] = [];
   for (const { child } of lived.births) names.push(await reserveBabyName(db, child.seed, region, child.bornAt, rng));
 
   storage.transactionSync(() => {
     const n = sql.exec<{ step: number }>(`UPDATE meta SET step = step + 1 RETURNING step`).one().step;
-    for (const blob of chronotyped) sql.exec(`UPDATE blobs SET personality = ? WHERE seed = ?`, JSON.stringify(blob.personality), blob.seed);
     for (const u of lived.unionsStarted) sql.exec(`INSERT INTO unions (id, seed_a, seed_b, started_at) VALUES (?, ?, ?, ?)`, u.id, u.a, u.b, u.startedAt);
     // After the inserts: a couple can meet and split within one step.
     for (const u of lived.unionsEnded) sql.exec(`UPDATE unions SET ended_at = ? WHERE id = ?`, u.endedAt, u.id);

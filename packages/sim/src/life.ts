@@ -87,7 +87,7 @@ const WAKE_HOUR = 6.5;
 
 /** How much a blob wants to sleep at `t`: tiredness, plus the pull of night
  * (UTC), which comes earlier for an early bird and later for a night owl. */
-export function sleepPressure(vitals: Vitals, t: number, chronotype = 0.5): number {
+export function sleepPressure(vitals: Vitals, t: number, chronotype: number): number {
   const h = hourOf(t - chronoShift(chronotype));
   // Night pulls toward bed; broad daylight holds a tired blob up a while longer.
   const clock = h >= 21.5 || h < 5 ? 0.5 : h >= 20 ? 0.25 : h >= 9 && h < 18 ? -0.25 : 0;
@@ -95,7 +95,7 @@ export function sleepPressure(vitals: Vitals, t: number, chronotype = 0.5): numb
 }
 
 /** Whether a blob, having just finished `last`, is up for company. */
-export const canSocialize = (last: Segment, vitals: Vitals, t: number, chronotype = 0.5) =>
+export const canSocialize = (last: Segment, vitals: Vitals, t: number, chronotype: number) =>
   last.activity !== "sleep" && vitals.energy > 0.25 && sleepPressure(vitals, t, chronotype) < 0.8;
 
 export function awakeExpression(vitals: Vitals, rng: Rng): string {

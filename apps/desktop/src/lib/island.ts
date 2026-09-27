@@ -26,21 +26,6 @@ export const canRamp = (ground: Ground) => ground === "grass" || ground === "san
 /** How many blocks a cell can be stacked above the base level. */
 export const MAX_HEIGHT = 2;
 
-// Decor ids from before the full pack was exported, so older island.json files still load.
-const LEGACY_DECOR: Record<string, DecorKind> = {
-  "tree-poplar": "tree-2",
-  "tree-pine": "tree-4",
-  "tree-oak": "tree-6",
-  "bush-small": "bush-3",
-  "bush-large": "bush-4",
-  rock: "rock-2",
-  rocks: "rock-4",
-  "rock-sand": "rock-sand-2",
-  "rocks-sand": "rock-sand-8",
-  "cactus-tall": "cactus-4",
-  "cactus-short": "cactus-2",
-};
-
 export interface IslandCell {
   ground: Ground;
   decor?: DecorKind;
@@ -130,13 +115,8 @@ function parseIsland(value: unknown): IslandLayout | null {
     if (height) cell.height = height as number;
     if (ramp) cell.ramp = true;
     if (decor !== undefined) {
-      const kind = DECOR_KINDS.includes(decor as DecorKind)
-        ? (decor as DecorKind)
-        : typeof decor === "string" && Object.prototype.hasOwnProperty.call(LEGACY_DECOR, decor)
-          ? LEGACY_DECOR[decor]
-          : undefined;
-      if (!kind) return null;
-      cell.decor = kind;
+      if (!DECOR_KINDS.includes(decor as DecorKind)) return null;
+      cell.decor = decor as DecorKind;
     }
     parsed.push(cell);
   }

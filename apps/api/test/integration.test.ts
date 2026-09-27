@@ -238,12 +238,17 @@ describe("blob-land API", () => {
     let childSeed: string | undefined;
     for (let d = 1; d <= 60 && !childSeed; d++) {
       await stepAll(start + d * DAY, rng, start + d * DAY);
-      childSeed = await inRegion(0, (sql) => sql.exec<{ seed: string }>(`SELECT seed FROM blobs WHERE parent_union_id IS NOT NULL LIMIT 1`).toArray()[0]?.seed);
+      // Theirs: the tests share one garden, where other couples may have children too.
+      childSeed = await inRegion(
+        0,
+        (sql) =>
+          sql
+            .exec<{ seed: string }>(`SELECT k.seed FROM blobs k JOIN unions u ON u.id = k.parent_union_id WHERE u.seed_a = ? AND u.seed_b = ? LIMIT 1`, a!, b!)
+            .toArray()[0]?.seed,
+      );
     }
     expect(childSeed).toBeDefined();
 
-    const union = await inRegion(0, (sql) => sql.exec<{ seed_a: string; seed_b: string }>(`SELECT seed_a, seed_b FROM unions LIMIT 1`).one());
-    expect([union!.seed_a, union!.seed_b].sort()).toEqual([alice.seed, bob.seed].sort());
     // Parents and child show up in each other's relationships, as family.
     const rels = await jsonAs<{ relationships: { seed: string; status: string }[] }>(
       await SELF.fetch(`https://api.test/blobs/${encodeURIComponent(alice.seed)}/relationships`),
@@ -257,7 +262,7 @@ describe("blob-land API", () => {
     await inRegion(0, (sql) => sql.exec(`UPDATE blobs SET born_at = ? WHERE seed = ?`, Date.now() - 1000, childSeed!));
 
     // The garden's news tells of the couple and the birth, once they've happened.
-    await inRegion(0, (sql) => sql.exec(`UPDATE unions SET started_at = ?`, Date.now() - 2000));
+    await inRegion(0, (sql) => sql.exec(`UPDATE unions SET started_at = ? WHERE seed_a = ? AND seed_b = ?`, Date.now() - 2000, a!, b!));
     const journal = await jsonAs<{ events: { kind: string; c: string | null }[] }>(
       await SELF.fetch("https://api.test/garden/journal", { headers: { Authorization: `Bearer ${alice.token}` } }),
     );

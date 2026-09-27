@@ -11,9 +11,6 @@ pnpm --filter @blob-land/api dev
 pnpm --filter @blob-land/api test
 ```
 
-A local database from before regions had their own objects can't be
-migrated: delete `apps/api/.wrangler/state`, then `db:apply` and `seed`.
-
 ## A lively local garden
 
 ```bash

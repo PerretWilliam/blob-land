@@ -19,6 +19,11 @@ for (let i = 0; made < count && i < count * 3; i++) {
   if (res.status === 201) {
     made++;
     console.log(`+ ${pseudo.padEnd(12)} ${sex.padEnd(6)} → ${attraction}`);
+  } else if (res.status === 429) {
+    // Sign-ups are rate limited (20 a minute): wait, then try that one again.
+    console.log("… rate limited, waiting 15 s");
+    await new Promise((r) => setTimeout(r, 15_000));
+    i--;
   } else if (res.status !== 409) {
     throw new Error(`register failed: ${res.status} ${await res.text()}`);
   }
