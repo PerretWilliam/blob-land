@@ -266,16 +266,22 @@ function nearestStops(island: IslandLayout): Int32Array {
   if (nearest) return nearest;
   const { size } = island;
   const centre = (n: number) => ({ x: ((n % size) + 0.5) / size, y: (Math.floor(n / size) + 0.5) / size });
-  const stops = island.cells.map((_, n) => n).filter((n) => canStopAt(island, centre(n)));
-  // ponytail: O(cells × stops) once per layout (~16M steps at 64²); a BFS if the garden grows past that.
+  // A breadth-first flood out from every stop at once: each cell gets the
+  // first stop to reach it, the nearest in steps (near enough in distance).
   nearest = new Int32Array(size * size).fill(-1);
-  for (let n = 0; n < size * size; n++) {
+  const queue: number[] = [];
+  island.cells.forEach((_, n) => {
+    if (canStopAt(island, centre(n))) nearest![n] = n;
+    if (nearest![n] >= 0) queue.push(n);
+  });
+  for (let head = 0; head < queue.length; head++) {
+    const n = queue[head]!;
     const [i, j] = [n % size, Math.floor(n / size)];
-    let bestD = Infinity;
-    for (const m of stops) {
-      const d = ((m % size) - i) ** 2 + (Math.floor(m / size) - j) ** 2;
-      if (d < bestD) [nearest[n], bestD] = [m, d];
-      if (d === 0) break;
+    for (const [, di, dj] of EDGES) {
+      const [a, b] = [i + di, j + dj];
+      if (a < 0 || b < 0 || a >= size || b >= size || nearest[b * size + a]! >= 0) continue;
+      nearest[b * size + a] = nearest[n]!;
+      queue.push(b * size + a);
     }
   }
   nearestCache.set(island, nearest);

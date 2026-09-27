@@ -43,8 +43,13 @@ CREATE TABLE blobs (
   personality TEXT NOT NULL, -- JSON
   energy REAL NOT NULL,
   mood REAL NOT NULL,
-  last TEXT NOT NULL -- JSON: its latest segment, where the world step picks up
+  last TEXT NOT NULL, -- JSON: its latest segment, where the world step picks up
+  -- The part of the world it lives in: each region is stepped, stored and
+  -- served on its own, so the garden can split up as it grows. Children are
+  -- born into their parents'.
+  region INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX blobs_region ON blobs(region);
 
 -- The played-back timeline, a few days of it (older rows are pruned).
 CREATE TABLE segments (

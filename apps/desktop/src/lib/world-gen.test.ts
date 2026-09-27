@@ -10,7 +10,7 @@ describe("gardenIsland", () => {
     expect(gardenSize(60) % 8).toBe(0);
   });
 
-  for (const size of [MIN_GARDEN, 40, MAX_GARDEN]) {
+  for (const size of [MIN_GARDEN, 40, 64, MAX_GARDEN]) {
     it(`is the same everywhere, and has it all, at ${size}`, () => {
       const island = gardenIsland(size);
       expect(gardenIsland(size)).toEqual(island);

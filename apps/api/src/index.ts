@@ -139,15 +139,23 @@ const HEARTBREAK = 45 * 60 * 1000;
 // How much already-played timeline to send: enough for a smooth pick-up.
 const SEGMENT_HISTORY = 15 * 60 * 1000;
 
+// One region of the garden at a time (?region=, else the player's own):
+// all a client ever plays back, however big the garden gets.
 app.get("/garden", requireAuth, async (c) => {
   const now = await gardenNow(c.env);
+  const asked = c.req.query("region");
+  if (asked !== undefined && !/^\d{1,9}$/.test(asked)) return c.json({ error: "region must be a non-negative integer" }, 400);
+  const region =
+    asked !== undefined
+      ? Number(asked)
+      : ((await c.env.DB.prepare(`SELECT region FROM blobs WHERE owner_user_id = ?`).bind(c.get("userId")).first<number>("region")) ?? 0);
   // Children born in the world step's lookahead aren't here yet.
   const { results: blobs } = await c.env.DB.prepare(
     `SELECT b.seed, COALESCE(b.name, u.pseudo) AS pseudo, u.country, b.sex, b.attraction, b.born_at, b.adult_at
      FROM blobs b LEFT JOIN users u ON u.id = b.owner_user_id
-     WHERE b.born_at <= ?1 AND (u.id IS NULL OR u.visible_in_garden = 1 OR u.id = ?2)`,
+     WHERE b.region = ?3 AND b.born_at <= ?1 AND (u.id IS NULL OR u.visible_in_garden = 1 OR u.id = ?2)`,
   )
-    .bind(now, c.get("userId"))
+    .bind(now, c.get("userId"), region)
     .all<{ seed: string; pseudo: string | null; country: string | null; sex: Sex; attraction: Attraction; born_at: number; adult_at: number }>();
   // A union started or ended in the lookahead hasn't happened yet either.
   const { results: unions } = await c.env.DB.prepare(
@@ -161,8 +169,10 @@ app.get("/garden", requireAuth, async (c) => {
     .bind(now, HEARTBREAK)
     .all<{ seed_a: string; seed_b: string }>();
   const heartbroken = new Set(splits.flatMap((u) => [u.seed_a, u.seed_b]));
-  const { results: rows } = await c.env.DB.prepare(`SELECT * FROM segments WHERE end > ? ORDER BY start`)
-    .bind(now - SEGMENT_HISTORY)
+  const { results: rows } = await c.env.DB.prepare(
+    `SELECT s.* FROM segments s JOIN blobs b ON b.seed = s.seed WHERE b.region = ? AND s.end > ? ORDER BY s.start`,
+  )
+    .bind(region, now - SEGMENT_HISTORY)
     .all<SegmentRow>();
   const segments = new Map<string, Segment[]>();
   for (const { seed, with_seed, ...r } of rows) {
@@ -172,6 +182,7 @@ app.get("/garden", requireAuth, async (c) => {
   // Timelines, not states: the client plays the stored segments back itself.
   return c.json({
     now,
+    region,
     // How fast the garden's clock runs: clients play timelines back at this rate.
     rate: timeScale(c.env),
     blobs: blobs.map((b) => ({

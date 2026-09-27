@@ -77,6 +77,31 @@ describe("blob-land API", () => {
     expect(after.segments.at(-1)!.end).toBeGreaterThan(Date.now());
   });
 
+  it("keeps each region to itself: stepped and served on its own", async () => {
+    const home = await register("homebody");
+    const away = await register("islander");
+    await env.DB.prepare(`UPDATE blobs SET region = 1 WHERE seed = ?`).bind(away.seed).run();
+    await advanceGarden(env.DB, Date.now());
+
+    // Each player gets their own region; neither sees the other.
+    const mine = await garden(home.token);
+    const theirs = await garden(away.token);
+    expect(mine.blobs.map((b) => b.seed)).toContain(home.seed);
+    expect(mine.blobs.map((b) => b.seed)).not.toContain(away.seed);
+    expect(theirs.blobs.map((b) => b.seed)).toEqual([away.seed]);
+    // Both regions were lived.
+    expect(theirs.blobs[0]!.segments.length).toBeGreaterThan(0);
+    expect(mine.blobs.find((b) => b.seed === home.seed)!.segments.length).toBeGreaterThan(0);
+
+    // Any region can be asked for by number; nonsense is refused.
+    const asked = await SELF.fetch("https://api.test/garden?region=1", { headers: { authorization: `Bearer ${home.token}` } });
+    expect((await jsonAs<GardenBody>(asked)).blobs.map((b) => b.seed)).toEqual([away.seed]);
+    const bad = await SELF.fetch("https://api.test/garden?region=-1", { headers: { authorization: `Bearer ${home.token}` } });
+    expect(bad.status).toBe(400);
+    // Back home, so later tests share one garden.
+    await env.DB.prepare(`UPDATE blobs SET region = 0 WHERE seed = ?`).bind(away.seed).run();
+  });
+
   it("takes a sex and attraction at sign-up, and lets the player change them", async () => {
     const bad = await SELF.fetch("https://api.test/auth/register", {
       method: "POST",

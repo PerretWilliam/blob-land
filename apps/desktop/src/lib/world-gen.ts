@@ -12,7 +12,7 @@ import { canRamp, canStep, cellAt, EDGES, type DecorKind, type IslandCell, type 
 // Side, in cells, for a garden of `blobs` blobs: grows in steps of 8 so the
 // map (and everyone's place on it) only shifts now and then.
 export const MIN_GARDEN = 24;
-export const MAX_GARDEN = 64;
+export const MAX_GARDEN = 128;
 export function gardenSize(blobs: number): number {
   const side = Math.ceil((6 * Math.sqrt(Math.max(1, blobs))) / 8) * 8;
   return Math.min(MAX_GARDEN, Math.max(MIN_GARDEN, side));
@@ -123,24 +123,28 @@ export function gardenIsland(size: number): IslandLayout {
       c.ground = "road";
     }
 
-  // A river from the mountain's foot down to the sea, on level ground only
-  // (the pack's river pieces don't climb). It meanders but always heads out.
+  // A river from the mountain's foot down to the sea, at ground level (the
+  // pack's river pieces don't climb). It meanders but always heads out.
   // It starts at the mountain's foot on the screen's left, well clear of the village.
   let [ri, rj] = [Math.round(half + peak.x), Math.round(half + peak.y + peak.r)];
   for (let steps = 0; steps < size * 2; steps++) {
     const c = at(ri, rj);
-    if (!c || c.ground === "water") break;
-    if (!c.height) c.ground = "river";
+    const sea = (i: number, j: number) => land[j * size + i]! <= 0;
+    if (!c || sea(ri, rj)) break;
+    // It runs on through any lake it meets, and cuts through low hills.
+    if (c.ground !== "water") {
+      c.ground = "river";
+      delete c.height;
+    }
     const out = Math.hypot(...centred(ri, rj));
     const options = neighbours(ri, rj).filter(([a, b]) => {
       const n = at(a, b);
-      return n && (n.ground === "water" || (!n.height && n.ground !== "river" && !inVillage(a, b, 2)));
+      return n && (n.ground === "water" || ((n.height ?? 0) <= 1 && n.ground !== "river" && !inVillage(a, b, 2)));
     });
     if (!options.length) break;
     // Mostly towards the front of the island, drifting outwards and now and
-    // then sideways; straight into the sea (or a lake) when it's next door.
-    const score = ([a, b]: readonly [number, number]) =>
-      at(a, b)!.ground === "water" ? 9 : b - rj + 0.5 * (Math.hypot(...centred(a, b)) - out) + rng() * 1.4;
+    // then sideways; straight into the sea when it's next door.
+    const score = ([a, b]: readonly [number, number]) => (sea(a, b) ? 9 : b - rj + 0.5 * (Math.hypot(...centred(a, b)) - out) + rng() * 1.4);
     [ri, rj] = options.reduce((best, o) => (score(o) > score(best) ? o : best));
   }
 

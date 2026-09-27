@@ -3,8 +3,6 @@ import {
   BookOpen,
   Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Eraser,
   Eye,
   EyeOff,
@@ -53,7 +51,6 @@ export interface GardenScreenProps {
   onIslandChange: (island: IslandLayout) => void;
 }
 
-const PAGE_SIZE = 50;
 // How often activities and faces are re-read off the timelines: segments last
 // minutes, so a few seconds of lag is invisible.
 const STATE_TICK_MS = 5_000;
@@ -115,11 +112,6 @@ export function GardenScreen({
     };
   };
   const reducedMotion = usePrefersReducedMotion();
-  const pageCount = Math.max(1, Math.ceil(blobs.length / PAGE_SIZE));
-  const [page, setPage] = useState(0);
-  // Clamp rather than reset to 0, so a garden that shrinks below the current
-  // page doesn't silently yank the visitor back to the first page.
-  useEffect(() => setPage((p) => Math.min(p, pageCount - 1)), [pageCount]);
   // Losing the account (or never having one) means there's no garden to show.
   const inGarden = view === "garden" && account !== null;
   // The shared garden is never edited: everyone sees the same generated
@@ -134,7 +126,6 @@ export function GardenScreen({
     return () => window.removeEventListener("keydown", onKey);
   }, [menuOpen]);
 
-  const pageBlobs = blobs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   // A taken pseudo forces the account onto a different seed from the private
   // blob — when that happens, show both rather than pretending they're one.
   const accountIsSprout = account !== null && account.seed !== localSeed;
@@ -152,9 +143,8 @@ export function GardenScreen({
   ];
   // The sprout lives in the garden; it shows up here once the garden has loaded.
   if (accountIsSprout && ownGardenBlob) privateBlobs.push(fromGarden(ownGardenBlob, `${account.pseudo} (garden sprout)`));
-  const gardenBlobs: SceneBlob[] = pageBlobs.map((blob) => fromGarden(blob));
-  // Your own blob is always in the garden you're looking at, even when listed on another page.
-  if (ownGardenBlob && !gardenBlobs.some((b) => b.seed === ownGardenBlob.seed)) gardenBlobs.unshift(fromGarden(ownGardenBlob));
+  // Everyone in the region at once: the scene only draws what's in view.
+  const gardenBlobs: SceneBlob[] = inGarden ? blobs.map((blob) => fromGarden(blob)) : [];
 
   function switchView(next: "private" | "garden") {
     setView(next);
@@ -262,19 +252,6 @@ export function GardenScreen({
                 <MenuItem icon={visible ? <Eye /> : <EyeOff />} onClick={onToggleVisibility}>
                   {visible ? "Visible to others" : "Hidden from others"}
                 </MenuItem>
-                {pageCount > 1 ? (
-                  <div className="flex items-center justify-between px-1">
-                    <Button variant="ghost" size="icon-sm" aria-label="Previous page" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                      <ChevronLeft />
-                    </Button>
-                    <span className="text-xs text-muted-foreground">
-                      Page {page + 1} of {pageCount}
-                    </span>
-                    <Button variant="ghost" size="icon-sm" aria-label="Next page" disabled={page >= pageCount - 1} onClick={() => setPage((p) => p + 1)}>
-                      <ChevronRight />
-                    </Button>
-                  </div>
-                ) : null}
               </>
             ) : (
               <MenuItem

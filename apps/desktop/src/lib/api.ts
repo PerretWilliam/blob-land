@@ -33,6 +33,8 @@ export interface GardenResponse {
   now: number;
   /** How fast the garden's clock runs: 1, or more in a sped-up local dev garden. */
   rate: number;
+  /** The region of the garden these blobs live in: the player's own. */
+  region: number;
   blobs: GardenBlob[];
 }
 

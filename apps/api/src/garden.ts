@@ -66,27 +66,48 @@ interface UnionRow {
   last_birth_at: number | null;
 }
 
+/**
+ * The region a new account's blob moves into.
+ *
+ * ponytail: everyone lands in region 0; once one region holds a few hundred
+ * blobs, open the next (the least crowded, or the player's friends').
+ */
+const NEW_ACCOUNT_REGION = 0;
+
 /** A new account's blob, grown up and ready to live from `now`. */
 export function newAccountBlob(db: D1Database, userId: string, seed: string, identity: Identity, now: number, rng: Rng = randomRng) {
   return db
     .prepare(
-      `INSERT INTO blobs (seed, owner_user_id, born_at, adult_at, sex, attraction, personality, energy, mood, last)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0.9, 0.15, ?)`,
+      `INSERT INTO blobs (seed, owner_user_id, born_at, adult_at, sex, attraction, personality, energy, mood, last, region)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0.9, 0.15, ?, ?)`,
     )
-    .bind(seed, userId, now, now, identity.sex, identity.attraction, JSON.stringify(randomPersonality(rng)), JSON.stringify(firstSegment(now, rng)));
+    .bind(seed, userId, now, now, identity.sex, identity.attraction, JSON.stringify(randomPersonality(rng)), JSON.stringify(firstSegment(now, rng)), NEW_ACCOUNT_REGION);
 }
 
-async function loadWorld(db: D1Database): Promise<World> {
+/** One region's blobs, with the relationships and couples they're in. A
+ * blob only ever meets its own region's, so each region is a world of its own. */
+async function loadWorld(db: D1Database, region: number): Promise<World> {
   const [{ results: blobs }, { results: rels }, { results: unions }] = await Promise.all([
     db
       .prepare(
         `SELECT b.seed, b.traits, b.born_at, b.adult_at, b.sex, b.attraction, b.personality, b.energy, b.mood, b.last,
                 u.seed_a AS parent_a, u.seed_b AS parent_b
-         FROM blobs b LEFT JOIN unions u ON u.id = b.parent_union_id`,
+         FROM blobs b LEFT JOIN unions u ON u.id = b.parent_union_id
+         WHERE b.region = ?`,
       )
+      .bind(region)
       .all<BlobRow>(),
-    db.prepare(`SELECT * FROM relationships`).all<RelationshipRow>(),
-    db.prepare(`SELECT id, seed_a, seed_b, started_at, last_birth_at FROM unions WHERE ended_at IS NULL`).all<UnionRow>(),
+    db
+      .prepare(`SELECT r.* FROM relationships r JOIN blobs b ON b.seed = r.seed_a WHERE b.region = ?`)
+      .bind(region)
+      .all<RelationshipRow>(),
+    db
+      .prepare(
+        `SELECT u.id, u.seed_a, u.seed_b, u.started_at, u.last_birth_at FROM unions u JOIN blobs b ON b.seed = u.seed_a
+         WHERE u.ended_at IS NULL AND b.region = ?`,
+      )
+      .bind(region)
+      .all<UnionRow>(),
   ]);
   const world: World = { blobs: new Map(), relationships: new Map(), unions: [] };
   for (const r of blobs) {
@@ -125,14 +146,24 @@ async function loadWorld(db: D1Database): Promise<World> {
 
 /**
  * Lives the whole garden forward to `until` (now + LOOKAHEAD by default)
- * and stores what happened. Run by the cron trigger only: one writer, so no
- * two steps ever roll the same stretch of time differently.
+ * and stores what happened, one region at a time. Run by the cron trigger
+ * only: one writer, so no two steps ever roll the same stretch of time
+ * differently.
  *
- * ponytail: loads every blob and every relationship each run — fine for a
- * few hundred blobs; page by neighbourhood if the garden outgrows that.
+ * ponytail: every region in one cron run, one after the other; give each
+ * region its own writer (a Durable Object) when there are too many for one run.
  */
 export async function advanceGarden(db: D1Database, now: number, rng: Rng = randomRng, until = now + LOOKAHEAD): Promise<void> {
-  const world = await loadWorld(db);
+  const { results } = await db.prepare(`SELECT DISTINCT region FROM blobs`).all<{ region: number }>();
+  for (const { region } of results) await advanceRegion(db, region, now, rng, until);
+  await db.batch([
+    db.prepare(`DELETE FROM segments WHERE end < ?`).bind(now - KEEP_SEGMENTS),
+    db.prepare(`DELETE FROM interactions WHERE ended_at < ?`).bind(now - KEEP_SEGMENTS),
+  ]);
+}
+
+async function advanceRegion(db: D1Database, region: number, now: number, rng: Rng, until: number): Promise<void> {
+  const world = await loadWorld(db, region);
   if (world.blobs.size === 0) return;
   // Blobs from before chronotypes get one, rolled once and stored.
   const writes: D1PreparedStatement[] = [];
@@ -154,8 +185,8 @@ export async function advanceGarden(db: D1Database, now: number, rng: Rng = rand
       db.prepare(`UPDATE unions SET last_birth_at = ? WHERE id = ?`).bind(child.bornAt, unionId),
       db
         .prepare(
-          `INSERT INTO blobs (seed, name, name_key, traits, parent_union_id, born_at, adult_at, sex, attraction, personality, energy, mood, last)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '{}')`,
+          `INSERT INTO blobs (seed, name, name_key, traits, parent_union_id, born_at, adult_at, sex, attraction, personality, energy, mood, last, region)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '{}', ?)`,
         )
         .bind(
           child.seed,
@@ -168,6 +199,7 @@ export async function advanceGarden(db: D1Database, now: number, rng: Rng = rand
           child.identity.sex,
           child.identity.attraction,
           JSON.stringify(child.personality),
+          region,
         ),
     );
   }
@@ -204,8 +236,5 @@ export async function advanceGarden(db: D1Database, now: number, rng: Rng = rand
       db.prepare(`UPDATE blobs SET energy = ?, mood = ?, last = ? WHERE seed = ?`).bind(blob.vitals.energy, blob.vitals.mood, JSON.stringify(blob.last), blob.seed),
     );
   }
-  writes.push(db.prepare(`DELETE FROM segments WHERE end < ?`).bind(now - KEEP_SEGMENTS));
-  writes.push(db.prepare(`DELETE FROM interactions WHERE ended_at < ?`).bind(now - KEEP_SEGMENTS));
-
   for (let i = 0; i < writes.length; i += BATCH) await db.batch(writes.slice(i, i + BATCH));
 }
