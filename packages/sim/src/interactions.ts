@@ -129,12 +129,27 @@ export function deltaFor(kind: InteractionKind, outcome: Outcome, ctx: MeetingCo
   };
 }
 
-/** How a meeting leaves each of them feeling: a nudge to mood, which lives in [-1, 1]. */
-export function moodShift(kind: InteractionKind, outcome: Outcome): number {
+/** How a meeting leaves one of them feeling: a nudge to mood, which lives in
+ * [-1, 1]. Who it was with counts: a good time with a sweetheart or a best
+ * friend lifts more, and even a nice moment with a rival doesn't. */
+export function moodShift(kind: InteractionKind, outcome: Outcome, status: RelationStatus = "acquaintances"): number {
   // A real fight stays with you.
   if (outcome === "bad") return kind === "argue" ? -0.4 : -0.25;
   if (kind === "argue" || kind === "sulk" || kind === "ignore") return outcome === "good" ? 0 : -0.15;
-  return outcome === "good" ? 0.2 : 0.05;
+  if (status === "rivals" || status === "ex") return outcome === "good" ? 0 : -0.1;
+  const close = status === "lovers" || status === "crush" || status === "best_friends" ? 1.5 : 1;
+  return (outcome === "good" ? 0.2 : 0.05) * close;
+}
+
+/** The face one of them wears: the moment, coloured by who it's with. A blob
+ * in love is starry-eyed chatting with its sweetheart; a crush makes it shy;
+ * even a pleasant moment with a rival or an ex stays awkward. */
+export function feeling(kind: InteractionKind, outcome: Outcome, status: RelationStatus): string {
+  if (kind === "argue" || outcome === "bad") return interactionExpression(kind, outcome);
+  if (status === "lovers") return "love";
+  if (status === "crush") return outcome === "good" ? "love" : "shy";
+  if (status === "rivals" || status === "ex") return kind === "ignore" ? "smug" : "unsure";
+  return interactionExpression(kind, outcome);
 }
 
 /** The blobatar expression both wear while it happens. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compatible, randomPersonality, type Identity } from "./identity";
-import { allowedFor, INTERACTIONS, MAX_STEP, pickInteraction, type MeetingContext } from "./interactions";
+import { allowedFor, feeling, INTERACTIONS, MAX_STEP, moodShift, pickInteraction, type MeetingContext } from "./interactions";
 import { DURATION, firstSegment, NEXT, SLEEP_HOURS, type Segment } from "./life";
 import { applyDelta, newRelationship, relationStatus, type Relationship } from "./relationship";
 import { randomRng, seededRng, type Rng } from "./rng";
@@ -111,6 +111,19 @@ describe("stepWorld", () => {
     }
   });
 
+  it("carries a meeting's mood into what comes next, most of the time", () => {
+    let [after, kept] = [0, 0];
+    for (const segs of bySeed.values()) {
+      segs.forEach((s, i) => {
+        const next = segs[i + 1];
+        if (s.activity !== "meet" || !next || (next.activity !== "explore" && next.activity !== "rest")) return;
+        after++;
+        if (next.expression === s.expression || (s.detail?.endsWith(":bad") && ["sad", "unsure", "mad"].includes(next.expression))) kept++;
+      });
+    }
+    expect(kept / after).toBeGreaterThan(0.6);
+  });
+
   it("never lets an axis move more than a step per meeting", () => {
     for (const m of step.meetings) for (const v of Object.values(m.delta)) expect(Math.abs(v)).toBeLessThanOrEqual(MAX_STEP);
   });
@@ -169,6 +182,18 @@ describe("relationships", () => {
     playfulness: 1,
     romance: 1,
     ...over,
+  });
+
+  it("shows on a blob's face, and in its mood, who it's with", () => {
+    expect(feeling("chat", "good", "lovers")).toBe("love");
+    expect(feeling("chat", "meh", "crush")).toBe("shy");
+    expect(feeling("play", "good", "rivals")).toBe("unsure");
+    expect(feeling("argue", "bad", "lovers")).toBe("mad");
+    expect(feeling("play", "good", "friends")).toBe("happy");
+    expect(moodShift("play", "good", "best_friends")).toBeGreaterThan(moodShift("play", "good", "acquaintances"));
+    expect(moodShift("play", "good", "acquaintances")).toBeGreaterThan(0);
+    expect(moodShift("chat", "good", "rivals")).toBe(0);
+    expect(moodShift("chat", "bad")).toBeLessThan(0);
   });
 
   it("only picks what the relationship allows, however good the mood", () => {

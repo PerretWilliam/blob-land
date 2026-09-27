@@ -2,7 +2,7 @@ import { childPersonality, compatible, randomIdentity, type Identity, type Perso
 import {
   allowedFor,
   deltaFor,
-  interactionExpression,
+  feeling,
   moodShift,
   pickInteraction,
   rollOutcome,
@@ -151,7 +151,8 @@ export function stepWorld(world: World, until: number, rng: Rng, maxCatchUp = 2 
     if (!b) break;
 
     const t = b.last.end;
-    const wantsCompany = 0.05 + 0.3 * b.personality.sociability + 0.1 * b.vitals.mood;
+    // A cheerful blob goes looking for company; a low one keeps to itself.
+    const wantsCompany = 0.05 + 0.3 * b.personality.sociability + 0.2 * b.vitals.mood;
     if (canSocialize(b.last, b.vitals, t) && rng() < wantsCompany) {
       const group = [b];
       for (let c = pickCompany(world, group, t, rng); c; c = group.length < GROUP_MAX && rng() < GROWS(b) ? pickCompany(world, group, t, rng) : undefined) {
@@ -192,6 +193,8 @@ function pickCompany(world: World, group: WorldBlob[], t: number, rng: Rng): Wor
 const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
 const activeUnion = (world: World, seed: string) => world.unions.find((u) => u.endedAt === null && (u.a === seed || u.b === seed));
 const SCORE: Record<Outcome, number> = { good: 1, meh: 0, bad: -1 };
+// Which relationship shows on a blob's face in a crowd, most telling first.
+const SALIENCE: RelationStatus[] = ["lovers", "crush", "rivals", "ex", "complicated", "best_friends", "family", "friends", "acquaintances", "strangers"];
 
 /**
  * Two or more blobs get together: they walk to a spot between them and stand
@@ -222,6 +225,8 @@ function gather(
 
   const scores = members.map((): number[] => []);
   const shifts = members.map((): number[] => []);
+  // Who matters most to each of them there: that colours its face.
+  const closest = members.map((): RelationStatus => "strangers");
   let kind: InteractionKind = "chat";
   for (let i = 0; i < members.length; i++) {
     for (let j = i + 1; j < members.length; j++) {
@@ -229,7 +234,8 @@ function gather(
       kind = moment.kind;
       for (const k of [i, j]) {
         scores[k]!.push(SCORE[moment.outcome]);
-        shifts[k]!.push(moodShift(moment.kind, moment.outcome));
+        shifts[k]!.push(moodShift(moment.kind, moment.outcome, moment.status));
+        if (SALIENCE.indexOf(moment.status) < SALIENCE.indexOf(closest[k]!)) closest[k] = moment.status;
       }
       if (!crowd) maybeBorn(world, members[0]!, members[1]!, moment.kind, moment.outcome, { x: mx, y: my + 0.08 }, end, rng, out, touched);
     }
@@ -247,7 +253,7 @@ function gather(
       start: m.last.end,
       end,
       activity: "meet",
-      expression: interactionExpression(shown, outcome),
+      expression: feeling(shown, outcome, closest[i]!),
       x: mx + ring * Math.cos(angle),
       y: my + ring * Math.sin(angle),
       rng: randomSeed(rng),
@@ -270,7 +276,7 @@ function pair(
   rng: Rng,
   out: WorldStep,
   touched: Map<string, Relationship>,
-): { kind: InteractionKind; outcome: Outcome } {
+): { kind: InteractionKind; outcome: Outcome; status: RelationStatus } {
   const key = pairKey(b.seed, c.seed);
   const union = activeUnion(world, b.seed);
   const couple = union !== undefined && (union.a === c.seed || union.b === c.seed);
@@ -308,7 +314,7 @@ function pair(
   }
   world.relationships.set(key, rel);
   touched.set(key, rel);
-  return { kind, outcome };
+  return { kind, outcome, status: rel.status };
 }
 
 /** A couple alone together, having a lovely time, may have a child. */

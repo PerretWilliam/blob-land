@@ -103,13 +103,15 @@ export function awakeExpression(vitals: Vitals, rng: Rng): string {
  * a kiss leaves it dreamy.
  */
 function lingering(last: Segment, rng: Rng): string | null {
-  if (last.activity === "meet" && last.detail) {
-    const [kind, outcome] = last.detail.split(":");
-    if (kind === "argue" && outcome !== "good") return "mad";
-    if (outcome === "bad") return pick(rng, ["sad", "unsure"]);
-    if (outcome === "good" && (kind === "hug" || kind === "kiss" || kind === "flirt") && rng() < 0.6) return "love";
+  if (last.activity === "meet") {
+    // Anger always outlasts the fight; any other mood from a meeting (in love,
+    // cheerful, glum, awkward…) usually carries into what comes next.
+    if (last.expression === "mad") return "mad";
+    if (last.detail?.endsWith(":bad")) return pick(rng, ["sad", "unsure"]);
+    return rng() < 0.75 ? last.expression : null;
   }
-  if (last.expression === "mad" && last.activity !== "sleep" && rng() < 0.5) return "mad";
+  // Then it fades, in its own time: anger and love the slowest.
+  if ((last.expression === "mad" || last.expression === "love") && last.activity !== "sleep" && rng() < 0.45) return last.expression;
   return null;
 }
 
@@ -122,8 +124,9 @@ function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng): Excl
   // Past 1, bedtime isn't a maybe; from 0.8 up it's a growing one.
   if (pressure > 1) return "sleep";
   return weighted(rng, {
-    explore: 5,
-    rest: prev === "rest" ? 0 : 1 + 3 * (1 - vitals.energy),
+    // In high spirits a blob goes off exploring; feeling low, it sits a while.
+    explore: 5 + 2 * Math.max(0, vitals.mood),
+    rest: prev === "rest" ? 0 : 1 + 3 * (1 - vitals.energy) + 2 * Math.max(0, -vitals.mood),
     discover: prev === "discover" ? 0 : 1.2,
     sleep: pressure > 0.8 ? 60 * (pressure - 0.8) : 0,
   });
