@@ -864,15 +864,14 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     if (p) applyPosition(seed, p);
   }
 
-  // Night dims the sprites themselves — per element, since a filter on a
-  // shared wrapper would break the blobs' depth sorting against the decor.
+  // Night dims the world: one filter over the ground, decor and blobs
+  // together (so they still sort against each other), none by day. A filter
+  // per sprite made WebKit paint each one apart at every redraw of a zoom or pan.
   const spriteFilter = `brightness(${0.45 + 0.55 * light}) saturate(${0.55 + 0.45 * light})`;
-  // Through a variable set on the scene, so the terrain needn't re-render as the light turns.
   const sprite = (at: { left: number; top: number }, w: number, z: number): CSSProperties => ({
     left: `${at.left}%`,
     top: `${at.top}%`,
     width: `${(w / island.w) * 100}%`,
-    filter: "var(--sprite-filter)",
     zIndex: z,
   });
 
@@ -934,6 +933,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           alt=""
           aria-hidden="true"
           draggable={false}
+          decoding="async"
           // Decor is anchored at the sprite's base, a little above its bottom edge.
           className={`absolute max-w-none select-none ${item.decor ? "-translate-x-1/2 -translate-y-[92%]" : ""}`}
           style={sprite(item.at, item.w, item.z)}
@@ -998,7 +998,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       ref={sceneRef}
       // Fills its parent; `container-type: size` lets the island size itself in cq units.
       className="absolute inset-0 overflow-hidden [container-type:size]"
-      style={{ background: skyGradient(light), transition: "background 2s", "--sprite-filter": spriteFilter } as CSSProperties}
+      style={{ background: skyGradient(light), transition: "background 2s" }}
       onClickCapture={(e) => {
         if (!dragged.current) return;
         dragged.current = false;
@@ -1033,7 +1033,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
             top: `${c.top}%`,
             width: `${c.size}%`,
             opacity: 0.4 + 0.6 * light,
-            filter: spriteFilter,
+            filter: light < 1 ? spriteFilter : undefined,
             ...(reducedMotion
               ? { transform: `translateX(${c.offset * 100}vw)` }
               : { animation: `cloud-drift ${c.duration}s linear ${-c.offset * c.duration}s infinite` }),
@@ -1054,9 +1054,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           aspectRatio: `${island.w} / ${island.h}`,
         }}
       >
-        {culled ? (
-          <canvas ref={bakeRef} aria-hidden="true" className="absolute inset-0 size-full" style={{ filter: "var(--sprite-filter)" }} />
-        ) : null}
+        <div className="absolute inset-0" style={light < 1 ? { filter: spriteFilter } : undefined}>
+        {culled ? <canvas ref={bakeRef} aria-hidden="true" className="absolute inset-0 size-full" /> : null}
         {culled
           ? inView.chunks.map((key) => <Fragment key={key}>{terrain.chunks.get(key)?.nodes}</Fragment>)
           : [...terrain.chunks.values()].map((chunk) => chunk.nodes)}
@@ -1117,6 +1116,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
               ),
             )
           : null}
+        </div>
 
         {blobs.map((blob) => {
           // Names only close up (and yours, and the one followed, always).
@@ -1370,8 +1370,14 @@ const SceneBlobView = memo(function SceneBlobView({
       <span
         aria-hidden="true"
         data-shadow
-        className="absolute rounded-[50%] bg-black/25 blur-[2px]"
-        style={{ width: size * 0.6, height: size * 0.18, transform: "translate(-50%, -50%)" }}
+        // A soft gradient, not a blur: a filter per blob is costly to repaint.
+        className="absolute rounded-[50%]"
+        style={{
+          width: size * 0.6,
+          height: size * 0.18,
+          transform: "translate(-50%, -50%)",
+          background: "radial-gradient(closest-side, rgb(0 0 0 / 0.3), rgb(0 0 0 / 0.18) 70%, transparent)",
+        }}
       />
       <div className="absolute -translate-x-1/2" style={{ bottom: -size * 0.2, width: size }}>
         {/* The walk cycle transforms this wrapper, never the blobatar itself. */}
