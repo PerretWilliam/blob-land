@@ -31,12 +31,16 @@ export function activityLog(segments: readonly Segment[], nameOf: (seed: string)
         return entries.push({ at, text: `Found ${seg.detail ?? "something"}.` });
       case "meet": {
         const [kind, outcome] = (seg.detail ?? "chat:meh").split(":") as [InteractionKind, Outcome];
-        return entries.push({ at, text: interactionText(kind, outcome, seg.with ? nameOf(seg.with) : "someone") });
+        return entries.push({ at, text: interactionText(kind, outcome, seg.with?.length ? listNames(seg.with.map(nameOf)) : "someone") });
       }
     }
   });
   return entries;
 }
+
+/** "A", "A and B", "A, B and C". */
+export const listNames = (names: readonly string[]) =>
+  names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 
 /** The bits worth a notification: waking up, finding things, meeting someone. */
 export const notable = (segments: readonly Segment[], nameOf?: (seed: string) => string) =>

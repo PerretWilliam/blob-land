@@ -19,8 +19,8 @@ export interface Segment {
   y: number;
   /** Replays the walk inside the segment (an explore's stops) on every client. */
   rng: number;
-  /** A meet's other blob. */
-  with: string | null;
+  /** Everyone else at a meet: one blob, or a whole group. */
+  with: string[] | null;
   /** What was found, for a discover; `kind:outcome` for a meet. */
   detail: string | null;
 }

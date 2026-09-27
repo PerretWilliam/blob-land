@@ -4,7 +4,7 @@ import { allowedFor, INTERACTIONS, MAX_STEP, pickInteraction, type MeetingContex
 import { DURATION, firstSegment, NEXT, SLEEP_HOURS, type Segment } from "./life";
 import { applyDelta, newRelationship, relationStatus, type Relationship } from "./relationship";
 import { randomRng, seededRng, type Rng } from "./rng";
-import { stepWorld, type World, type WorldBlob } from "./world";
+import { GROUP_MAX, stepWorld, type World, type WorldBlob } from "./world";
 
 const T0 = Date.UTC(2026, 8, 25, 8);
 const HOUR = 60 * 60 * 1000;
@@ -56,8 +56,8 @@ describe("stepWorld", () => {
         expect(length).toBeGreaterThanOrEqual(SLEEP_HOURS[0] * HOUR - 1);
         expect(length).toBeLessThanOrEqual(SLEEP_HOURS[1] * HOUR + 1);
       } else if (s.activity === "meet") {
-        // The first to arrive may wait up to 5 minutes for the other.
-        expect(length).toBeLessThanOrEqual(DURATION.meet[1] + 5 * 60 * 1000 + 1);
+        // The first to arrive may wait up to 5 minutes for the others; groups linger longer.
+        expect(length).toBeLessThanOrEqual(DURATION.meet[1] * 1.5 + 5 * 60 * 1000 + 1);
       } else {
         expect(length).toBeGreaterThanOrEqual(DURATION[s.activity][0] - 1);
         expect(length).toBeLessThanOrEqual(DURATION[s.activity][1] + 1);
@@ -83,9 +83,22 @@ describe("stepWorld", () => {
   it("pairs meetings up: both sides, same end, facing each other", () => {
     expect(step.meetings.length).toBeGreaterThan(50);
     for (const m of step.meetings) {
-      const a = bySeed.get(m.a)!.find((s) => s.activity === "meet" && s.end === m.end && s.with === m.b);
-      const b = bySeed.get(m.b)!.find((s) => s.activity === "meet" && s.end === m.end && s.with === m.a);
+      const a = bySeed.get(m.a)!.find((s) => s.activity === "meet" && s.end === m.end && s.with?.includes(m.b));
+      const b = bySeed.get(m.b)!.find((s) => s.activity === "meet" && s.end === m.end && s.with?.includes(m.a));
       expect(a && b).toBeTruthy();
+    }
+  });
+
+  it("gathers groups now and then, standing close together", () => {
+    const groups = step.segments.filter((s) => s.activity === "meet" && s.with!.length > 1);
+    expect(groups.length).toBeGreaterThan(0);
+    for (const s of groups) {
+      expect(s.with!.length).toBeLessThan(GROUP_MAX);
+      for (const other of s.with!) {
+        const o = bySeed.get(other)!.find((x) => x.activity === "meet" && x.end === s.end)!;
+        expect(o.with).toContain(s.seed);
+        expect(Math.hypot(o.x - s.x, o.y - s.y)).toBeLessThan(0.2);
+      }
     }
   });
 

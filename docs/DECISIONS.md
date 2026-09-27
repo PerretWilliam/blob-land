@@ -22,6 +22,8 @@ The Worker's cron trigger (every 5 minutes) is the only thing that lives the gar
 
 Each pair has friendship, romance and tension, plus a chemistry rolled once when they first meet. The status (friends, best friends, crush, lovers, complicated, rivals, ex, family…) is read off those with hysteresis, and the status decides which interactions are even possible — rivals argue, sulk or ignore each other; they never hug. Romance only grows between blobs mutually attracted to each other's sex, never within a family, and only between grown-ups.
 
+Meetings can grow into gatherings of up to five: company is picked by how well a blob gets on with everyone already there and by how close they stand, so blobs gather with their neighbours. A group does one thing together (chat, play, dance) and every pair in it still has its own moment — pairs whose status rules that out (rivals, exes) bicker or snub each other instead. Bonds move slower in a crowd, and children only come from a couple alone together.
+
 ## Couples form and break up; children grow up
 
 A union starts when a relationship is in love enough, and ends when the couple breaks up (they become exes), not at a birth. Children can be born while a couple is together, after a cooldown, less often as the garden fills up. Children grow up after 8–12 days and can then fall in love and have children of their own; unions are between blob seeds, not accounts, for that reason.

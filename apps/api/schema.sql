@@ -55,7 +55,7 @@ CREATE TABLE segments (
   x REAL NOT NULL,
   y REAL NOT NULL,
   rng INTEGER NOT NULL,
-  with_seed TEXT,
+  with_seed TEXT, -- everyone else at a meet, comma-separated
   detail TEXT,
   PRIMARY KEY (seed, start)
 );

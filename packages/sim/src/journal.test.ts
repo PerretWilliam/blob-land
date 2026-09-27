@@ -22,7 +22,8 @@ describe("activityLog", () => {
     seg(3, "explore"),
     seg(4, "explore"),
     seg(5, "discover", { detail: "a smooth pebble" }),
-    seg(6, "meet", { with: "bob", detail: "hug:good" }),
+    seg(6, "meet", { with: ["bob"], detail: "hug:good" }),
+    seg(7, "meet", { with: ["ann", "bob", "cy"], detail: "chat:good" }),
   ];
 
   it("tells the day in order, merging back-to-back explores", () => {
@@ -32,10 +33,11 @@ describe("activityLog", () => {
       "Went exploring.",
       "Found a smooth pebble.",
       "Hugged BOB.",
+      "Had a lovely chat with ANN, BOB and CY.",
     ]);
   });
 
   it("only notifies about wakes, finds and meetings", () => {
-    expect(notable(segs).map((e) => e.at)).toEqual([2, 5, 6]);
+    expect(notable(segs).map((e) => e.at)).toEqual([2, 5, 6, 7]);
   });
 });

@@ -168,7 +168,7 @@ export async function advanceGarden(db: D1Database, now: number, rng: Rng = rand
     writes.push(
       db
         .prepare(`INSERT OR REPLACE INTO segments (seed, start, end, activity, expression, x, y, rng, with_seed, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(s.seed, s.start, s.end, s.activity, s.expression, s.x, s.y, s.rng, s.with, s.detail),
+        .bind(s.seed, s.start, s.end, s.activity, s.expression, s.x, s.y, s.rng, s.with?.join(",") ?? null, s.detail),
     );
   }
   for (const m of step.meetings) {

@@ -1,4 +1,4 @@
-import { activityLog, segmentAt, type Identity } from "@blob-land/sim";
+import { activityLog, listNames, segmentAt, type Identity } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
@@ -94,7 +94,7 @@ export function GardenScreen({
       sex: blob.sex,
       attraction: blob.attraction,
       partner: blob.partner,
-      meetingWith: activity === "meet" && withSeed ? nameOf(withSeed) : undefined,
+      meetingWith: activity === "meet" && withSeed?.length ? listNames(withSeed.map(nameOf)) : undefined,
       partnerLabel: blob.partner ? nameOf(blob.partner) : undefined,
       young: now < blob.adultAt,
       ...(blob.seed === account?.seed ? { onIdentityChange } : {}),

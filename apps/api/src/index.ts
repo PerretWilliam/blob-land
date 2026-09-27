@@ -155,7 +155,7 @@ app.get("/garden", requireAuth, async (c) => {
     .all<SegmentRow>();
   const segments = new Map<string, Segment[]>();
   for (const { seed, with_seed, ...r } of rows) {
-    segments.set(seed, [...(segments.get(seed) ?? []), { ...r, with: with_seed }]);
+    segments.set(seed, [...(segments.get(seed) ?? []), { ...r, with: with_seed?.split(",") ?? null }]);
   }
 
   // Timelines, not states: the client plays the stored segments back itself.
