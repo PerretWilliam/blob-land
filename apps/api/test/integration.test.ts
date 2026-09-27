@@ -3,7 +3,7 @@ import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import schemaSql from "../schema.sql?raw";
 import { gardenNow } from "../src/clock";
-import { advanceGarden } from "../src/garden";
+import { advanceGarden, regionForNewAccount } from "../src/garden";
 
 beforeAll(async () => {
   // Strip `-- comment` text first: a comment can itself contain a `;` (see
@@ -45,6 +45,10 @@ async function login(pseudo: string) {
 const DAY = 24 * 60 * 60 * 1000;
 
 interface GardenBody {
+  region: number;
+  home: number;
+  size: number;
+  regions: { region: number; blobs: number }[];
   blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; partner: string | null; segments: { start: number; end: number }[] }[];
 }
 
@@ -94,12 +98,24 @@ describe("blob-land API", () => {
     expect(mine.blobs.find((b) => b.seed === home.seed)!.segments.length).toBeGreaterThan(0);
 
     // Any region can be asked for by number; nonsense is refused.
-    const asked = await SELF.fetch("https://api.test/garden?region=1", { headers: { authorization: `Bearer ${home.token}` } });
-    expect((await jsonAs<GardenBody>(asked)).blobs.map((b) => b.seed)).toEqual([away.seed]);
+    const asked = await jsonAs<GardenBody>(await SELF.fetch("https://api.test/garden?region=1", { headers: { authorization: `Bearer ${home.token}` } }));
+    expect(asked.blobs.map((b) => b.seed)).toEqual([away.seed]);
+    // Visiting: still home is home, and every region is listed with its island.
+    expect(asked).toMatchObject({ region: 1, home: 0, size: 24 });
+    expect(asked.regions.map((r) => r.region)).toEqual([0, 1]);
+    expect(asked.regions[1]!.blobs).toBe(1);
     const bad = await SELF.fetch("https://api.test/garden?region=-1", { headers: { authorization: `Bearer ${home.token}` } });
     expect(bad.status).toBe(400);
     // Back home, so later tests share one garden.
     await env.DB.prepare(`UPDATE blobs SET region = 0 WHERE seed = ?`).bind(away.seed).run();
+  });
+
+  it("sends new accounts to the first region with room, and opens the next when all are full", async () => {
+    const { region } = await garden((await register("newcomer")).token);
+    expect(region).toBe(0);
+    const count = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM blobs WHERE region = 0`).first<number>("n"))!;
+    expect(await regionForNewAccount(env.DB, count + 1)).toBe(0);
+    expect(await regionForNewAccount(env.DB, count)).toBe(1);
   });
 
   it("takes a sex and attraction at sign-up, and lets the player change them", async () => {

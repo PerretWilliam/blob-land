@@ -33,9 +33,20 @@ export interface GardenResponse {
   now: number;
   /** How fast the garden's clock runs: 1, or more in a sped-up local dev garden. */
   rate: number;
-  /** The region of the garden these blobs live in: the player's own. */
+  /** The region of the garden these blobs live in: the one asked for, else the player's own. */
   region: number;
+  /** The player's own region. */
+  home: number;
+  /** Every region, and how many blobs live there. */
+  regions: GardenRegion[];
+  /** The region's island side, in cells (see gardenIsland). */
+  size: number;
   blobs: GardenBlob[];
+}
+
+export interface GardenRegion {
+  region: number;
+  blobs: number;
 }
 
 /** The garden's clock, as last read from the server. */
@@ -87,8 +98,9 @@ export function login(pseudo: string, password: string): Promise<AuthResponse> {
   return request("/auth/login", { method: "POST", body: JSON.stringify({ pseudo, password }) });
 }
 
-export function getGarden(token: string): Promise<GardenResponse> {
-  return request("/garden", { headers: authHeader(token) });
+/** One region of the garden: `region`, or the player's own. */
+export function getGarden(token: string, region?: number): Promise<GardenResponse> {
+  return request(region === undefined ? "/garden" : `/garden?region=${region}`, { headers: authHeader(token) });
 }
 
 export function setVisibility(token: string, visible: boolean): Promise<{ ok: true }> {

@@ -1,8 +1,10 @@
-import { activityLog, listNames, segmentAt, type Identity } from "@blob-land/sim";
+import { activityLog, gardenSize, listNames, segmentAt, type Identity } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Eraser,
   Eye,
   EyeOff,
@@ -26,9 +28,9 @@ import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { RelationsPanel } from "@/components/relations-panel";
 import { Button } from "@/components/ui/button";
 import { ACTIVITY_LABELS, ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
-import { gardenTime, type GardenBlob, type GardenClock } from "@/lib/api";
+import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import type { LocalLife } from "@/lib/life";
-import { gardenIsland, gardenSize } from "@/lib/world-gen";
+import { gardenIsland } from "@/lib/world-gen";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
 import { usePrefersReducedMotion } from "@/lib/motion";
 
@@ -41,6 +43,10 @@ export interface GardenScreenProps {
   onCountryChange: (country: string | null) => void;
   account: { pseudo: string; seed: string; token: string } | null;
   blobs: GardenBlob[];
+  /** The region on screen, the player's own, every region, and the island's side, once loaded. */
+  regions: { region: number; home: number; list: GardenRegion[]; size: number } | null;
+  /** Go and see another region's island. */
+  onVisit: (region: number) => void;
   /** The garden's time, which may run faster than the private blob's (dev). */
   gardenClock: GardenClock;
   visible: boolean;
@@ -65,6 +71,8 @@ export function GardenScreen({
   onCountryChange,
   account,
   blobs,
+  regions,
+  onVisit,
   gardenClock,
   visible,
   onToggleVisibility,
@@ -115,8 +123,9 @@ export function GardenScreen({
   // Losing the account (or never having one) means there's no garden to show.
   const inGarden = view === "garden" && account !== null;
   // The shared garden is never edited: everyone sees the same generated
-  // island, sized for how many live there.
-  const gardenSide = gardenSize(blobs.length);
+  // island, sized by the server for how many live there.
+  const gardenSide = regions?.size ?? gardenSize(blobs.length);
+  const atHome = !regions || regions.region === regions.home;
   const gardenLayout = useMemo(() => gardenIsland(gardenSide), [gardenSide]);
 
   useEffect(() => {
@@ -154,7 +163,7 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        <Scene key="garden" blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={account.seed}
+        <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={atHome ? account.seed : undefined}
           clock={() => gardenTime(gardenClock)}
           onShowRelations={(seed, name) => {
             setRelationsOf({ seed, name });
@@ -269,6 +278,8 @@ export function GardenScreen({
         ) : null}
       </nav>
 
+      {inGarden && regions && regions.list.length > 1 ? <RegionSwitcher regions={regions} onVisit={onVisit} /> : null}
+
       {panel === "journal" ? <JournalPanel segments={life.segments} name={localPseudo} now={now} onClose={() => setPanel(null)} /> : null}
       {panel === "family" ? (
         <FamilyPanel
@@ -345,6 +356,36 @@ function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["s
         ))}
       </ol>
     </aside>
+  );
+}
+
+/** The garden's islands, one per region: step through them, and back home. */
+function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScreenProps["regions"]>; onVisit: (region: number) => void }) {
+  const { list, region, home } = regions;
+  const k = list.findIndex((r) => r.region === region);
+  const [prev, next] = [list[k - 1], list[k + 1]];
+  const count = list[k]?.blobs ?? 0;
+  return (
+    <nav
+      aria-label="Islands"
+      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-background/85 p-1.5 shadow-lg backdrop-blur-md"
+    >
+      <Button variant="ghost" size="icon-sm" aria-label="Previous island" disabled={!prev} onClick={() => prev && onVisit(prev.region)}>
+        <ChevronLeft />
+      </Button>
+      <p className="min-w-32 text-center text-sm" aria-live="polite">
+        <span className="font-medium">{region === home ? "Your island" : `Island ${region + 1}`}</span>
+        <span className="text-muted-foreground"> · {count} {count === 1 ? "blob" : "blobs"}</span>
+      </p>
+      <Button variant="ghost" size="icon-sm" aria-label="Next island" disabled={!next} onClick={() => next && onVisit(next.region)}>
+        <ChevronRight />
+      </Button>
+      {region !== home ? (
+        <Button variant="secondary" size="sm" onClick={() => onVisit(home)}>
+          <Home /> Home
+        </Button>
+      ) : null}
+    </nav>
   );
 }
 

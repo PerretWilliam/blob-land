@@ -12,6 +12,21 @@ export interface GroundPoint {
  * Exported so the renderer draws it where blobs sleep. */
 export const NEST = { min: 0.03, max: 0.13 } as const;
 
+/*
+ * The public garden's island side, in cells, for a region of `blobs` blobs.
+ * The server says it (every client then draws the same island), and it grows
+ * in steps of 8 so the map only changes now and then.
+ */
+export const MIN_GARDEN = 24;
+export const MAX_GARDEN = 128;
+export function gardenSize(blobs: number): number {
+  const side = Math.ceil((6 * Math.sqrt(Math.max(1, blobs))) / 8) * 8;
+  return Math.min(MAX_GARDEN, Math.max(MIN_GARDEN, side));
+}
+/** New accounts join the first region with fewer blobs than this: about
+ * when its island reaches MAX_GARDEN. Children still go on being born into it. */
+export const REGION_CAP = 450;
+
 /** Moves a point the sim picked onto ground the blob can stand on. The sim
  * doesn't know the terrain (water, trees…); the renderer does. */
 export type Snap = (p: GroundPoint) => GroundPoint;

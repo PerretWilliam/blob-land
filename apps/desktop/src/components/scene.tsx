@@ -10,6 +10,8 @@ import { CountryField, countryName } from "@/components/country-field";
 import { AuraFx, InteractionFx, momentAt, type Aura, type Moment } from "@/components/interaction-fx";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
+import bridgeAcrossNeSw from "@/assets/iso/bridge-ne-sw.svg";
+import bridgeAcrossNwSe from "@/assets/iso/bridge-nw-se.svg";
 import DECOR_WIDTHS from "@/assets/iso/widths.json";
 import {
   canHoldDecor,
@@ -17,6 +19,7 @@ import {
   DECOR_KINDS,
   EDGES,
   findPath,
+  homeNest,
   isSunken,
   nestCell,
   OPPOSITE_EDGE,
@@ -237,7 +240,8 @@ function linkedEdges(layout: IslandLayout, i: number, j: number, ground: "road" 
     const [a, b] = [i + di, j + dj];
     if (ground === "river" && a === layout.size && b >= 0 && b < layout.size) return true;
     const neighbour = cellAt(layout, a, b);
-    if (!(neighbour?.ground === ground || (ground === "river" && neighbour?.ground === "water"))) return false;
+    // Roads run on over a bridge; rivers into the sea.
+    if (!(neighbour?.ground === ground || (ground === "river" && neighbour?.ground === "water") || (ground === "road" && neighbour?.bridge))) return false;
     const neighbourHeight = neighbour?.height ?? 0;
     const rampEdge = rampDirection(layout, a, b);
     // Level ground: a ramp only opens onto its flat (low) front, never its side walls.
@@ -270,6 +274,10 @@ function cellStack(layout: IslandLayout, i: number, j: number): string[] {
       : piece(`tile-${ground}`);
   return [...stack, top];
 }
+
+/** A bridge's deck, across the river's flow (a bridge only sits on a straight stretch). */
+const bridgeOver = (layout: IslandLayout, i: number, j: number) =>
+  linkedEdges(layout, i, j, "river") === "nw-se" ? bridgeAcrossNeSw : bridgeAcrossNwSe;
 
 /** Thumbnails for the editor's tools. */
 export const GROUND_THUMBS = Object.fromEntries(
@@ -309,10 +317,12 @@ const FREE = new Set<Activity>(["explore", "rest", "discover"]);
  * converging on the midpoint of their two own positions.
  */
 function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]))): GroundPoint[] {
-  const snap = (p: GroundPoint) => snapToGround(layout, p);
   const zoom = walkZoom(layout.size);
   const gap = PAIR_GAP / zoom;
   const ps = blobs.map((b) => {
+    // Each to its own nest at night.
+    const home = homeNest(layout, b.seed, b.partner);
+    const snap = (p: GroundPoint) => snapToGround(layout, p, home);
     const at = segmentAt(b.segments, t, snap);
     if (!at) return { x: 0.5, y: 0.5 };
     if (t >= at.seg.end) return snap({ x: at.seg.x, y: at.seg.y });
@@ -413,8 +423,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   const liftAt = (p: GroundPoint) => {
     const [u, v] = [p.x * tiles, p.y * tiles];
     const [i, j] = [Math.min(tiles - 1, Math.floor(u)), Math.min(tiles - 1, Math.floor(v))];
-    const g = cellAt(layout, i, j)?.ground;
-    return surfaceHeight(layout, i, j, u, v) * LEVEL - (g && isSunken(g) ? WATER_DROP : 0);
+    const cell = cellAt(layout, i, j);
+    return surfaceHeight(layout, i, j, u, v) * LEVEL - (cell && isSunken(cell.ground) && !cell.bridge ? WATER_DROP : 0);
   };
   const liftRef = useRef(liftAt);
   liftRef.current = liftAt;
@@ -624,6 +634,15 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
     return { x: clamp(v.x, left, left + w), y: clamp(v.y, top, top + h), z: clamp(v.z, 1, focusZoom) };
   }
+  // The island grew (or shrank) a step under the camera: zoom by as much, so
+  // the tiles keep their size on screen and the world grows around the view.
+  const lastTiles = useRef(tiles);
+  useLayoutEffect(() => {
+    const k = tiles / lastTiles.current;
+    lastTiles.current = tiles;
+    if (k === 1) return;
+    for (const v of [view, camera]) if (v.current) v.current = { ...v.current, z: v.current.z * k };
+  }, [tiles]);
   /*
    * What's in view, updated by the frame loop only when it changes: which
    * ground chunks to mount, whether it's the zoomed-out map, and which blobs.
@@ -843,9 +862,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   const segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]));
   const moments = new Map(blobs.map((b) => [b.seed, momentAt(b.seed, b.segments, now, (seed) => segmentsOf.get(seed))]));
 
-  const nest = layout.nest ?? NEST;
-  const nestMid = (nest.min + nest.max) / 2;
-  const nestW = (nest.max - nest.min) * tiles * 2 * HALF_W + 40;
+  const nests = layout.nests ?? [{ x: (NEST.min + NEST.max) / 2, y: (NEST.min + NEST.max) / 2, r: (NEST.max - NEST.min) / 2 }];
 
   // The ground and everything standing on it only change with the layout:
   // thousands of sprites on a big map, so they're built once, not every tick,
@@ -874,6 +891,9 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         // Shift so the image's top vertex (not its corner) lands on the grid point.
         const corner = { left: at.left - (TOP_X / island.w) * 100, top: at.top - (TOP_Y / island.h) * 100 };
         items.push({ key: `${i}-${j}-${level}`, i, j, src, at: corner, w: TILE_IMG_W, z: level === 0 ? 0 : cellZ(i + j), decor: false });
+        // A bridge stands on the river, in its cell's depth band like a hill.
+        if (level === 0 && cellAt(layout, i, j)?.bridge)
+          items.push({ key: `bridge-${i}-${j}`, i, j, src: bridgeOver(layout, i, j), at: corner, w: TILE_IMG_W, z: cellZ(i + j), decor: false });
       });
     }
     layout.cells.forEach((cell, n) => {
@@ -1020,17 +1040,20 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           ? inView.chunks.map((key) => <Fragment key={key}>{terrain.chunks.get(key)?.nodes}</Fragment>)
           : [...terrain.chunks.values()].map((chunk) => chunk.nodes)}
 
-        {/* The nest, flat on the ground over exactly the square blobs sleep in. */}
-        <svg
-          aria-hidden="true"
-          className="absolute -translate-x-1/2 -translate-y-1/2"
-          style={sprite(ground({ x: nestMid, y: nestMid }), nestW, 1)}
-          viewBox="0 0 120 60"
-        >
-          <ellipse cx="60" cy="30" rx="56" ry="27" fill="#8a5a33" stroke="#000" strokeWidth="5" />
-          <ellipse cx="60" cy="31" rx="36" ry="15" fill="#5e3b20" stroke="#000" strokeWidth="4" />
-          <path d="M14 26 Q40 14 70 18 M50 46 Q80 44 104 30" stroke="#000" strokeWidth="3" fill="none" strokeLinecap="round" />
-        </svg>
+        {/* The nests, flat on the ground over exactly the squares blobs sleep in. */}
+        {nests.map((nest) => (
+          <svg
+            key={`${nest.x},${nest.y}`}
+            aria-hidden="true"
+            className="absolute -translate-x-1/2 -translate-y-1/2"
+            style={sprite(ground(nest), nest.r * 2 * tiles * 2 * HALF_W + 40, 1)}
+            viewBox="0 0 120 60"
+          >
+            <ellipse cx="60" cy="30" rx="56" ry="27" fill="#8a5a33" stroke="#000" strokeWidth="5" />
+            <ellipse cx="60" cy="31" rx="36" ry="15" fill="#5e3b20" stroke="#000" strokeWidth="4" />
+            <path d="M14 26 Q40 14 70 18 M50 46 Q80 44 104 30" stroke="#000" strokeWidth="3" fill="none" strokeLinecap="round" />
+          </svg>
+        ))}
 
         {onCellPaint ? <EditGrid layout={layout} island={island} onCellPaint={onCellPaint} /> : null}
 

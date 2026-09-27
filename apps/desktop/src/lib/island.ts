@@ -48,6 +48,8 @@ export interface IslandCell {
   height?: number;
   /** A slope up to the neighbour one block higher (see `rampDirection`). */
   ramp?: true;
+  /** On a river: a footbridge, straight across it. Walked over, never stopped on. */
+  bridge?: true;
 }
 
 /**
@@ -59,8 +61,9 @@ export interface IslandLayout {
   size: number;
   cells: IslandCell[];
   /** Where blobs sleep, if not the sim's own NEST corner: the garden's
-   * village. Same shape as NEST (a square on the diagonal). */
-  nest?: { min: number; max: number };
+   * nests, each a square (centre, half side) in ground units. Every blob has
+   * its own one (see `homeNest`). */
+  nests?: { x: number; y: number; r: number }[];
 }
 
 export const ISLAND_SIZE = 4;
@@ -244,14 +247,26 @@ export function canStopAt(island: IslandLayout, p: { x: number; y: number }): bo
   return !cell || (canPass(cell.ground) && !cell.decor);
 }
 
+/** Which of the layout's nests a blob sleeps in: always the same one while
+ * the island stays the same, and the same as its partner's. */
+export function homeNest(island: IslandLayout, seed: string, partner?: string | null): number {
+  const count = island.nests?.length ?? 0;
+  if (count < 2) return 0;
+  const key = partner && partner < seed ? partner : seed;
+  let h = 0;
+  for (let k = 0; k < key.length; k++) h = (Math.imul(h, 31) + key.charCodeAt(k)) | 0;
+  return (h >>> 0) % count;
+}
+
 /** `p` if a blob can stand there, else the middle of the nearest cell it can
  * stand on — the sim picks points without knowing the terrain. On a layout
- * with its own nest, a sleeping spot in the sim's NEST corner moves there. */
-export function snapToGround(island: IslandLayout, p: GroundPoint): GroundPoint {
-  const { nest } = island;
+ * with its own nests, a sleeping spot in the sim's NEST corner moves into
+ * nest `home` (see `homeNest`). */
+export function snapToGround(island: IslandLayout, p: GroundPoint, home = 0): GroundPoint {
+  const nest = island.nests?.[home % island.nests.length];
   if (nest && p.x >= NEST.min && p.x <= NEST.max && p.y >= NEST.min && p.y <= NEST.max) {
-    const k = (nest.max - nest.min) / (NEST.max - NEST.min);
-    p = { x: nest.min + (p.x - NEST.min) * k, y: nest.min + (p.y - NEST.min) * k };
+    const k = (2 * nest.r) / (NEST.max - NEST.min);
+    p = { x: nest.x - nest.r + (p.x - NEST.min) * k, y: nest.y - nest.r + (p.y - NEST.min) * k };
   }
   if (canStopAt(island, p)) return p;
   const [i, j] = cellOf(island.size, p);
@@ -292,11 +307,11 @@ const cellOf = (size: number, p: GroundPoint) =>
   [Math.min(size - 1, Math.max(0, Math.floor(p.x * size))), Math.min(size - 1, Math.max(0, Math.floor(p.y * size)))] as const;
 
 /** Whether a blob may step directly from one orthogonally adjacent cell to
- * another: neither is water, and any height difference is bridged by a ramp
+ * another: neither is water (bar a bridge), and any height difference is bridged by a ramp
  * climbing the right way (see `rampDirection`) — never a bare cliff. */
 export function canStep(island: IslandLayout, i1: number, j1: number, i2: number, j2: number): boolean {
   const [a, b] = [cellAt(island, i1, j1), cellAt(island, i2, j2)];
-  if (!a || !b || !canPass(a.ground) || !canPass(b.ground)) return false;
+  if (!a || !b || !(canPass(a.ground) || a.bridge) || !(canPass(b.ground) || b.bridge)) return false;
   const diff = (b.height ?? 0) - (a.height ?? 0);
   if (Math.abs(diff) > 1) return false;
   if (diff === 0) return true;

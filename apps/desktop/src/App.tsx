@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GardenScreen } from "@/components/garden-screen";
 import { JoinGardenScreen } from "@/components/join-garden-screen";
 import { PseudoScreen } from "@/components/pseudo-screen";
-import { getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock } from "@/lib/api";
+import { getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { loadState, saveState, type AppState } from "@/lib/state";
@@ -22,6 +22,9 @@ export default function App() {
   const [joining, setJoining] = useState(false);
   const [blobs, setBlobs] = useState<GardenBlob[]>([]);
   const [gardenClock, setGardenClock] = useState<GardenClock>(() => ({ at: Date.now(), readAt: Date.now(), rate: 1 }));
+  // Which region's island is on screen (null: the player's own), and what the server says about the regions.
+  const [visiting, setVisiting] = useState<number | null>(null);
+  const [regions, setRegions] = useState<{ region: number; home: number; list: GardenRegion[]; size: number } | null>(null);
   const [island, setIsland] = useState<IslandLayout>(() => defaultIsland(ISLAND_SIZE));
   const saveIslandTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -38,9 +41,15 @@ export default function App() {
     saveIslandTimer.current = setTimeout(() => void saveIsland(next), 400);
   }
 
+  const visitingRef = useRef(visiting);
+  visitingRef.current = visiting;
   const refreshGarden = useCallback(async (token: string) => {
-    const { blobs, now, rate } = await getGarden(token);
+    const asked = visitingRef.current ?? undefined;
+    const { blobs, now, rate, region, home, regions: list, size } = await getGarden(token, asked);
+    // The player moved on to another island while this one was loading.
+    if ((visitingRef.current ?? undefined) !== asked) return;
     setBlobs(blobs);
+    setRegions({ region, home, list, size });
     setGardenClock({ at: now, readAt: Date.now(), rate: rate ?? 1 });
   }, []);
 
@@ -94,7 +103,7 @@ export default function App() {
         .catch(() => {});
     }, fast ? FAST_GARDEN_REFRESH_MS : PING_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [appState?.account?.token, refreshGarden, fast]);
+  }, [appState?.account?.token, refreshGarden, fast, visiting]);
 
   function handlePseudoChosen(pseudo: string, identity: Identity) {
     const now = Date.now();
@@ -171,6 +180,8 @@ export default function App() {
       onCountryChange={handleCountryChange}
       account={appState.account}
       blobs={blobs}
+      regions={regions}
+      onVisit={(region) => setVisiting(region === regions?.home ? null : region)}
       gardenClock={gardenClock}
       visible={appState.settings.visible}
       onToggleVisibility={handleToggleVisibility}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstSegment, liveThrough, nextSolo, type Segment } from "./life";
-import { NEST, positionOn } from "./position";
+import { gardenSize, MAX_GARDEN, MIN_GARDEN, NEST, positionOn, REGION_CAP } from "./position";
 import { seededRng } from "./rng";
 
 const T0 = Date.UTC(2026, 8, 25, 8);
@@ -48,5 +48,16 @@ describe("positionOn", () => {
   it("snaps every stop onto standable ground", () => {
     const westOnly = (p: { x: number; y: number }) => ({ x: Math.min(p.x, 0.5), y: p.y });
     for (let t = T0; t < T0 + 48 * HOUR; t += 45_000) expect(positionOn(segs, t, westOnly).x).toBeLessThanOrEqual(0.5);
+  });
+});
+
+describe("gardenSize", () => {
+  it("grows with the garden, in steps, within bounds", () => {
+    expect(gardenSize(1)).toBe(MIN_GARDEN);
+    expect(gardenSize(60)).toBeGreaterThan(MIN_GARDEN);
+    expect(gardenSize(60) % 8).toBe(0);
+    expect(gardenSize(10_000)).toBe(MAX_GARDEN);
+    // A full region is just about as big as an island gets.
+    expect(gardenSize(REGION_CAP)).toBeGreaterThanOrEqual(MAX_GARDEN - 8);
   });
 });

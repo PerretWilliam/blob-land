@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { canStep, snapToGround } from "./island";
-import { gardenIsland, gardenSize, MAX_GARDEN, MIN_GARDEN } from "./world-gen";
+import { MAX_GARDEN, MIN_GARDEN } from "@blob-land/sim";
+import { gardenIsland } from "./world-gen";
 
 describe("gardenIsland", () => {
-  it("grows with the garden, in steps, within bounds", () => {
-    expect(gardenSize(1)).toBe(MIN_GARDEN);
-    expect(gardenSize(60)).toBeGreaterThan(MIN_GARDEN);
-    expect(gardenSize(10_000)).toBe(MAX_GARDEN);
-    expect(gardenSize(60) % 8).toBe(0);
-  });
-
   for (const size of [MIN_GARDEN, 40, 64, MAX_GARDEN]) {
     it(`is the same everywhere, and has it all, at ${size}`, () => {
       const island = gardenIsland(size);
@@ -43,10 +37,26 @@ describe("gardenIsland", () => {
         const standable = c.ground !== "water" && c.ground !== "river" && !c.decor;
         if (standable) expect(seen.has(n), `cell ${n % size},${Math.floor(n / size)}`).toBe(true);
       });
-      // Sleep spots in the sim's nest corner land in the village.
+      // Sleep spots in the sim's nest corner land in the blob's own nest,
+      // the first one in the village; a blob can get to every nest.
       const bed = snapToGround(island, { x: 0.08, y: 0.08 });
       expect(Math.abs(bed.x - 0.5)).toBeLessThan(2 / size);
       expect(Math.abs(bed.y - 0.5)).toBeLessThan(2 / size);
+      island.nests!.forEach((nest, k) => {
+        const p = snapToGround(island, { x: 0.08, y: 0.08 }, k);
+        expect(Math.hypot(p.x - nest.x, p.y - nest.y)).toBeLessThan(2 / size);
+        expect(seen.has(Math.floor(p.y * size) * size + Math.floor(p.x * size))).toBe(true);
+      });
+    });
+
+    it(`spreads the nests out, a few blobs to each, and bridges the river, at ${size}`, () => {
+      const island = gardenIsland(size);
+      const nests = island.nests!;
+      expect(nests.length).toBeGreaterThanOrEqual(Math.max(1, Math.floor((size / 6) ** 2 / 16)));
+      for (const a of nests) for (const b of nests) if (a !== b) expect(Math.hypot(a.x - b.x, a.y - b.y) * size).toBeGreaterThanOrEqual(7);
+      const bridges = island.cells.filter((c) => c.bridge);
+      expect(bridges.length).toBeGreaterThan(0);
+      expect(bridges.every((c) => c.ground === "river")).toBe(true);
     });
   }
 });

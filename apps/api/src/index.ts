@@ -1,4 +1,4 @@
-import { isAttraction, isCountry, isSex, type Attraction, type Segment, type Sex } from "@blob-land/sim";
+import { gardenSize, isAttraction, isCountry, isSex, type Attraction, type Segment, type Sex } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -7,7 +7,7 @@ import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
 import { gardenNow, timeScale } from "./clock";
 import type { Env } from "./env";
-import { advanceGarden, newAccountBlob } from "./garden";
+import { advanceGarden, newAccountBlob, regionForNewAccount } from "./garden";
 import { cleanName, MAX_NAME_LENGTH, nameTaken } from "./names";
 import { familyTree, nameOf } from "./tree";
 
@@ -98,7 +98,7 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
       `INSERT INTO users (id, pseudo, seed, password_hash, password_salt, visible_in_garden, country, last_seen_at, created_at)
        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     ).bind(id, pseudo, seed, hash, salt, country, now, now),
-    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env)),
+    newAccountBlob(c.env.DB, id, seed, { sex, attraction }, await gardenNow(c.env), await regionForNewAccount(c.env.DB)),
   ]);
 
   const token = await sign({ sub: id, exp: Math.floor(now / 1000) + 60 * 60 * 24 * 30 }, c.env.JWT_SECRET, "HS256");
@@ -145,10 +145,15 @@ app.get("/garden", requireAuth, async (c) => {
   const now = await gardenNow(c.env);
   const asked = c.req.query("region");
   if (asked !== undefined && !/^\d{1,9}$/.test(asked)) return c.json({ error: "region must be a non-negative integer" }, 400);
-  const region =
-    asked !== undefined
-      ? Number(asked)
-      : ((await c.env.DB.prepare(`SELECT region FROM blobs WHERE owner_user_id = ?`).bind(c.get("userId")).first<number>("region")) ?? 0);
+  const home = (await c.env.DB.prepare(`SELECT region FROM blobs WHERE owner_user_id = ?`).bind(c.get("userId")).first<number>("region")) ?? 0;
+  const region = asked !== undefined ? Number(asked) : home;
+  // Every region and how many live there (hidden players too: the island's
+  // size must be the same for everyone), so the player can go and visit.
+  const { results: regions } = await c.env.DB.prepare(
+    `SELECT region, COUNT(*) AS blobs FROM blobs WHERE born_at <= ? GROUP BY region ORDER BY region`,
+  )
+    .bind(now)
+    .all<{ region: number; blobs: number }>();
   // Children born in the world step's lookahead aren't here yet.
   const { results: blobs } = await c.env.DB.prepare(
     `SELECT b.seed, COALESCE(b.name, u.pseudo) AS pseudo, u.country, b.sex, b.attraction, b.born_at, b.adult_at
@@ -183,6 +188,10 @@ app.get("/garden", requireAuth, async (c) => {
   return c.json({
     now,
     region,
+    home,
+    regions,
+    // The island's side, in cells: every client draws the same one.
+    size: gardenSize(regions.find((r) => r.region === region)?.blobs ?? 0),
     // How fast the garden's clock runs: clients play timelines back at this rate.
     rate: timeScale(c.env),
     blobs: blobs.map((b) => ({

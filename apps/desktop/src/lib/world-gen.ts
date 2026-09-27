@@ -1,27 +1,25 @@
 import { seededRng } from "@blob-land/sim";
-import { canRamp, canStep, cellAt, EDGES, type DecorKind, type IslandCell, type IslandLayout } from "./island";
+import { canHoldDecor, canRamp, canStep, cellAt, EDGES, type DecorKind, type IslandCell, type IslandLayout } from "./island";
 
 /*
  * The public garden: one procedural island, the same on every client (it's
- * a pure function of its size), so nothing about the terrain is stored or
- * sent. An ocean all round, a beach, plains and woods, a small desert, a
- * mountain with a snowy top, a river down to the sea, and a village clearing
- * in the middle where everyone sleeps.
+ * a pure function of its size, which the server sends — see gardenSize), so
+ * nothing about the terrain is stored or sent. An ocean all round, a beach,
+ * plains and woods, a small desert, a mountain with a snowy top, a river down
+ * to the sea with footbridges, and a village clearing in the middle. Blobs
+ * sleep in nests scattered over the island, a few to each.
  */
 
-// Side, in cells, for a garden of `blobs` blobs: grows in steps of 8 so the
-// map (and everyone's place on it) only shifts now and then.
-export const MIN_GARDEN = 24;
-export const MAX_GARDEN = 128;
-export function gardenSize(blobs: number): number {
-  const side = Math.ceil((6 * Math.sqrt(Math.max(1, blobs))) / 8) * 8;
-  return Math.min(MAX_GARDEN, Math.max(MIN_GARDEN, side));
-}
-
-// Village clearing radius, in cells: grass and roads, no decor, the nest in the middle.
+// Village clearing radius, in cells: grass and roads, no decor, a nest in the middle.
 const VILLAGE = 3;
 // How many blocks the mountain rises.
 const PEAK = 4;
+// A footbridge at least this often along the river, in cells.
+const BRIDGE_EVERY = 10;
+// Roughly how many blobs share a nest, on an island sized for its garden
+// (gardenSize gives about (side / 6)² blobs); and how far apart nests keep, in cells.
+const PER_NEST = 8;
+const NEST_SPACING = 7;
 
 /** Smooth value noise in [0, 1], sampled in cell units. The lattice is
  * hashed from absolute coordinates, so it doesn't depend on the map size. */
@@ -127,12 +125,15 @@ export function gardenIsland(size: number): IslandLayout {
   // pack's river pieces don't climb). It meanders but always heads out.
   // It starts at the mountain's foot on the screen's left, well clear of the village.
   let [ri, rj] = [Math.round(half + peak.x), Math.round(half + peak.y + peak.r)];
+  // Its cells in order, with whether a road ran there before it.
+  const course: { i: number; j: number; road: boolean }[] = [];
   for (let steps = 0; steps < size * 2; steps++) {
     const c = at(ri, rj);
     const sea = (i: number, j: number) => land[j * size + i]! <= 0;
     if (!c || sea(ri, rj)) break;
     // It runs on through any lake it meets, and cuts through low hills.
     if (c.ground !== "water") {
+      course.push({ i: ri, j: rj, road: c.ground === "road" });
       c.ground = "river";
       delete c.height;
     }
@@ -147,6 +148,22 @@ export function gardenIsland(size: number): IslandLayout {
     const score = ([a, b]: readonly [number, number]) => (sea(a, b) ? 9 : b - rj + 0.5 * (Math.hypot(...centred(a, b)) - out) + rng() * 1.4);
     [ri, rj] = options.reduce((best, o) => (score(o) > score(best) ? o : best));
   }
+
+  // Footbridges: wherever a road meets the river, and every so often along
+  // it. Only across a straight stretch, onto level land on both banks.
+  let sinceBridge = BRIDGE_EVERY;
+  course.forEach(({ i, j, road }, k) => {
+    sinceBridge++;
+    const [prev, next] = [course[k - 1], course[k + 1]];
+    if (!prev || !next || (prev.i !== next.i && prev.j !== next.j)) return;
+    // Across the flow: along i when it runs along j, and the other way round.
+    const [di, dj] = prev.i === next.i ? [1, 0] : [0, 1];
+    const banks = [at(i - di, j - dj), at(i + di, j + dj)];
+    if (!banks.every((b) => b && (canHoldDecor(b.ground) || b.ground === "road") && !b.height)) return;
+    if (!road && sinceBridge < BRIDGE_EVERY) return;
+    at(i, j)!.bridge = true;
+    sinceBridge = 0;
+  });
 
   // Ramps: keep adding one where a reachable cell meets an unreachable one a
   // block up or down, until everything that can be reached is.
@@ -207,7 +224,29 @@ export function gardenIsland(size: number): IslandLayout {
     if (decor) c.decor = decor;
   }
 
-  // Everyone sleeps in the middle of the village: a nest about two cells wide.
-  const r = 1 / size;
-  return { size, cells, nest: { min: 0.5 - r, max: 0.5 + r } };
+  // Nests, each two cells wide on a flat clearing: one in the middle of the
+  // village, the others scattered wherever there's room, a few blobs to each.
+  const nests = [{ i: Math.floor(half), j: Math.floor(half) }];
+  const want = Math.max(1, Math.round((size / 6) ** 2 / PER_NEST));
+  // The 4x4 cells around the corner (i, j) a nest sits on: all level, open ground.
+  const clearing = (i: number, j: number) => {
+    const around: IslandCell[] = [];
+    for (let b = j - 2; b < j + 2; b++)
+      for (let a = i - 2; a < i + 2; a++) {
+        const c = at(a, b);
+        if (!c || !seen[b * size + a] || c.height || c.ramp || !canHoldDecor(c.ground)) return null;
+        around.push(c);
+      }
+    return around;
+  };
+  const spots: number[] = [];
+  for (let n = 0; n < size * size; n++) if (clearing(n % size, Math.floor(n / size))) spots.push(n);
+  for (let tries = 0; nests.length < want && spots.length && tries < want * 20; tries++) {
+    const n = pick(spots);
+    const [i, j] = [n % size, Math.floor(n / size)];
+    if (nests.some((o) => Math.hypot(o.i - i, o.j - j) < NEST_SPACING)) continue;
+    nests.push({ i, j });
+  }
+  for (const { i, j } of nests) for (const c of clearing(i, j) ?? []) delete c.decor;
+  return { size, cells, nests: nests.map(({ i, j }) => ({ x: i / size, y: j / size, r: 1 / size })) };
 }
