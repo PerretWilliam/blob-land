@@ -15,6 +15,10 @@ on:
 
 jobs:
   build:
+    # The repo's default GITHUB_TOKEN is read-only; tauri-action needs to
+    # write to the release to attach the build.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

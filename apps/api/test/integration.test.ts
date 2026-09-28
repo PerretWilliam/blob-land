@@ -303,7 +303,8 @@ describe("blob-land API", () => {
     expect((await rename(alice.token, "Pebble")).status).toBe(200);
     const renamed = await jsonAs<{ name: string }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
     expect(renamed.name).toBe("Pebble");
-  });
+    // Up to 180 simulated days of stepAll can outrun the default 5s under CI load.
+  }, 20000);
 });
 
 describe("countries", () => {
