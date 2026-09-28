@@ -88,8 +88,9 @@ easily broken by accident:
   font installed), then `pnpm tauri icon brand/icon.png` in `apps/desktop` for
   the platform icons (don't commit its `android/`, `ios/` or `64x64.png` output).
 - **Third-party assets:** the iso sprite pack (`apps/desktop/src/assets/iso`,
-  by Zagorskiy) is licensed for Blob Land only. Never copy it elsewhere. Credit
-  anything new in `CREDITS.md`.
+  by Zagorskiy) can be used here and in other projects as content files, but
+  never redistributed, re-packaged or sold on its own or as an asset
+  collection (see its `LICENSE.txt`). Credit anything new in `CREDITS.md`.
 - **License:** PolyForm Noncommercial 1.0.0 plus additional terms (`LICENSE`).
   Don't call the project "open source" or MIT.
 - **CI minutes:** the repo is private, so Actions minutes are limited, and
