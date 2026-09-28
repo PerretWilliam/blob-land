@@ -16,9 +16,7 @@ jobs:
       matrix:
         platform: [ubuntu-22.04, macos-latest, windows-latest]
 
-    # macOS minutes cost 10x on Actions, so that leg runs on the self-hosted
-    # runner instead; ubuntu and windows stay on GitHub-hosted runners.
-    runs-on: ${{ matrix.platform == 'macos-latest' && fromJSON('["self-hosted", "macOS"]') || matrix.platform }}
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
