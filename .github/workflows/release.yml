@@ -40,5 +40,4 @@ jobs:
           pr-title: "Version Packages"
           commit-message: "chore: version packages"
           publish-script: pnpm changeset publish
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          github-token: ${{ secrets.RELEASE_TOKEN }}
