@@ -34,8 +34,8 @@ jobs:
       - name: version or release
         uses: changesets/action@v2
         with:
-          title: "Version Packages"
-          commit: "chore: version packages"
-          publish: pnpm changeset publish
+          pr-title: "Version Packages"
+          commit-message: "chore: version packages"
+          publish-script: pnpm changeset publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
