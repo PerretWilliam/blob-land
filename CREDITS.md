@@ -9,7 +9,7 @@ Each of these keeps its own license; the [Blob Land license](LICENSE) doesn't co
 | What | By | Used for | License |
 | --- | --- | --- | --- |
 | [blobatar](https://blobatar.dev) | [Alain](https://github.com/Alain00/blobatar) | Every blob's face and body, drawn from its name | MIT |
-| Isometric sprite pack (tiles, trees, bushes, rocks, cacti, clouds) | [Zagorskiy](https://x.com/ZagorskiyUA) | The islands, the menu and the app icon | Its author's license: see [`LICENSE.txt`](apps/desktop/src/assets/iso/LICENSE.txt). Not for reuse outside Blob Land. |
+| Isometric sprite pack (tiles, trees, bushes, rocks, cacti, clouds) | [Zagorskiy](https://x.com/ZagorskiyUA) | The islands, the menu and the app icon | Its author's license: see [`LICENSE.txt`](apps/desktop/src/assets/iso/LICENSE.txt). May be used in other projects as content, not redistributed or sold on its own. |
 | [Fredoka](https://github.com/hafontia/Fredoka-One) | The Fredoka Project Authors, packaged by [Fontsource](https://fontsource.org) | All the lettering in the app and on the banner | SIL Open Font License 1.1 |
 | [Lucide](https://lucide.dev) | Lucide contributors | Icons in the menus and panels | ISC |
 

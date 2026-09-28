@@ -35,8 +35,9 @@ as if it were your own project.
    licenses, listed in CREDITS.md, and these terms do not cover them. In
    particular, the isometric sprite pack in `apps/desktop/src/assets/iso`, by
    Zagorskiy, is used under its author's license (see the LICENSE.txt next to
-   it): it may not be reused, redistributed or sold on its own or in another
-   project.
+   it): it may be used in other projects as content files, but not
+   redistributed, re-packaged or sold on its own or as an asset collection,
+   modified or not.
 
 ---
 
