@@ -116,7 +116,32 @@ window costs here, and need re-setting against that floor; what's left to win
 is in the world's share (texture atlases for the GPU process, fewer live
 sprites far from the camera), to be measured after the API work.
 
-## The API — 2026-09-27, regions in their own objects
+## The API — 2026-09-30, Node and Postgres in Docker
+
+`pnpm --filter @blob-land/api load 10000 20 600` against the API's Docker
+image and `postgres:17-alpine` (`docker compose`, Podman on an M-series Mac,
+one API container, pool of 10), 10 000 blobs in 24 regions of 450:
+
+| | Result |
+|---|---|
+| Filling 10 000 blobs, each region then lived once | 4.2 s |
+| One step of every region (5 min more, 24 regions at once) | 0.4 s in all |
+| `/garden` whole, one client | 183 answers/s, p50 5 ms, p95 9 ms, 281 KB (69 KB gzipped) |
+| `/garden` whole, 20 clients at once | 867 answers/s, p50 22 ms, p95 30 ms, p99 41 ms |
+| `/garden?since=` after one step, 20 clients | 1 157 answers/s, p50 14 ms, p95 38 ms, 105 KB |
+| Memory, after the run | API 239 MB, Postgres 106 MB |
+
+- 3.5× the answers of the Worker version under 20 clients (246/s), at a
+  quarter of its median. A region's answer is still built once per change
+  and sent to every player of it; the only query most requests make is the
+  region's version, to know the view is still good.
+- Every answer is gzipped now (Cloudflare used to do it): 281 KB of timeline
+  goes out as 69 KB, and the compressing is part of the numbers above.
+- More API containers on the same database add answers per second and share
+  the steps; Postgres is then what to watch (the `segments` table is the
+  big one, ~3 days of timeline per region).
+
+## The API — 2026-09-27, regions in their own objects (replaced)
 
 `pnpm --filter @blob-land/api load 10000 20 500` against `wrangler dev`
 (local workerd, `TIME_SCALE=1`), 10 000 blobs in 24 regions of 450:

@@ -62,8 +62,9 @@ Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ```bash
 pnpm install
-pnpm --filter @blob-land/api db:apply   # local D1 schema
-pnpm dev                                # API worker, its world-step ticker, and the desktop app
+cp apps/api/.env.example apps/api/.env                   # once
+docker compose -f apps/api/docker-compose.yml up -d db   # Postgres for the API and its tests
+pnpm dev                                                 # the API (stepping the garden) and the desktop app
 ```
 
 The code is organised in three packages: see the [README](README.md#how-its-built), and [docs/DECISIONS.md](docs/DECISIONS.md) for why things are the way they are.

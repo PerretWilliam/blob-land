@@ -1,0 +1,40 @@
+# The whole garden on one machine: Postgres and the API.
+#   JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
+# For local dev, only the database: `docker compose up -d db`, then `pnpm dev`.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: blob
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blob}
+      POSTGRES_DB: blob_land
+    volumes:
+      - db:/var/lib/postgresql/data
+      # A second database for the tests (`pnpm test`), made on first start.
+      - ./test/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blob -d blob_land"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://blob:${POSTGRES_PASSWORD:-blob}@db:5432/blob_land
+      JWT_SECRET: ${JWT_SECRET:-}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+    ports:
+      - "8787:8787"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db:

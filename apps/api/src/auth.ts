@@ -1,19 +1,19 @@
-// PBKDF2-SHA256, 100k iterations (the Workers CPU-time-friendly max), 16-byte
+// PBKDF2-SHA256, 600k iterations (OWASP's advice; hashes from before hold 100k), 16-byte
 // salt. Iteration count is embedded in the stored hash so a future bump
 // doesn't break verifying old hashes.
-const ITERATIONS = 100_000;
+const ITERATIONS = 600_000;
 
 function toHex(bytes: ArrayBuffer | Uint8Array): string {
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function fromHex(hex: string): Uint8Array {
+function fromHex(hex: string): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   return bytes;
 }
 
-async function deriveBits(password: string, salt: Uint8Array, iterations: number): Promise<ArrayBuffer> {
+async function deriveBits(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<ArrayBuffer> {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
     "deriveBits",
   ]);

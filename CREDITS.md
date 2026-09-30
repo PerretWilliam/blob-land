@@ -29,11 +29,14 @@ Each of these keeps its own license; the [Blob Land license](LICENSE) doesn't co
 
 | What | Used for | License |
 | --- | --- | --- |
-| [Cloudflare Workers](https://workers.cloudflare.com), [Durable Objects](https://developers.cloudflare.com/durable-objects/), [D1](https://developers.cloudflare.com/d1/) and [Wrangler](https://github.com/cloudflare/workers-sdk) | Running the shared garden | Wrangler: MIT or Apache 2.0 |
-| [Hono](https://hono.dev) | The API's routes | MIT |
+| [Node.js](https://nodejs.org) | Running the shared garden | MIT |
+| [Hono](https://hono.dev) and [@hono/node-server](https://github.com/honojs/node-server) | The API's routes | MIT |
+| [PostgreSQL](https://www.postgresql.org) | The garden's database | PostgreSQL License |
+| [Drizzle ORM](https://orm.drizzle.team) and drizzle-kit | Queries, schema and migrations | Apache 2.0 |
+| [Postgres.js](https://github.com/porsager/postgres) | The database driver | Unlicense |
 
 ## Tools
 
-[TypeScript](https://www.typescriptlang.org) (Apache 2.0), [Vitest](https://vitest.dev) (MIT), [pnpm](https://pnpm.io) (MIT), [Changesets](https://github.com/changesets/changesets) (MIT), [commitlint](https://commitlint.js.org) and [husky](https://typicode.github.io/husky/) (MIT).
+[TypeScript](https://www.typescriptlang.org) (Apache 2.0), [Vitest](https://vitest.dev) (MIT), [esbuild](https://esbuild.github.io) and [tsx](https://tsx.is) (MIT), [pnpm](https://pnpm.io) (MIT), [Changesets](https://github.com/changesets/changesets) (MIT), [commitlint](https://commitlint.js.org) and [husky](https://typicode.github.io/husky/) (MIT).
 
 Every other package the app pulls in along the way is listed, with its license, by `pnpm licenses list`.

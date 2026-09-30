@@ -3,24 +3,22 @@
 ## Stack
 
 - **apps/desktop** — Tauri (Rust shell) wrapping a React + Vite + TypeScript UI, styled with Tailwind CSS and shadcn/ui components. Talks to `apps/api` through `@tauri-apps/plugin-http`, which issues requests from the Rust side rather than the webview.
-- **apps/api** — a Cloudflare Worker built on Hono. Server-authoritative over accounts and the whole garden, which is split into regions: each region lives in its own Durable Object (`Region`), which holds it in its own SQLite, lives it forward on its own alarm every 5 minutes and serves it; requests only read it. D1 holds what regions share. The client never sends computed state, only actions.
+- **apps/api** — a Node service built on Hono, on Postgres through Drizzle (ORM and migrations), shipped as a Docker image. Server-authoritative over accounts and the whole garden, which is split into regions: every server claims the regions due for a step (every 5 minutes) and lives each forward in one transaction, and answers players from a view of each region it keeps until the region changes. Servers hold no state of their own, so any number run side by side on one database. The client never sends computed state, only actions.
 - **packages/sim** — a pure TypeScript simulation engine with no I/O, imported by both `apps/desktop` and `apps/api`. `stepWorld` lives a set of blobs forward at random — segments of sleep, rest, exploring, discoveries and meetings; relationships, couples, breakups and births — taking an injected `Rng` so tests can pin it. Playback helpers (`positionOn`, `legIn`, `segmentAt`) turn stored segments back into where a blob stands at any instant.
 
 ## Data model
 
-D1 (`apps/api/migrations/`, what the whole garden shares):
+One Postgres database (schema in `apps/api/src/schema.ts`, migrations in `apps/api/migrations/`, applied as a server starts). Every table a region's blobs live in carries `region`, and every query about them filters on it.
 
 - **users** — one row per account: `id`, `pseudo`, `seed` (normalized pseudo, unique), password hash/salt, `last_seen_at`, `created_at`.
-- **blobs** — the directory: every blob's `seed`, its `region`, `born_at`, its account (`owner_user_id`) if it has one, and `name_key`: pseudos and children's names are one namespace, under this one UNIQUE key.
-
-Each region's Durable Object (schema in `apps/api/src/garden.ts`, migrated on start):
-
-- **blobs** — every blob living there: its `name`, `country` and `visible` (the account's, kept here to be served), identity (`sex`, `attraction`), `personality`, `born_at`/`adult_at`, `energy`/`mood`, frozen `traits` and `parent_union_id` for a child, and `last` — its latest segment, where the step picks up.
+- **regions** — one row per region: its `population` (kept by a trigger on blobs), how many steps it has lived (`step`), a `version` bumped by every change (servers' cached views check it), and when it's next due (`next_step_at`).
+- **blobs** — every blob: its `region`, `name` and `name_key` (pseudos and children's names are one namespace, under this one unique key), its account (`owner_user_id`) if it has one, `country` and `visible`, identity (`sex`, `attraction`), `personality`, `born_at`/`adult_at`, `energy`/`mood`, frozen `traits` and `parent_union_id` for a child, and `last` — its latest segment, where the step picks up.
 - **unions** — couples between two blob seeds (`seed_a < seed_b`), `started_at`, `ended_at` (`NULL` while together), `last_birth_at`. A partial unique index keeps one active union per blob.
 - **segments** — the played-back timeline, a few days of it: activity, expression, end point, replay `rng`, who with, what was found, and the `step` that wrote it (`/garden?since=`).
 - **relationships** — per pair: friendship, romance, tension, chemistry, status, kin, ex, meetings.
 - **interactions** — each meeting: kind, outcome, the axis changes it made.
-- **meta** — the region's number and how many steps it has lived.
+
+Times are epoch milliseconds in `double precision`: the sim's aren't always whole, and a float8 holds any epoch millisecond exactly.
 
 A blob only ever meets its own region's, and children are born into their parents', so a family, its couples and its news never span regions.
 
@@ -29,7 +27,7 @@ The private blob's life is lived the same way on the device (`apps/desktop/src/l
 ## Delivered so far
 
 1. Simulation engine (`packages/sim`): deterministic schedule, state, journal, and trait inheritance.
-2. API worker (`apps/api`): accounts, presence, garden listing, union pairing, and lazy birth resolution.
+2. API server (`apps/api`): accounts, presence, garden listing, union pairing, and lazy birth resolution; self-hosted with Docker and Postgres.
 3. Desktop wiring (`apps/desktop`): auth, garden screen rendering blobs via `stateAt`, visibility toggle, presence ping, tray notifications for journal events.
 4. Garden performance: viewport-gated animation, client-side pagination, `prefers-reduced-motion` support.
 5. Local-first onboarding: a pseudo is picked locally with no account or network call; joining the garden is an explicit, separate action that can assign the account a different seed than the private blob if the chosen pseudo collides with an existing one.
