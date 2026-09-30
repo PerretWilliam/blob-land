@@ -16,9 +16,10 @@ English too.
 - `apps/desktop`: Tauri 2 + React/Vite/TS. The world is drawn with PixiJS
   (WebGL) in `src/components/world.ts`, driven by `src/components/scene.tsx`.
   Every server call goes through `src/lib/api.ts`.
-- `apps/api`: Cloudflare Worker (Hono). Each region of the garden lives whole in
-  its own Durable Object (`src/region.ts`, SQLite, stepped on its own alarm);
-  D1 only holds what regions share (accounts, the blob directory).
+- `apps/api`: Node (Hono) on Postgres through Drizzle, shipped with Docker.
+  Schema in `src/schema.ts` (`pnpm db:generate` writes the migration); routes
+  in `src/app.ts`; regions are stepped by whichever server claims them
+  (`src/region.ts`, a row lock per step) and served from per-server views.
 - `packages/sim`: the simulation, pure TypeScript, shared by both. No DOM or
   Node APIs in it: only Web Crypto (declared in `src/env.d.ts`).
 
@@ -103,8 +104,12 @@ easily broken by accident:
   `apps/desktop/package.json` (`tauri.conf.json` points at it). Never bump
   versions by hand.
 - **Dev quirks:** in `pnpm dev`, the Dock shows the app as `blob-land-desktop`
-  (an unbundled binary); a bundled build shows "Blob Land". The API's tests use
-  `@cloudflare/vitest-pool-workers` with vitest 4 (`cloudflareTest` plugin,
-  files run one at a time, test bindings typed via `Cloudflare.Env`).
-- **Deploying the API** isn't set up yet (D1 `database_id` is `REPLACE_ME`,
-  `JWT_SECRET` is a secret): don't deploy without the maintainer.
+  (an unbundled binary); a bundled build shows "Blob Land". The API's `pnpm dev` and
+  tests need Postgres: `docker compose -f apps/api/docker-compose.yml up -d db`
+  (tests run on `blob_land_test` and empty it first; CI has a Postgres service).
+- **The API's schema:** change `src/schema.ts`, then `pnpm db:generate`; never
+  edit a migration once it's merged. Every query about a region's blobs
+  filters on `region`; a change to a region locks its `regions` row first
+  (`touch`), as the step does.
+- **Deploying the API:** self-hosted with `apps/api/docker-compose.yml`; no
+  hosted instance is set up: don't deploy one without the maintainer.

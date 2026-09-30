@@ -35,7 +35,7 @@ A pnpm monorepo in TypeScript:
 | Package | What it is |
 | --- | --- |
 | [`apps/desktop`](apps/desktop) | The app: Tauri, React, and a PixiJS (WebGL) world |
-| [`apps/api`](apps/api) | The garden's server: a Cloudflare Worker (Hono), each region of the garden in its own Durable Object, accounts in D1 |
+| [`apps/api`](apps/api) | The garden's server: Node (Hono) on Postgres (Drizzle), self-hosted with Docker |
 | [`packages/sim`](packages/sim) | The simulation, pure TypeScript, shared by the app and the server |
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the stack and the data model, [docs/DECISIONS.md](docs/DECISIONS.md) the reasoning behind the choices already made, and [docs/PERFORMANCE.md](docs/PERFORMANCE.md) the frame-rate targets and how they're measured.
@@ -44,12 +44,13 @@ A pnpm monorepo in TypeScript:
 
 ```bash
 pnpm install
-pnpm --filter @blob-land/api db:apply   # local D1 schema, once
-pnpm dev                                # API + world-step ticker + desktop app, in parallel
+cp apps/api/.env.example apps/api/.env                   # once
+docker compose -f apps/api/docker-compose.yml up -d db   # Postgres
+pnpm dev                                                 # API + desktop app, in parallel
 pnpm -r test
 ```
 
-Each package also has its own README with package-specific commands. The icon and banner are drawn by `pnpm --filter @blob-land/desktop brand`.
+Each package also has its own README with package-specific commands; hosting your own garden server is in [apps/api](apps/api/README.md#self-hosting). The icon and banner are drawn by `pnpm --filter @blob-land/desktop brand`.
 
 ## Contributing
 

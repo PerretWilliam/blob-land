@@ -1,19 +1,17 @@
-import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
 
-// The tests start from the same D1 migrations production runs (test/setup.ts applies them).
-const migrations = await readD1Migrations("./migrations");
-
 export default defineConfig({
-  plugins: [
-    cloudflareTest({
-      wrangler: { configPath: "./wrangler.toml" },
-      // Real time, whatever .dev.vars speeds the local garden up to. JWT_SECRET
-      // is a real secret in prod (wrangler secret put): tests get a throwaway one.
-      miniflare: { bindings: { TEST_MIGRATIONS: migrations, DEV_TOOLS: "1", TIME_SCALE: "1", JWT_SECRET: "test-secret" } },
-    }),
-  ],
   test: {
+    // A Postgres of its own: `docker compose up -d db` makes blob_land_test,
+    // CI runs one as a service. test/setup.ts empties it first.
+    env: {
+      DATABASE_URL: process.env.TEST_DATABASE_URL ?? "postgres://blob:blob@localhost:5432/blob_land_test",
+      JWT_SECRET: "test-secret",
+      DEV_TOOLS: "1",
+      AUTH_RATE_LIMIT: "1000",
+      // Behind a proxy, as a real server would be: X-Forwarded-For is read (test/integration.test.ts, "security").
+      TRUST_PROXY: "1",
+    },
     setupFiles: ["./test/setup.ts"],
     // The tests share one garden from start to end: one file at a time, in order.
     fileParallelism: false,

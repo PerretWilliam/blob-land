@@ -1,18 +1,19 @@
-import { seededRng, type Rng } from "@blob-land/sim";
-import { createScheduledController, env, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { firstSegment, randomPersonality, seededRng, type Rng } from "@blob-land/sim";
+import { and, eq, or, sql } from "drizzle-orm";
+import { Hono } from "hono";
+import { describe, expect, it, vi } from "vitest";
+import { app, clientIp, placeAccount } from "../src/app";
 import { gardenNow } from "../src/clock";
-import { LOOKAHEAD } from "../src/garden";
-import worker, { placeAccount } from "../src/index";
-import type { Region } from "../src/region";
+import { db } from "../src/db";
+import { join as joinGarden, LOOKAHEAD } from "../src/garden";
+import { live, stepDue } from "../src/region";
+import { blobs, regions, relationships, segments, unions, users } from "../src/schema";
 
-const stub = (n: number) => env.REGION.get(env.REGION.idFromName(String(n)));
-/** Runs `fn` on region `n`'s own SQLite. */
-const inRegion = <T>(n: number, fn: (sql: SqlStorage) => T) => runInDurableObject(stub(n), (_: Region, state) => fn(state.storage.sql));
-/** Lives every region forward to `until`, as their alarms would. */
+const call = (path: string, init?: RequestInit) => app.request(path, init);
+
+/** Lives every region forward to `until`, as their steps would. */
 async function stepAll(now = Date.now(), rng?: Rng, until = now + LOOKAHEAD) {
-  const { results } = await env.DB.prepare(`SELECT DISTINCT region FROM blobs`).all<{ region: number }>();
-  for (const { region } of results) await runInDurableObject(stub(region), (r: Region) => r.live(now, until, rng ?? Math.random));
+  for (const { region } of await db.select({ region: regions.region }).from(regions)) await live(region, now, until, rng ?? Math.random);
 }
 
 const PASSWORD = "correct horse battery staple";
@@ -22,7 +23,7 @@ async function jsonAs<T>(res: Response): Promise<T> {
 }
 
 async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string; friend?: string } = {}) {
-  const res = await SELF.fetch("https://api.test/auth/register", {
+  const res = await call("/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ pseudo, password: PASSWORD, ...identity }),
@@ -32,7 +33,7 @@ async function register(pseudo: string, identity: { sex?: string; attraction?: s
 }
 
 async function login(pseudo: string) {
-  const res = await SELF.fetch("https://api.test/auth/login", {
+  const res = await call("/auth/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ pseudo, password: PASSWORD }),
@@ -54,7 +55,7 @@ interface GardenBody {
 }
 
 async function garden(token: string, query = ""): Promise<GardenBody> {
-  const res = await SELF.fetch(`https://api.test/garden${query}`, { headers: { authorization: `Bearer ${token}` } });
+  const res = await call(`/garden${query}`, { headers: { authorization: `Bearer ${token}` } });
   expect(res.status).toBe(200);
   return jsonAs<GardenBody>(res);
 }
@@ -64,10 +65,7 @@ describe("blob-land API", () => {
     const { token } = await register("wanderer");
     await login("wanderer");
 
-    const ping = await SELF.fetch("https://api.test/me/ping", {
-      method: "PATCH",
-      headers: { authorization: `Bearer ${token}` },
-    });
+    const ping = await call("/me/ping", { method: "PATCH", headers: { authorization: `Bearer ${token}` } });
     expect(ping.status).toBe(200);
 
     // Living from the moment it joins: listed, with a timeline already.
@@ -79,13 +77,19 @@ describe("blob-land API", () => {
     expect(after.segments.at(-1)!.end).toBeGreaterThan(Date.now());
   });
 
-  it("keeps each region to itself: lived on its own alarm, and served on its own", async () => {
+  it("answers the health check", async () => {
+    expect(await jsonAs(await call("/health"))).toEqual({ ok: true });
+  });
+
+  it("keeps each region to itself: stepped when due, and served on its own", async () => {
     const home = await register("homebody");
     // A second region, with one blob in it.
-    const populate = await SELF.fetch("https://api.test/__dev/populate", { method: "POST", body: JSON.stringify({ count: 1 }) });
+    const populate = await call("/__dev/populate", { method: "POST", body: JSON.stringify({ count: 1 }) });
     expect(await jsonAs<{ regions: number[] }>(populate)).toEqual({ regions: [1] });
-    // Each region lives on its own alarm.
-    for (const n of [0, 1]) expect(await runDurableObjectAlarm(stub(n))).toBe(true);
+    // Both due: one claim steps each once, and then neither is due again for a while.
+    await db.update(regions).set({ nextStepAt: 0 });
+    expect(await stepDue()).toBe(2);
+    expect(await stepDue()).toBe(0);
 
     const mine = await garden(home.token);
     const theirs = await garden(home.token, "?region=1");
@@ -101,13 +105,8 @@ describe("blob-land API", () => {
     expect(theirs.regions[1]!.blobs).toBe(1);
     // A region no one lives in is empty; nonsense is refused.
     expect((await garden(home.token, "?region=7")).blobs).toEqual([]);
-    const bad = await SELF.fetch("https://api.test/garden?region=-1", { headers: { authorization: `Bearer ${home.token}` } });
+    const bad = await call("/garden?region=-1", { headers: { authorization: `Bearer ${home.token}` } });
     expect(bad.status).toBe(400);
-
-    // An alarm whose retries all failed is gone: the cron sets it again.
-    await runInDurableObject(stub(1), (_: Region, state) => state.storage.deleteAlarm());
-    await worker.scheduled(createScheduledController(), env);
-    expect(await runInDurableObject(stub(1), (_: Region, state) => state.storage.getAlarm())).not.toBeNull();
   });
 
   it("sends only what's new since an earlier answer, and shows hidden players to themselves", async () => {
@@ -116,7 +115,7 @@ describe("blob-land API", () => {
     await stepAll();
     const full = await garden(friend.token);
     expect(full.delta).toBe(false);
-    const hide = await SELF.fetch("https://api.test/me/visibility", {
+    const hide = await call("/me/visibility", {
       method: "PATCH",
       headers: { authorization: `Bearer ${shy.token}`, "content-type": "application/json" },
       body: JSON.stringify({ visible: false }),
@@ -145,21 +144,21 @@ describe("blob-land API", () => {
     expect(region).toBe(0);
     // With room for one more, the next account still lands in region 0; once
     // it's full, the one after opens region 1.
-    const count = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM blobs WHERE region = 0`).first<number>("n"))!;
-    const join = async (seed: string) => {
-      const id = crypto.randomUUID();
-      await env.DB.batch([
-        env.DB.prepare(`INSERT INTO users (id, pseudo, seed, password_hash, password_salt, last_seen_at, created_at) VALUES (?, ?, ?, 'x', 'x', 0, 0)`).bind(id, seed, seed),
-        placeAccount(env.DB, id, seed, Date.now(), null, count + 1),
-      ]);
-      return env.DB.prepare(`SELECT region FROM blobs WHERE seed = ?`).bind(seed).first<number>("region");
-    };
+    const [{ count }] = (await db.select({ count: regions.population }).from(regions).where(eq(regions.region, 0))) as [{ count: number }];
+    const join = (seed: string) =>
+      db.transaction(async (tx) => {
+        const id = crypto.randomUUID();
+        await tx.insert(users).values({ id, pseudo: seed, seed, passwordHash: "x", passwordSalt: "x", lastSeenAt: 0, createdAt: 0 });
+        const n = await placeAccount(tx, null, count + 1);
+        await joinGarden(tx, n, [{ seed, ownerUserId: id, name: seed, country: null, identity: { sex: "none", attraction: "any" } }], Date.now(), Math.random);
+        return n;
+      });
     expect(await join("filler")).toBe(0);
     expect(await join("pioneer")).toBe(1);
     // A friend's island wins over the first one with room; an unknown friend is refused.
     const buddy = await register("buddy", { friend: "Pioneer" });
     expect((await garden(buddy.token)).region).toBe(1);
-    const lost = await SELF.fetch("https://api.test/auth/register", {
+    const lost = await call("/auth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ pseudo: "lonely", password: PASSWORD, friend: "nobody-at-all" }),
@@ -168,7 +167,7 @@ describe("blob-land API", () => {
   });
 
   it("takes a sex and attraction at sign-up, and lets the player change them", async () => {
-    const bad = await SELF.fetch("https://api.test/auth/register", {
+    const bad = await call("/auth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ pseudo: "oddone", password: PASSWORD, sex: "robot" }),
@@ -179,38 +178,41 @@ describe("blob-land API", () => {
     expect((await garden(token)).blobs.find((b) => b.pseudo === "roxanne")).toMatchObject({ sex: "female", attraction: "women" });
 
     const patch = (body: object) =>
-      SELF.fetch("https://api.test/me/identity", {
+      call("/me/identity", {
         method: "PATCH",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
     expect((await patch({ sex: "male" })).status).toBe(400);
     expect((await patch({ sex: "male", attraction: "any" })).status).toBe(200);
+    // The cached view knows the region changed.
     expect((await garden(token)).blobs.find((b) => b.pseudo === "roxanne")).toMatchObject({ sex: "male", attraction: "any" });
   });
 
   it("reports pseudo availability, and offers suggestions once taken", async () => {
-    const before = await SELF.fetch("https://api.test/pseudo/brand-new-pseudo");
+    const before = await call("/pseudo/brand-new-pseudo");
     expect(before.status).toBe(200);
     expect(await jsonAs<{ available: boolean; suggestions?: string[] }>(before)).toMatchObject({ available: true });
 
     await register("brand-new-pseudo");
 
-    const after = await SELF.fetch("https://api.test/pseudo/brand-new-pseudo");
+    const after = await call("/pseudo/brand-new-pseudo");
     const afterBody = await jsonAs<{ available: boolean; suggestions: string[] }>(after);
     expect(afterBody.available).toBe(false);
     expect(afterBody.suggestions.length).toBeGreaterThan(0);
+    // Each fits the length a pseudo may have (this one is 16 already).
+    for (const suggestion of afterBody.suggestions) expect(suggestion.length).toBeLessThanOrEqual(16);
 
     // Each suggested variant must itself be free to register.
     for (const suggestion of afterBody.suggestions) {
-      const check = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent(suggestion)}`);
+      const check = await call(`/pseudo/${encodeURIComponent(suggestion)}`);
       expect(await jsonAs<{ available: boolean }>(check)).toMatchObject({ available: true });
     }
 
     // Same seed under different casing/surrounding whitespace must also read
     // as taken — it's normalizeSeed's job (trim + lowercase), not a raw
     // string match.
-    const variant = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent("  Brand-New-Pseudo  ")}`);
+    const variant = await call(`/pseudo/${encodeURIComponent("  Brand-New-Pseudo  ")}`);
     expect(await jsonAs<{ available: boolean }>(variant)).toMatchObject({ available: false });
   });
 
@@ -218,71 +220,73 @@ describe("blob-land API", () => {
     const alice = await register("alice", { sex: "female", attraction: "men" });
     const bob = await register("bob", { sex: "male", attraction: "women" });
     // Head start: they already adore each other, so this doesn't take a simulated year.
-    const [a, b] = [alice.seed, bob.seed].sort();
-    await inRegion(0, (sql) =>
-      sql.exec(
-        `INSERT OR REPLACE INTO relationships (seed_a, seed_b, friendship, romance, tension, chemistry, status, meetings, last_met_at)
-         VALUES (?, ?, 80, 90, 0, 1, 'crush', 10, ?)`,
-        a!,
-        b!,
-        Date.now(),
-      ),
-    );
+    const [a, b] = [alice.seed, bob.seed].sort() as [string, string];
+    const crush = { friendship: 80, romance: 90, tension: 0, chemistry: 1, status: "crush", meetings: 10, lastMetAt: Date.now() };
+    await db
+      .insert(relationships)
+      .values({ seedA: a, seedB: b, region: 0, ...crush })
+      .onConflictDoUpdate({ target: [relationships.seedA, relationships.seedB], set: crush });
 
     // Live the garden forward a day at a time until a child is born. Joining
-    // lives the garden with real randomness (see /join), so the days this takes
-    // vary from run to run: leave plenty.
+    // lives the garden with real randomness (see /auth/register), so the days
+    // this takes vary from run to run: leave plenty.
     const rng = seededRng(7);
     const start = Date.now();
     let childSeed: string | undefined;
     for (let d = 1; d <= 180 && !childSeed; d++) {
       await stepAll(start + d * DAY, rng, start + d * DAY);
       // Theirs: the tests share one garden, where other couples may have children too.
-      childSeed = await inRegion(
-        0,
-        (sql) =>
-          sql
-            .exec<{ seed: string }>(`SELECT k.seed FROM blobs k JOIN unions u ON u.id = k.parent_union_id WHERE u.seed_a = ? AND u.seed_b = ? LIMIT 1`, a!, b!)
-            .toArray()[0]?.seed,
-      );
+      const [child] = await db
+        .select({ seed: blobs.seed })
+        .from(blobs)
+        .innerJoin(unions, eq(unions.id, blobs.parentUnionId))
+        .where(and(eq(unions.seedA, a), eq(unions.seedB, b)))
+        .limit(1);
+      childSeed = child?.seed;
     }
     expect(childSeed).toBeDefined();
 
     // Parents and child show up in each other's relationships, as family.
-    const rels = await jsonAs<{ relationships: { seed: string; status: string }[] }>(
-      await SELF.fetch(`https://api.test/blobs/${encodeURIComponent(alice.seed)}/relationships`),
-    );
+    const rels = await jsonAs<{ relationships: { seed: string; status: string }[] }>(await call(`/blobs/${encodeURIComponent(alice.seed)}/relationships`));
     expect(rels.relationships.find((r) => r.seed === bob.seed)).toBeDefined();
 
-    const kin = await inRegion(0, (sql) => sql.exec(`SELECT kin FROM relationships WHERE (seed_a = ?1 OR seed_b = ?1) AND kin = 'parent'`, childSeed!).toArray());
+    const kin = await db
+      .select()
+      .from(relationships)
+      .where(and(or(eq(relationships.seedA, childSeed!), eq(relationships.seedB, childSeed!)), eq(relationships.kin, "parent")));
     expect(kin).toHaveLength(2);
 
     // /tree hides blobs born "in the future" (the step lives ahead of now); ask as of then.
-    await inRegion(0, (sql) => sql.exec(`UPDATE blobs SET born_at = ? WHERE seed = ?`, Date.now() - 1000, childSeed!));
+    await db.update(blobs).set({ bornAt: Date.now() - 1000 }).where(eq(blobs.seed, childSeed!));
 
     // The garden's news tells of the couple and the birth, once they've happened.
-    await inRegion(0, (sql) => sql.exec(`UPDATE unions SET started_at = ? WHERE seed_a = ? AND seed_b = ?`, Date.now() - 2000, a!, b!));
-    const journal = await jsonAs<{ events: { kind: string; c: string | null }[] }>(
-      await SELF.fetch("https://api.test/garden/journal", { headers: { Authorization: `Bearer ${alice.token}` } }),
+    await db
+      .update(unions)
+      .set({ startedAt: Date.now() - 2000 })
+      .where(and(eq(unions.seedA, a), eq(unions.seedB, b)));
+    const journal = await jsonAs<{ events: { kind: string; c: string | null; aName: string }[] }>(
+      await call("/garden/journal", { headers: { Authorization: `Bearer ${alice.token}` } }),
     );
     expect(journal.events.map((e) => e.kind)).toEqual(expect.arrayContaining(["couple", "birth"]));
     expect(journal.events.find((e) => e.kind === "birth")!.c).toBe(childSeed);
+    expect(journal.events.find((e) => e.kind === "couple")!.aName).toBeTypeOf("string");
 
-    const tree = await SELF.fetch(`https://api.test/tree/${encodeURIComponent(alice.seed)}`);
+    const tree = await call(`/tree/${encodeURIComponent(alice.seed)}`);
     expect(tree.status).toBe(200);
-    const treeBody = await jsonAs<{ children: { seed: string; name: string; parents: { seed: string }[] }[] }>(tree);
+    const treeBody = await jsonAs<{ children: { seed: string; name: string; born_at: number; parents: { seed: string }[] }[] }>(tree);
     expect(treeBody.children).toHaveLength(1);
     const child = treeBody.children[0]!;
+    expect(child.born_at).toBeTypeOf("number");
     expect(child.parents.map((p) => p.seed).sort()).toEqual([alice.seed, bob.seed].sort());
 
-    const childTree = await jsonAs<{ parents: { seed: string }[] | null }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
+    const childTree = await jsonAs<{ parents: { seed: string }[] | null }>(await call(`/tree/${encodeURIComponent(child.seed)}`));
     expect(childTree.parents!.map((p) => p.seed).sort()).toEqual([alice.seed, bob.seed].sort());
 
     // Born with a rolled name, in the namespace pseudos use.
     expect(child.name).toMatch(/^[A-Z][a-z]+\d*$/);
-    const nameCheck = await SELF.fetch(`https://api.test/pseudo/${encodeURIComponent(child.name.toLowerCase())}`);
+    const nameCheck = await call(`/pseudo/${encodeURIComponent(child.name.toLowerCase())}`);
     expect(await jsonAs<{ available: boolean }>(nameCheck)).toMatchObject({ available: false });
-    const squatter = await SELF.fetch("https://api.test/auth/register", {
+    const squatter = await call("/auth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ pseudo: child.name, password: PASSWORD }),
@@ -291,7 +295,7 @@ describe("blob-land API", () => {
 
     // Only a parent may rename it, and not to anyone else's pseudo.
     const rename = (token: string, name: string) =>
-      SELF.fetch(`https://api.test/blobs/${encodeURIComponent(child.seed)}/name`, {
+      call(`/blobs/${encodeURIComponent(child.seed)}/name`, {
         method: "PATCH",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify({ name }),
@@ -301,10 +305,15 @@ describe("blob-land API", () => {
     expect((await rename(alice.token, "bob")).status).toBe(409);
     expect((await rename(alice.token, "  ")).status).toBe(400);
     expect((await rename(alice.token, "Pebble")).status).toBe(200);
-    const renamed = await jsonAs<{ name: string }>(await SELF.fetch(`https://api.test/tree/${encodeURIComponent(child.seed)}`));
+    const renamed = await jsonAs<{ name: string }>(await call(`/tree/${encodeURIComponent(child.seed)}`));
     expect(renamed.name).toBe("Pebble");
+    // Every blob counted once in its region, children included.
+    const [{ counted }] = (await db.execute<{ counted: boolean }>(
+      sql`SELECT bool_and(r.population = (SELECT count(*) FROM blobs b WHERE b.region = r.region)) AS counted FROM regions r`,
+    )) as unknown as [{ counted: boolean }];
+    expect(counted).toBe(true);
     // Up to 180 simulated days of stepAll can outrun the default 5s under CI load.
-  }, 20000);
+  }, 60000);
 });
 
 describe("countries", () => {
@@ -314,7 +323,7 @@ describe("countries", () => {
     expect(await country()).toBe("FR");
 
     const set = (value: unknown) =>
-      SELF.fetch("https://api.test/me/country", {
+      call("/me/country", {
         method: "PATCH",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ country: value }),
@@ -325,7 +334,7 @@ describe("countries", () => {
     expect(await country()).toBeNull();
     expect((await set("Neverland")).status).toBe(400);
 
-    const bad = await SELF.fetch("https://api.test/auth/register", {
+    const bad = await call("/auth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ pseudo: "nowhere", password: PASSWORD, country: "XX" }),
@@ -336,11 +345,175 @@ describe("countries", () => {
 
 describe("the garden clock", () => {
   it("is real time by default, and runs TIME_SCALE times faster when set", async () => {
-    expect(Math.abs((await gardenNow(env)) - Date.now())).toBeLessThan(50);
-    const fast = { ...env, TIME_SCALE: "60" };
-    const [a, real] = [await gardenNow(fast), Date.now()];
+    expect(Math.abs((await gardenNow()) - Date.now())).toBeLessThan(50);
+    const [a, real] = [await gardenNow(60), Date.now()];
     await new Promise((r) => setTimeout(r, 100));
-    const b = await gardenNow(fast);
+    const b = await gardenNow(60);
     expect(b - a).toBeGreaterThanOrEqual((Date.now() - real) * 60 * 0.8);
+  });
+});
+
+describe("security", () => {
+  it("counts a player by the address the proxy saw, not one they wrote in", async () => {
+    const echo = new Hono().get("/", (c) => c.text(clientIp(c as never)));
+    // The client wrote the first entry; the proxy appended the last.
+    const res = await echo.request("/", { headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.9" } });
+    expect(await res.text()).toBe("203.0.113.9");
+  });
+
+  it("checks a pseudo in one go, refuses long ones, and limits how often", async () => {
+    const from = { "x-forwarded-for": "198.51.100.7" };
+    await register("echo");
+    await register("echo2");
+    const body = await jsonAs<{ available: boolean; suggestions: string[] }>(await call("/pseudo/echo", { headers: from }));
+    expect(body).toMatchObject({ available: false, suggestions: ["echo3", "echo4", "echo5"] });
+    expect((await call(`/pseudo/${"a".repeat(17)}`, { headers: from })).status).toBe(400);
+    // 60 a minute from one address, then no more.
+    const statuses = [];
+    for (let i = 0; i < 60; i++) statuses.push((await call(`/pseudo/free${i}`, { headers: from })).status);
+    expect(statuses.filter((s) => s === 429).length).toBe(2);
+    expect((await call("/pseudo/other", { headers: { "x-forwarded-for": "198.51.100.8" } })).status).toBe(200);
+  });
+
+  it("won't start outside dev with a short session secret", async () => {
+    const saved = { ...process.env };
+    try {
+      vi.resetModules();
+      Object.assign(process.env, { JWT_SECRET: "change-me", DEV_TOOLS: "" });
+      await expect(import("../src/env")).rejects.toThrow(/at least 32 characters/);
+      vi.resetModules();
+      process.env.JWT_SECRET = "x".repeat(32);
+      await expect(import("../src/env")).resolves.toBeDefined();
+    } finally {
+      Object.assign(process.env, saved);
+      vi.resetModules();
+    }
+  });
+
+  it("caps how many blobs the dev tools make at once", async () => {
+    const res = await call("/__dev/populate", { method: "POST", body: JSON.stringify({ count: 1e9 }) });
+    expect(res.status).toBe(400);
+  });
+});
+
+/**
+ * Two accounts already a couple, with a child, and one meeting between them
+ * in the timeline: set down directly, rather than lived until it happens.
+ */
+async function family(x: { seed: string }, y: { seed: string }, childName: string) {
+  const [a, b] = [x.seed, y.seed].sort() as [string, string];
+  const [{ region }] = (await db.select({ region: blobs.region }).from(blobs).where(eq(blobs.seed, a))) as [{ region: number }];
+  const [now, unionId, child] = [Date.now(), crypto.randomUUID(), `child-${crypto.randomUUID()}`];
+  await db.insert(unions).values({ id: unionId, region, seedA: a, seedB: b, startedAt: now - 60_000 });
+  const love = { friendship: 80, romance: 90, tension: 0, chemistry: 1, status: "lovers", meetings: 10, lastMetAt: now };
+  await db
+    .insert(relationships)
+    .values({ seedA: a, seedB: b, region, ...love })
+    .onConflictDoUpdate({ target: [relationships.seedA, relationships.seedB], set: love });
+  await db.insert(blobs).values({
+    seed: child,
+    name: childName,
+    nameKey: childName.toLowerCase(),
+    region,
+    parentUnionId: unionId,
+    bornAt: now - 30_000,
+    adultAt: now + DAY,
+    sex: "none",
+    attraction: "any",
+    personality: JSON.stringify(randomPersonality(Math.random)),
+    energy: 1,
+    mood: 0,
+    last: JSON.stringify(firstSegment(now - 30_000, Math.random)),
+  });
+  const meet = { region, start: now + 0.5, end: now + 60_000, activity: "meet", expression: "happy", x: 0.5, y: 0.5, rng: 1, detail: "chat:good", step: 0 };
+  await db.insert(segments).values([
+    { seed: a, withSeed: b, ...meet },
+    { seed: b, withSeed: a, ...meet },
+  ]);
+  // Every server's view of the region is stale now.
+  await db.update(regions).set({ version: sql`${regions.version} + 1` }).where(eq(regions.region, region));
+  return { region, unionId, child };
+}
+
+const as = (token: string) => ({ authorization: `Bearer ${token}`, "content-type": "application/json" });
+
+describe("a player's own blob", () => {
+  it("hides a hidden player from everyone else: in the garden, the family tree and relationships", async () => {
+    const ivy = await register("secretivy", { sex: "female", attraction: "men" });
+    const oak = await register("openoak", { sex: "male", attraction: "women" });
+    const onlooker = await register("onlooker");
+    const { child } = await family(ivy, oak, "Sprig");
+    await call("/me/visibility", { method: "PATCH", headers: as(ivy.token), body: JSON.stringify({ visible: false }) });
+
+    // Nowhere in what anyone else gets: not as a blob, a partner, or at a meeting.
+    const seen = await garden(onlooker.token);
+    expect(JSON.stringify(seen)).not.toContain(ivy.seed);
+    expect(seen.blobs.find((b) => b.seed === oak.seed)!.partner).toBeNull();
+    const tree = async (seed: string, token?: string) =>
+      jsonAs<{ name: string | null; partner: { seed: string } | null; parents: { seed: string }[] | null; children: { parents: { seed: string }[] }[] }>(
+        await call(`/tree/${encodeURIComponent(seed)}`, token ? { headers: as(token) } : undefined),
+      );
+    expect(JSON.stringify(await tree(oak.seed))).not.toContain(ivy.seed);
+    expect((await tree(child)).parents!.map((p) => p.seed)).toEqual([oak.seed]);
+    expect(await tree(ivy.seed)).toMatchObject({ name: null, children: [] });
+    const rels = await jsonAs<{ relationships: unknown[] }>(await call(`/blobs/${ivy.seed}/relationships`));
+    expect(rels.relationships).toEqual([]);
+
+    // Its own player still sees it whole.
+    expect((await garden(ivy.token)).blobs.find((b) => b.seed === ivy.seed)!.partner).toBe(oak.seed);
+    const own = await tree(ivy.seed, ivy.token);
+    expect(own.partner!.seed).toBe(oak.seed);
+    expect(own.children[0]!.parents.map((p) => p.seed).sort()).toEqual([ivy.seed, oak.seed].sort());
+  });
+
+  it("breaks a couple up when one of them stops being drawn to the other", async () => {
+    const rowan = await register("rowan", { sex: "female", attraction: "men" });
+    const birch = await register("birch", { sex: "male", attraction: "women" });
+    const { unionId } = await family(rowan, birch, "Twig");
+    const change = (identity: object) => call("/me/identity", { method: "PATCH", headers: as(rowan.token), body: JSON.stringify(identity) });
+    const pair = async () => {
+      const [union] = await db.select().from(unions).where(eq(unions.id, unionId));
+      const [a, b] = [rowan.seed, birch.seed].sort() as [string, string];
+      const [rel] = await db.select().from(relationships).where(and(eq(relationships.seedA, a), eq(relationships.seedB, b)));
+      return { endedAt: union!.endedAt, status: rel!.status, romance: rel!.romance };
+    };
+
+    // Still drawn to him: nothing changes between them.
+    expect((await change({ sex: "female", attraction: "any" })).status).toBe(200);
+    expect(await pair()).toMatchObject({ endedAt: null, status: "lovers", romance: 90 });
+    // Not any more: they part, as exes, and the romance is gone.
+    expect((await change({ sex: "female", attraction: "women" })).status).toBe(200);
+    const after = await pair();
+    expect(after).toMatchObject({ status: "ex", romance: 0 });
+    expect(after.endedAt).toBeTypeOf("number");
+  });
+
+  it("deletes an account for good, with its password, and frees its pseudo", async () => {
+    const maple = await register("maple", { sex: "female", attraction: "men" });
+    const cedar = await register("cedar", { sex: "male", attraction: "women" });
+    const { region, child } = await family(maple, cedar, "Acorn");
+    const remove = (password: string) => call("/me", { method: "DELETE", headers: as(maple.token), body: JSON.stringify({ password }) });
+
+    expect((await remove("not the password")).status).toBe(403);
+    expect((await remove(PASSWORD)).status).toBe(200);
+
+    const relogin = await call("/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pseudo: "maple", password: PASSWORD }) });
+    expect(relogin.status).toBe(401);
+    expect(await jsonAs<{ available: boolean }>(await call("/pseudo/maple"))).toMatchObject({ available: true });
+    // Nothing left that leads back to it: the child keeps its other parent.
+    const childTree = await jsonAs<{ parents: { seed: string }[] }>(await call(`/tree/${child}`));
+    expect(childTree.parents.map((p) => p.seed)).toEqual([cedar.seed]);
+    const left = await db.execute(sql`
+      SELECT 1 FROM unions WHERE seed_a = ${maple.seed} OR seed_b = ${maple.seed}
+      UNION ALL SELECT 1 FROM relationships WHERE seed_a = ${maple.seed} OR seed_b = ${maple.seed}
+      UNION ALL SELECT 1 FROM segments WHERE seed = ${maple.seed} OR with_seed = ${maple.seed}`);
+    expect([...left]).toHaveLength(0);
+    const [counted] = await db.select({ population: regions.population }).from(regions).where(eq(regions.region, region));
+    const [{ n }] = (await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM blobs WHERE region = ${region}`)) as unknown as [{ n: number }];
+    expect(counted!.population).toBe(n);
+
+    // Someone new can take the pseudo, with none of the old one's family.
+    const again = await register("maple");
+    expect((await jsonAs<{ children: unknown[] }>(await call(`/tree/${again.seed}`))).children).toEqual([]);
   });
 });

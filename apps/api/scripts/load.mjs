@@ -26,7 +26,7 @@ const timed = async (label, fn) => {
 };
 
 const { token } = await (
-  await call("/auth/register", { method: "POST", body: JSON.stringify({ pseudo: `load-${Date.now()}`, password: "load-test-pass" }) })
+  await call("/auth/register", { method: "POST", body: JSON.stringify({ pseudo: `load-${Date.now().toString(36)}`, password: "load-test-pass" }) })
 ).json();
 const auth = { authorization: `Bearer ${token}` };
 await timed(`populate ${count} blobs`, () => call("/__dev/populate", { method: "POST", body: JSON.stringify({ count }) }));

@@ -14,9 +14,13 @@ A child born from a union gets its own row in the `blobs` table, addressable and
 
 Blobs used to be a formula of (seed, time): the same inputs always gave the same day, which made them predictable. Now every choice — when to sleep, where to walk, who to meet, how it goes — is rolled with real randomness (Web Crypto) and stored as segments. Clients never recompute a blob's life; they play back the stored segments, each carrying its own 32-bit `rng` so the walk inside it replays identically for everyone watching. Randomness is kept believable by structure, not by determinism: allowed transitions (a blob wakes before doing anything else), minimum durations, slow-moving energy and mood, and relationship axes that move by a capped step per meeting. The one thing still derived from the seed is a blob's look, because that is its identity.
 
-## One writer per region: its own object, on its own alarm
+## Self-hosted: Node and Postgres in Docker, not Cloudflare
 
-Each region of the garden lives whole in its own Durable Object, in that object's SQLite, and lives itself forward on its own alarm every 5 minutes, 30 minutes ahead of now so clients always have something to play. Requests only read, and an object runs one thing at a time, so no two steps can roll the same stretch of time differently, with no locking. A step is written in one transaction: if it fails, nothing of it is kept, the runtime retries it, and the next one lives the same stretch; the cron only sets again an alarm that stopped for good. A garden that was asleep longer than 2 days skips the gap instead of living it. D1 keeps only what regions share (accounts, the directory of blobs and their names), so no single database takes every region's writes, and the garden grows by adding regions.
+The garden's server used to be a Cloudflare Worker, each region in its own Durable Object and accounts in D1. It tied the garden to one provider and never got deployed. It is now a plain Node service (Hono, as before) on Postgres, shipped as a Docker image with a `docker compose` file, so it runs anywhere a container does. Drizzle is its ORM: the schema is TypeScript (`src/schema.ts`), migrations are generated from it and applied as each server starts, and its `sql` tag covers the two queries an ORM says badly (the family tree's recursion, the journal's union). Everything is one database, so a birth takes its name in the same transaction as the step that makes it, and a sign-up creates the account and its blob at once, with nothing to undo.
+
+## One writer per region: a row lock, and steps any server can claim
+
+Every region lives itself forward every 5 minutes, 30 minutes ahead of now so clients always have something to play. Each server looks every second for regions whose `next_step_at` has passed and claims them (`FOR UPDATE SKIP LOCKED`, moving the next step on as it claims), so any number of servers share the stepping and each region is stepped by one. The step runs in one transaction that holds the region's row: no two steps can roll the same stretch of time differently, and changes a player makes (which lock the region's row first, as the step does, so the two can't deadlock) wait for it. If a step fails, nothing of it is kept, and the next claim a period later lives the same stretch. A garden that was asleep longer than 2 days skips the gap instead of living it. Each server keeps a view of the regions players ask for, rebuilt when the region's `version` moves (one indexed read per request tells), so servers need nothing from each other. Past what one Postgres takes, the tables split by region (partitioning, or one database per group of regions) without the code changing its queries.
 
 ## Relationships gate interactions
 
@@ -32,9 +36,19 @@ A union starts when a relationship is in love enough, and ends when the couple b
 
 A blob is female, male or neither, and is drawn to women, men or anyone. The player picks both for their own blob (and can change them); children roll theirs at birth. A blob with no sex draws only those drawn to anyone. The sex shows as a sign on the blob — a bow or a bowler hat — measured onto its silhouette, since blobs come in ten shapes.
 
+A change the blob's couple can't survive (they're no longer drawn to each other) breaks it up at once, as exes, and any romance it can no longer feel fades. Nothing else is taken back: friendships, family and history stay.
+
+## Hidden means hidden everywhere
+
+An account can hide from the garden. Its seed is its normalized pseudo, so hiding its name alone would hide nothing: a hidden account is left out of everything anyone else is sent — the region's blobs, as someone's partner, from meetings' `with`, from the news, the family tree (its children show with one parent) and relationships. Its own player still sees it whole (`/tree` and `/blobs/:seed/relationships` take an optional token for that).
+
+## Deleting an account deletes the blob, not its children
+
+Deleting an account (with its password again) takes its blob out of the garden with its pseudo, timeline, meetings and relationships, and ends its couple. Its children are the garden's too, so they stay, with their other parent: the unions they were born to keep a placeholder seed no one can take, so a new account with the same pseudo inherits nothing. The private island stays on the device.
+
 ## UTC everywhere
 
-All timestamps are epoch milliseconds, and time-of-day logic (the pull of night toward bed, the sky's daylight) operates in UTC, the same on the desktop client and the Worker regardless of the user's local timezone.
+All timestamps are epoch milliseconds, and time-of-day logic (the pull of night toward bed, the sky's daylight) operates in UTC, the same on the desktop client and the server regardless of the user's local timezone.
 
 ## Account seed can differ from the local blob's seed
 

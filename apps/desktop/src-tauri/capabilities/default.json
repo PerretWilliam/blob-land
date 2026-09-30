@@ -22,7 +22,7 @@
     "autostart:default",
     {
       "identifier": "http:default",
-      "allow": [{ "url": "http://localhost:8787/*" }, { "url": "http://127.0.0.1:8787/*" }, { "url": "https://*.workers.dev/*" }]
+      "allow": [{ "url": "http://localhost:8787/*" }, { "url": "http://127.0.0.1:8787/*" }]
     }
   ]
 }
