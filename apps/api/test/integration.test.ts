@@ -216,48 +216,17 @@ describe("blob-land API", () => {
     expect(await jsonAs<{ available: boolean }>(variant)).toMatchObject({ available: false });
   });
 
-  it("lets two blobs fall for each other, have a child, and exposes it via /tree/:seed", async () => {
+  it("tells of a couple and their child in the journal, and exposes it via /tree/:seed", async () => {
     const alice = await register("alice", { sex: "female", attraction: "men" });
     const bob = await register("bob", { sex: "male", attraction: "women" });
-    // Head start: they already adore each other, so this doesn't take a simulated year.
+    // Whether a couple forms and has a child is a matter of chance (the sim's
+    // own tests cover it), so start from the family instead of living it.
+    const { child: childSeed } = await family(alice, bob, "Sprig");
     const [a, b] = [alice.seed, bob.seed].sort() as [string, string];
-    const crush = { friendship: 80, romance: 90, tension: 0, chemistry: 1, status: "crush", meetings: 10, lastMetAt: Date.now() };
-    await db
-      .insert(relationships)
-      .values({ seedA: a, seedB: b, region: 0, ...crush })
-      .onConflictDoUpdate({ target: [relationships.seedA, relationships.seedB], set: crush });
-
-    // Live the garden forward a day at a time until a child is born. Joining
-    // lives the garden with real randomness (see /auth/register), so the days
-    // this takes vary from run to run: leave plenty.
-    const rng = seededRng(7);
-    const start = Date.now();
-    let childSeed: string | undefined;
-    for (let d = 1; d <= 180 && !childSeed; d++) {
-      await stepAll(start + d * DAY, rng, start + d * DAY);
-      // Theirs: the tests share one garden, where other couples may have children too.
-      const [child] = await db
-        .select({ seed: blobs.seed })
-        .from(blobs)
-        .innerJoin(unions, eq(unions.id, blobs.parentUnionId))
-        .where(and(eq(unions.seedA, a), eq(unions.seedB, b)))
-        .limit(1);
-      childSeed = child?.seed;
-    }
-    expect(childSeed).toBeDefined();
 
     // Parents and child show up in each other's relationships, as family.
     const rels = await jsonAs<{ relationships: { seed: string; status: string }[] }>(await call(`/blobs/${encodeURIComponent(alice.seed)}/relationships`));
     expect(rels.relationships.find((r) => r.seed === bob.seed)).toBeDefined();
-
-    const kin = await db
-      .select()
-      .from(relationships)
-      .where(and(or(eq(relationships.seedA, childSeed!), eq(relationships.seedB, childSeed!)), eq(relationships.kin, "parent")));
-    expect(kin).toHaveLength(2);
-
-    // /tree hides blobs born "in the future" (the step lives ahead of now); ask as of then.
-    await db.update(blobs).set({ bornAt: Date.now() - 1000 }).where(eq(blobs.seed, childSeed!));
 
     // The garden's news tells of the couple and the birth, once they've happened.
     await db
@@ -312,8 +281,7 @@ describe("blob-land API", () => {
       sql`SELECT bool_and(r.population = (SELECT count(*) FROM blobs b WHERE b.region = r.region)) AS counted FROM regions r`,
     )) as unknown as [{ counted: boolean }];
     expect(counted).toBe(true);
-    // Up to 180 simulated days of stepAll can outrun the default 5s under CI load.
-  }, 60000);
+  });
 });
 
 describe("countries", () => {
