@@ -1,5 +1,19 @@
 # @blob-land/api
 
+## 0.3.0
+
+### Minor Changes
+
+- 8601ce1: The garden's server can now be hosted by anyone: it runs as a Docker container on Postgres (`docker compose up` in `apps/api`), and as many copies as needed can share one garden. Answers are gzipped and the garden loads faster under many players at once.
+  
+  When a pseudo is taken, the names suggested instead now always fit the 16 characters a pseudo may have.
+- 8601ce1: A player hidden from the garden is now hidden everywhere: not shown as anyone's partner, at anyone's meeting, in the news, in family trees or in relationships. A player can delete their account (with their password), and its pseudo is free to take again; children born in the garden stay, with their other parent. A blob whose new identity means it and its partner are no longer drawn to each other breaks up with them.
+
+### Patch Changes
+
+- Updated dependencies [33dab08]
+  - @blob-land/sim@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
