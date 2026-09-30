@@ -1,8 +1,11 @@
 import { exists, mkdir, readTextFile, writeTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
+import type { Language } from "@/i18n";
 import type { LocalLife } from "@/lib/life";
 
 export interface AppSettings {
   visible: boolean;
+  /** Picked in the settings; unset, the system's language (if the app speaks it). */
+  language?: Language;
 }
 
 export interface AccountState {

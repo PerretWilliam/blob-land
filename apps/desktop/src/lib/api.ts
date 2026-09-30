@@ -1,8 +1,9 @@
 import type { Attraction, Identity, Kin, RelationStatus, Segment, Sex } from "@blob-land/sim";
 import { fetch } from "@tauri-apps/plugin-http";
+import { t } from "@/i18n";
 
 // plugin-http issues the request from the Rust side, not the webview, so it
-// carries no Origin header and never hits the Worker's tauri://-only CORS check.
+// carries no Origin header and never hits the server's tauri://-only CORS check.
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8787";
 
 export interface AuthResponse {
@@ -81,21 +82,6 @@ export class ApiError extends Error {
 // How long a request may take before it counts as unreachable.
 const TIMEOUT_MS = 10_000;
 
-// The server's errors a player can meet, in words they can act on. Anything
-// else is a bug on one side or the other: it's shown as is.
-const FRIENDLY: Record<string, string> = {
-  "invalid pseudo or password": "That pseudo and password don't match. Check them and try again.",
-  "pseudo already taken": "Someone in the garden already goes by that pseudo.",
-  "pseudo and password are required": "Pick a pseudo and a password first.",
-  "name already taken": "Another blob already has that name. Try a different one.",
-  "no account goes by that friend's pseudo": "No one in the garden goes by that friend's pseudo. Check the spelling, or leave it empty.",
-  "only a parent can name this blob": "Only its parents can name this blob.",
-  rate_limited: "That's a lot of tries in a row. Wait a minute, then try again.",
-  unauthorized: "Your session has expired. Log in again to get back to the garden.",
-};
-const SERVER_TROUBLE = "The garden is having trouble right now. Try again in a moment.";
-export const OFFLINE_MESSAGE = "Can't reach the garden. Check your internet connection, then try again.";
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -105,12 +91,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: { "content-type": "application/json", ...init?.headers },
     });
   } catch {
-    throw new ApiError(OFFLINE_MESSAGE, true);
+    throw new ApiError(t().offline, true);
   }
   const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
   if (!res.ok) {
     const code = body?.error;
-    throw new ApiError(res.status >= 500 ? SERVER_TROUBLE : ((code && FRIENDLY[code]) ?? code ?? SERVER_TROUBLE), false, code);
+    // The server's errors a player can meet are said in their words (i18n
+    // `errors`); anything else is a bug on one side or the other, shown as is.
+    const said = t();
+    throw new ApiError(res.status >= 500 ? said.serverTrouble : ((code && said.errors[code]) ?? code ?? said.serverTrouble), false, code);
   }
   return body as T;
 }
@@ -169,6 +158,11 @@ export function setVisibility(token: string, visible: boolean): Promise<{ ok: tr
   });
 }
 
+/** Deletes the account, its blob and its pseudo for good (the password again, to be sure). */
+export function deleteAccount(token: string, password: string): Promise<{ ok: true }> {
+  return request("/me", { method: "DELETE", headers: authHeader(token), body: JSON.stringify({ password }) });
+}
+
 export function ping(token: string): Promise<{ ok: true }> {
   return request("/me/ping", { method: "PATCH", headers: authHeader(token) });
 }
@@ -185,20 +179,22 @@ export interface FamilyChild {
   name: string | null;
   born_at: number;
   depth: number;
-  /** The couple it was born to. */
-  parents: [FamilyMember, FamilyMember];
+  /** The couple it was born to: one of them only, when the other hides from the garden or left it. */
+  parents: FamilyMember[];
 }
 
 export interface FamilyTree {
   seed: string;
   name: string | null;
+  /** Null for a blob that wasn't born in the garden; those hidden or gone are left out. */
   parents: FamilyMember[] | null;
   partner: FamilyMember | null;
   children: FamilyChild[];
 }
 
-export function getTree(seed: string): Promise<FamilyTree> {
-  return request(`/tree/${encodeURIComponent(seed)}`);
+/** `token`, when signed in: a hidden player sees themselves in it. */
+export function getTree(seed: string, token?: string | null): Promise<FamilyTree> {
+  return request(`/tree/${encodeURIComponent(seed)}`, token ? { headers: authHeader(token) } : undefined);
 }
 
 /** Parents only. Fails with "name already taken" when a pseudo or another child has it. */
@@ -224,8 +220,8 @@ export interface Relation {
   lastMetAt: number | null;
 }
 
-export function getRelationships(seed: string): Promise<{ relationships: Relation[] }> {
-  return request(`/blobs/${encodeURIComponent(seed)}/relationships`);
+export function getRelationships(seed: string, token?: string | null): Promise<{ relationships: Relation[] }> {
+  return request(`/blobs/${encodeURIComponent(seed)}/relationships`, token ? { headers: authHeader(token) } : undefined);
 }
 
 /** GET /garden/journal — the garden's news, newest first. */

@@ -59,7 +59,8 @@ export const DURATION: Record<Exclude<Activity, "sleep">, readonly [number, numb
 };
 export const SLEEP_HOURS = [5, 10] as const;
 
-const DISCOVERIES = [
+/** What a blob can come across exploring: stored as is in its timeline, and worded by the app. */
+export const DISCOVERIES = [
   "a smooth pebble",
   "a patch of warm moss",
   "a puddle that reflects the sky just right",
@@ -72,7 +73,7 @@ const DISCOVERIES = [
   "a snail going somewhere important",
   "a four-leaf clover",
   "a very flat stone",
-];
+] as const;
 
 const hourOf = (t: number) => {
   const d = new Date(t);

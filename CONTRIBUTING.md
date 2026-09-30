@@ -72,6 +72,7 @@ The code is organised in three packages: see the [README](README.md#how-its-buil
 ## Writing it
 
 - Code, comments, commit messages and docs are in English.
+- Words players see go in `apps/desktop/src/i18n`: add the English line in `en.tsx`, and the typecheck asks for it in every other language. A new language is one file typed as `Messages` and one line in `LANGUAGES` (`i18n/index.ts`).
 - Match what's around it: its naming, its comments, its idioms. The simplest change that works is the best one.
 - The interface talks to players, not developers: errors say what happened and what to do, in plain words.
 

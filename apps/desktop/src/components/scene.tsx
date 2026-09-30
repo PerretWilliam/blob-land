@@ -1,15 +1,15 @@
-import { daylight, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Identity, type Segment, type Sex } from "@blob-land/sim";
+import { daylight, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Segment, type Sex } from "@blob-land/sim";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ATTRACTION_LABELS, IdentityFields, SEX_LABELS } from "@/components/blob-gender";
 import { Button } from "@/components/ui/button";
-import { CountryField, countryName } from "@/components/country-field";
 import { AuraFx, InteractionFx, momentAt, type Aura } from "@/components/interaction-fx";
 import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
 import { cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
 import { useInView } from "@/lib/motion";
+import { countryName, useT } from "@/i18n";
+import type { Messages } from "@/i18n/en";
 
 export { DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB } from "@/components/world";
 
@@ -33,12 +33,8 @@ export interface SceneBlob {
   young?: boolean;
   /** Something that just happened to it, shown over its head for a while. */
   aura?: Aura;
-  /** Set on the player's own blob: lets them change who it is from its ID card. */
-  onIdentityChange?: (identity: Identity) => void;
   /** Where its player is from (ISO code), if they share it: a flag by its name. */
   country?: string | null;
-  /** Set on the player's own garden blob: lets them pick or drop their country. */
-  onCountryChange?: (country: string | null) => void;
 }
 
 /** A stored expression name as blobatar's expression object. */
@@ -231,6 +227,7 @@ function meetingSpot(seg: Segment, segmentsOf: Map<string, Segment[]>, snap: (p:
 }
 
 export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations, startAt }: SceneProps) {
+  const t = useT();
   const tiles = layout.size;
   // Fitting the whole map is zoom 1; how far in the camera starts, and follows a blob.
   const baseZoom = Math.max(1, tiles / TILES_IN_VIEW);
@@ -969,7 +966,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
               <button
                 type="button"
                 className="sr-only"
-                aria-label={`Follow ${blob.label}`}
+                aria-label={t.card.follow(blob.label)}
                 aria-pressed={blob.seed === selected}
                 onFocus={(e) => {
                   focused.current = e.currentTarget.matches(":focus-visible") ? blob.seed : null;
@@ -996,24 +993,24 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         const mood = moodOf(blob.expression);
         return (
           <aside
-            aria-label={`${blob.label}'s ID card`}
+            aria-label={t.card.of(blob.label)}
             className="absolute right-4 bottom-4 z-10 w-64 toon p-3"
             onClick={(e) => e.stopPropagation()}
           >
             <header className="-mx-3 -mt-3 flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink bg-grass px-3 py-2">
               <h2 className="flex-1 truncate text-base font-bold">{blob.label}</h2>
-              <button type="button" aria-label="Close" className="text-ink/70 hover:text-ink" onClick={() => setSelected(null)}>
+              <button type="button" aria-label={t.common.close} className="text-ink/70 hover:text-ink" onClick={() => setSelected(null)}>
                 <X className="size-4" />
               </button>
             </header>
             <dl className="mt-2 space-y-1.5 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Activity</dt>
+                <dt className="text-muted-foreground">{t.card.activity}</dt>
                 <dd className="flex items-center gap-1.5">
                   {blob.activity ? (
                     <>
                       <ActivityIcon activity={blob.activity} />
-                      {blob.meetingWith ? `With ${blob.meetingWith}` : ACTIVITY_LABELS[blob.activity]}
+                      {blob.meetingWith ? t.card.with(blob.meetingWith) : t.activity[blob.activity]}
                     </>
                   ) : (
                     "—"
@@ -1021,38 +1018,38 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Mood</dt>
+                <dt className="text-muted-foreground">{t.card.mood}</dt>
                 <dd className="flex items-center gap-1.5">
                   <MoodIcon expression={blob.expression} />
-                  {mood?.label ?? "—"}
+                  {mood ? t.mood[mood.key] : "—"}
                 </dd>
               </div>
               {blob.country ? (
                 <div className="flex items-center justify-between gap-2">
-                  <dt className="text-muted-foreground">Country</dt>
+                  <dt className="text-muted-foreground">{t.card.country}</dt>
                   <dd className="truncate">
                     {flagOf(blob.country)} {countryName(blob.country)}
                   </dd>
                 </div>
               ) : null}
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Sex</dt>
-                <dd>{SEX_LABELS[blob.sex]}</dd>
+                <dt className="text-muted-foreground">{t.card.sex}</dt>
+                <dd>{t.sex[blob.sex]}</dd>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Falls for</dt>
-                <dd>{ATTRACTION_LABELS[blob.attraction]}</dd>
+                <dt className="text-muted-foreground">{t.card.fallsFor}</dt>
+                <dd>{t.attraction[blob.attraction]}</dd>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Age</dt>
-                <dd>{blob.young ? "Child" : "Grown-up"}</dd>
+                <dt className="text-muted-foreground">{t.card.age}</dt>
+                <dd>{blob.young ? t.card.child : t.card.grownUp}</dd>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Status</dt>
-                <dd className="truncate">{blob.partner ? `With ${blob.partnerLabel ?? "someone"}` : "Single"}</dd>
+                <dt className="text-muted-foreground">{t.card.status}</dt>
+                <dd className="truncate">{blob.partner ? t.card.with(blob.partnerLabel ?? t.card.someone) : t.card.single}</dd>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">ID</dt>
+                <dt className="text-muted-foreground">{t.card.id}</dt>
                 <dd className="truncate font-mono text-xs text-muted-foreground" title={blob.seed}>
                   {blob.seed.slice(0, 10)}
                 </dd>
@@ -1066,18 +1063,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                 }}
               >
                 <HeartHandshake />
-                See relations
+                {t.card.relations}
               </Button>
-            ) : null}
-            {blob.onIdentityChange ? (
-              <div className="mt-3 border-t pt-3">
-                <IdentityFields value={{ sex: blob.sex, attraction: blob.attraction }} onChange={blob.onIdentityChange} />
-                {blob.onCountryChange ? (
-                  <div className="mt-3">
-                    <CountryField value={blob.country ?? null} onChange={blob.onCountryChange} />
-                  </div>
-                ) : null}
-              </div>
             ) : null}
           </aside>
         );
@@ -1103,6 +1090,7 @@ function EditGrid({
 }) {
   const tiles = layout.size;
   const locked = nestCell(tiles);
+  const t = useT();
   // Grid point, on cell (i, j)'s surface -> island pack px (the SVG's viewBox).
   const pt = (i: number, j: number, u: number, v: number) => {
     const { x, y } = island.at(u, v, surfaceHeight(layout, i, j, u, v));
@@ -1138,7 +1126,7 @@ function EditGrid({
             onPointerDown={isLocked ? undefined : () => onCellPaint(n)}
             onPointerEnter={isLocked ? undefined : (e) => e.buttons === 1 && onCellPaint(n)}
           >
-            <title>{isLocked ? "The nest — where your blob sleeps" : `Cell ${i + 1}, ${j + 1}`}</title>
+            <title>{isLocked ? t.editor.nest : t.editor.cell(i + 1, j + 1)}</title>
           </polygon>
         );
       })}
@@ -1147,42 +1135,36 @@ function EditGrid({
 }
 
 const ACTIVITY_ICONS = { sleep: Moon, wake: Sunrise, rest: Coffee, explore: Footprints, discover: Sparkles, meet: Users } as const;
-export const ACTIVITY_LABELS: Record<Activity, string> = {
-  sleep: "Sleeping",
-  wake: "Waking up",
-  rest: "Resting",
-  explore: "Exploring",
-  discover: "Found something",
-  meet: "With someone",
-};
-
 export function ActivityIcon({ activity, className = "size-3" }: { activity: Activity; className?: string }) {
+  const t = useT();
   const Icon = ACTIVITY_ICONS[activity];
-  return <Icon className={className} aria-label={ACTIVITY_LABELS[activity]} role="img" />;
+  return <Icon className={className} aria-label={t.activity[activity]} role="img" />;
 }
 
-// Expressions are objects, so a mood is looked up by identity.
-const MOODS = new Map<Expression, { label: string; emoji: string }>([
-  [idle, { label: "Calm", emoji: "😌" }],
-  [happy, { label: "Happy", emoji: "😊" }],
-  [sleepy, { label: "Sleepy", emoji: "😴" }],
-  [surprised, { label: "Surprised", emoji: "😮" }],
-  [thinking, { label: "Thoughtful", emoji: "🤔" }],
-  [love, { label: "In love", emoji: "🥰" }],
-  [sad, { label: "Sad", emoji: "😢" }],
-  [mad, { label: "Angry", emoji: "😠" }],
-  [shy, { label: "Shy", emoji: "😳" }],
-  [wink, { label: "Playful", emoji: "😉" }],
-  [smug, { label: "Smug", emoji: "😏" }],
-  [unsure, { label: "Unsure", emoji: "😕" }],
-  [scared, { label: "Scared", emoji: "😨" }],
+// Expressions are objects, so a mood is looked up by identity; its words are in i18n, by key.
+const MOODS = new Map<Expression, { key: keyof Messages["mood"]; emoji: string }>([
+  [idle, { key: "idle", emoji: "😌" }],
+  [happy, { key: "happy", emoji: "😊" }],
+  [sleepy, { key: "sleepy", emoji: "😴" }],
+  [surprised, { key: "surprised", emoji: "😮" }],
+  [thinking, { key: "thinking", emoji: "🤔" }],
+  [love, { key: "love", emoji: "🥰" }],
+  [sad, { key: "sad", emoji: "😢" }],
+  [mad, { key: "mad", emoji: "😠" }],
+  [shy, { key: "shy", emoji: "😳" }],
+  [wink, { key: "wink", emoji: "😉" }],
+  [smug, { key: "smug", emoji: "😏" }],
+  [unsure, { key: "unsure", emoji: "😕" }],
+  [scared, { key: "scared", emoji: "😨" }],
 ]);
 export const moodOf = (expression: Expression) => MOODS.get(expression);
 
 export function MoodIcon({ expression }: { expression: Expression }) {
+  const t = useT();
   const mood = moodOf(expression);
+  const label = mood && t.mood[mood.key];
   return mood ? (
-    <span role="img" aria-label={mood.label} title={mood.label}>
+    <span role="img" aria-label={label} title={label}>
       {mood.emoji}
     </span>
   ) : null;

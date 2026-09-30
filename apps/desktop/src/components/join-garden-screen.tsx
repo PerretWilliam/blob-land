@@ -5,6 +5,7 @@ import { normalizeSeed } from "blobatar";
 import { MenuScreen } from "@/components/main-menu";
 import { Button } from "@/components/ui/button";
 import { EmptyState, RetryButton } from "@/components/empty-state";
+import { useT } from "@/i18n";
 import { ApiError, checkPseudo, login, register, type AuthResponse } from "@/lib/api";
 
 export interface JoinGardenScreenProps {
@@ -27,6 +28,7 @@ export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoi
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const t = useT();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,7 +42,7 @@ export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoi
       if (mode === "register" && err instanceof ApiError && err.code === "pseudo already taken") {
         const availability = await checkPseudo(pseudo).catch(() => null);
         setSuggestions(availability?.suggestions ?? []);
-        setError("Someone in the garden already goes by that pseudo. Pick one of these, or change it yourself.");
+        setError(t.join.taken);
       } else {
         // Tauri plugins reject with plain strings, not Errors.
         setError(err instanceof Error ? err.message : String(err));
@@ -57,30 +59,28 @@ export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoi
           <EmptyState
             face="sad"
             seed={normalizeSeed(localPseudo)}
-            title="The garden is out of reach"
+            title={t.common.outOfReach}
             action={
               <div className="flex flex-col items-center gap-2">
                 <RetryButton onRetry={onRetry} />
                 <Button variant="link" onClick={onCancel}>
-                  Back to the menu
+                  {t.join.backToMenu}
                 </Button>
               </div>
             }
           >
-            Joining needs an internet connection, and the garden can't be reached right now. Your own island keeps living meanwhile.
+            {t.join.offline}
           </EmptyState>
         </div>
       ) : (
       <form onSubmit={submit} className="toon flex w-full flex-col gap-3 p-5">
-        <h2 className="text-xl font-bold">{mode === "login" ? "Log in to your account" : "Join the garden"}</h2>
+        <h2 className="text-xl font-bold">{mode === "login" ? t.join.loginTitle : t.join.title}</h2>
         {mode === "register" ? (
-          <p className="text-sm text-muted-foreground">
-            Your private blob keeps its own seed either way — joining just grows a public copy in the garden.
-          </p>
+          <p className="text-sm text-muted-foreground">{t.join.intro}</p>
         ) : null}
         <input
           className="toon-input"
-          placeholder="pseudo"
+          placeholder={t.pseudo.placeholder}
           maxLength={MAX_NAME_LENGTH}
           value={pseudo}
           onChange={(e) => setPseudo(e.target.value)}
@@ -88,7 +88,7 @@ export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoi
         />
         <input
           className="toon-input"
-          placeholder="password"
+          placeholder={t.join.password}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -98,7 +98,7 @@ export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoi
             <CountryField value={country} onChange={setCountry} />
             <input
               className="toon-input"
-              placeholder="a friend's pseudo, to live on their island (optional)"
+              placeholder={t.join.friend}
               maxLength={MAX_NAME_LENGTH}
               value={friend}
               onChange={(e) => setFriend(e.target.value)}
@@ -125,17 +125,17 @@ export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoi
           </div>
         ) : null}
         <Button type="submit" size="lg" disabled={pending}>
-          {mode === "login" ? "Log in" : "Join the garden"}
+          {mode === "login" ? t.join.login : t.join.join}
         </Button>
         <button
           type="button"
           className="text-sm font-medium text-muted-foreground underline decoration-2 underline-offset-4 hover:text-ink"
           onClick={() => setMode(mode === "login" ? "register" : "login")}
         >
-          {mode === "login" ? "New account? Join instead" : "Already joined? Log in"}
+          {mode === "login" ? t.join.toJoin : t.join.toLogin}
         </button>
         <button type="button" className="text-sm font-medium text-muted-foreground underline decoration-2 underline-offset-4 hover:text-ink" onClick={onCancel}>
-          Not now
+          {t.join.notNow}
         </button>
       </form>
       )}

@@ -6,7 +6,21 @@ import { GardenScreen } from "@/components/garden-screen";
 import { JoinGardenScreen } from "@/components/join-garden-screen";
 import { MainMenu } from "@/components/main-menu";
 import { PseudoScreen } from "@/components/pseudo-screen";
-import { gardenTime, getGarden, ping, setCountry, setIdentity, setVisibility, type AuthResponse, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
+import { SettingsScreen } from "@/components/settings-screen";
+import { isLanguage, journalLine, language, setLanguage, useT, type Language } from "@/i18n";
+import {
+  deleteAccount,
+  gardenTime,
+  getGarden,
+  ping,
+  setCountry,
+  setIdentity,
+  setVisibility,
+  type AuthResponse,
+  type GardenBlob,
+  type GardenClock,
+  type GardenRegion,
+} from "@/lib/api";
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { useOnline } from "@/lib/online";
@@ -25,14 +39,10 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [joining, setJoining] = useState(false);
   const { online, check: checkOnline } = useOnline();
-  // A change the garden couldn't take (offline, most often): said, not lost.
-  const [notice, setNotice] = useState<string | null>(null);
-  // Stable, so the notice's own timer isn't restarted by every render.
-  const dismissNotice = useCallback(() => setNotice(null), []);
-  const telling =
-    <A extends unknown[]>(change: (...args: A) => Promise<void>) =>
-    (...args: A) =>
-      void change(...args).catch((e: unknown) => setNotice(e instanceof Error ? e.message : String(e)));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  // Redrawn in the language picked.
+  useT();
   // Every start opens on the main menu; it says which scene to play.
   const [playing, setPlaying] = useState<"private" | "garden" | null>(null);
   const [blobs, setBlobs] = useState<GardenBlob[]>([]);
@@ -42,9 +52,17 @@ export default function App() {
   const [regions, setRegions] = useState<{ region: number; home: number; list: GardenRegion[]; size: number } | null>(null);
   const [island, setIsland] = useState<IslandLayout>(() => defaultIsland(ISLAND_SIZE));
   const saveIslandTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // The player's country, as the garden last said: kept while visiting other islands.
+  const ownCountry = useRef<string | null>(null);
 
   useEffect(() => {
-    Promise.all([loadState().then(setAppState), loadIsland().then(setIsland)]).finally(() => setLoaded(true));
+    Promise.all([
+      loadState().then((state) => {
+        if (isLanguage(state?.settings.language)) setLanguage(state.settings.language);
+        setAppState(state);
+      }),
+      loadIsland().then(setIsland),
+    ]).finally(() => setLoaded(true));
   }, []);
 
   // A drag paints many cells in a row; save once it settles, so overlapping
@@ -96,7 +114,7 @@ export default function App() {
       void (async () => {
         const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
         if (!granted) return;
-        for (const entry of entries) sendNotification({ title: appState.localPseudo, body: entry.text });
+        for (const entry of entries) sendNotification({ title: appState.localPseudo, body: journalLine(entry) });
       })();
     }
     const next = { ...appState, life, lastOpenedAt: now };
@@ -181,13 +199,34 @@ export default function App() {
     void saveState(next);
   }
 
-  async function handleToggleVisibility() {
+  async function handleVisibleChange(visible: boolean) {
     if (!appState?.account) return;
-    const visible = !appState.settings.visible;
     await setVisibility(appState.account.token, visible);
-    const next = { ...appState, settings: { visible } };
+    const next = { ...appState, settings: { ...appState.settings, visible } };
     setAppState(next);
     void saveState(next);
+  }
+
+  // Gone from the garden for good; the private island stays.
+  async function handleDeleteAccount(password: string) {
+    if (!appState?.account) return;
+    await deleteAccount(appState.account.token, password);
+    const next: AppState = { ...appState, account: null, settings: { ...appState.settings, visible: true } };
+    setAppState(next);
+    void saveState(next);
+    setBlobs([]);
+    setRegions(null);
+    setVisiting(null);
+    known.current = null;
+    setSettingsOpen(false);
+  }
+
+  function handleLanguageChange(next: Language) {
+    setLanguage(next);
+    if (!appState) return;
+    const state = { ...appState, settings: { ...appState.settings, language: next } };
+    setAppState(state);
+    void saveState(state);
   }
 
   if (!loaded) return null;
@@ -205,43 +244,72 @@ export default function App() {
     );
   }
 
+  // The player's garden blob, when its island is the one loaded: its country, and its other half.
+  const mine = appState.account ? blobs.find((b) => b.seed === appState.account!.seed) : undefined;
+  if (mine) ownCountry.current = mine.country;
+  const partner = mine?.partner ? blobs.find((b) => b.seed === mine.partner) : undefined;
+  const settings = settingsOpen ? (
+    <SettingsScreen
+      seed={appState.localSeed}
+      name={appState.localPseudo}
+      identity={appState.life.identity}
+      onIdentityChange={handleIdentityChange}
+      partner={partner ? { name: partner.pseudo ?? "", identity: partner } : null}
+      account={appState.account}
+      onJoin={() => {
+        setSettingsOpen(false);
+        setJoining(true);
+      }}
+      country={ownCountry.current}
+      onCountryChange={handleCountryChange}
+      visible={appState.settings.visible}
+      onVisibleChange={handleVisibleChange}
+      onDeleteAccount={handleDeleteAccount}
+      language={language()}
+      onLanguageChange={handleLanguageChange}
+      onClose={closeSettings}
+    />
+  ) : null;
+
   if (!playing) {
     return (
-      <MainMenu
-        seed={appState.localSeed}
-        name={appState.localPseudo}
-        inGarden={appState.account !== null}
-        online={online}
-        onPlay={() => setPlaying("private")}
-        onGarden={() => setPlaying("garden")}
-        onJoin={() => setJoining(true)}
-      />
+      <>
+        <MainMenu
+          seed={appState.localSeed}
+          name={appState.localPseudo}
+          inGarden={appState.account !== null}
+          online={online}
+          onPlay={() => setPlaying("private")}
+          onGarden={() => setPlaying("garden")}
+          onJoin={() => setJoining(true)}
+          onSettings={() => setSettingsOpen(true)}
+        />
+        {settings}
+      </>
     );
   }
 
   return (
-    <GardenScreen
-      initialView={playing}
-      onMainMenu={() => setPlaying(null)}
-      online={online}
-      onRetryOnline={checkOnline}
-      localPseudo={appState.localPseudo}
-      localSeed={appState.localSeed}
-      life={appState.life}
-      onIdentityChange={telling(handleIdentityChange)}
-      onCountryChange={telling(handleCountryChange)}
-      account={appState.account}
-      blobs={blobs}
-      regions={regions}
-      onVisit={(region) => setVisiting(region === regions?.home ? null : region)}
-      gardenClock={gardenClock}
-      visible={appState.settings.visible}
-      onToggleVisibility={telling(handleToggleVisibility)}
-      notice={notice}
-      onDismissNotice={dismissNotice}
-      onJoinGarden={() => setJoining(true)}
-      island={island}
-      onIslandChange={handleIslandChange}
-    />
+    <>
+      <GardenScreen
+        initialView={playing}
+        onMainMenu={() => setPlaying(null)}
+        online={online}
+        onRetryOnline={checkOnline}
+        localPseudo={appState.localPseudo}
+        localSeed={appState.localSeed}
+        life={appState.life}
+        account={appState.account}
+        blobs={blobs}
+        regions={regions}
+        onVisit={(region) => setVisiting(region === regions?.home ? null : region)}
+        gardenClock={gardenClock}
+        onJoinGarden={() => setJoining(true)}
+        onSettings={() => setSettingsOpen(true)}
+        island={island}
+        onIslandChange={handleIslandChange}
+      />
+      {settings}
+    </>
   );
 }

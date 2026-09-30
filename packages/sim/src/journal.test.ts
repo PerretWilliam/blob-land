@@ -27,17 +27,10 @@ describe("activityLog", () => {
   ];
 
   it("tells the day in order, merging back-to-back explores", () => {
-    expect(activityLog(segs, (s) => s.toUpperCase()).map((e) => e.text)).toEqual([
-      "Fell asleep.",
-      "Woke up.",
-      "Went exploring.",
-      "Found a smooth pebble.",
-      "Hugged BOB.",
-      "Had a lovely chat with ANN, BOB and CY.",
-    ]);
+    expect(activityLog(segs).map((s) => s.start)).toEqual([1, 2, 3, 5, 6, 7]);
   });
 
   it("only notifies about wakes, finds and meetings", () => {
-    expect(notable(segs).map((e) => e.at)).toEqual([2, 5, 6, 7]);
+    expect(notable(segs).map((s) => s.start)).toEqual([2, 5, 6, 7]);
   });
 });
