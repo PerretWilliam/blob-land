@@ -3,21 +3,21 @@ import { Baby, Heart, HeartCrack, type LucideIcon, Newspaper, Swords, X } from "
 import { useEffect, useState } from "react";
 import { EmptyState, LoadFailed } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
+import { language, useT } from "@/i18n";
 import { getGardenJournal, type GardenEvent } from "@/lib/api";
 
 // Often enough to feel live; a sped-up dev garden changes faster, but this is news, not a feed.
 const REFRESH_MS = 20_000;
 
-const STYLE: Record<GardenEvent["kind"], { icon: LucideIcon; row: string; badge: string; text: (e: Names) => string }> = {
-  couple: { icon: Heart, row: "border-rose-400 bg-rose-500/10", badge: "bg-rose-500 text-white", text: ({ a, b }) => `${a} and ${b} are a couple!` },
-  birth: { icon: Baby, row: "border-violet-400 bg-violet-500/10", badge: "bg-violet-500 text-white", text: ({ a, b, c }) => `${a} and ${b} welcomed ${c}.` },
-  breakup: { icon: HeartCrack, row: "border-stone-400 bg-stone-500/10", badge: "bg-stone-500 text-white", text: ({ a, b }) => `${a} and ${b} broke up.` },
-  fight: { icon: Swords, row: "border-red-500 bg-red-600/10", badge: "bg-red-600 text-white", text: ({ a, b }) => `${a} and ${b} had a big fight.` },
+const STYLE: Record<GardenEvent["kind"], { icon: LucideIcon; row: string; badge: string }> = {
+  couple: { icon: Heart, row: "border-rose-400 bg-rose-500/10", badge: "bg-rose-500 text-white" },
+  birth: { icon: Baby, row: "border-violet-400 bg-violet-500/10", badge: "bg-violet-500 text-white" },
+  breakup: { icon: HeartCrack, row: "border-stone-400 bg-stone-500/10", badge: "bg-stone-500 text-white" },
+  fight: { icon: Swords, row: "border-red-500 bg-red-600/10", badge: "bg-red-600 text-white" },
 };
-type Names = { a: string; b: string; c: string };
 
-const ago = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 function since(ms: number): string {
+  const ago = new Intl.RelativeTimeFormat(language(), { numeric: "auto" });
   const min = Math.round(ms / 60_000);
   if (min < 60) return ago.format(-min, "minute");
   const h = Math.round(min / 60);
@@ -30,6 +30,7 @@ export function GardenNewsPanel({ token, onClose }: { token: string; onClose: ()
   const [error, setError] = useState<unknown>(null);
   // Bumped by "Try again".
   const [attempt, setAttempt] = useState(0);
+  const t = useT();
   useEffect(() => {
     let live = true;
     const load = () =>
@@ -47,31 +48,32 @@ export function GardenNewsPanel({ token, onClose }: { token: string; onClose: ()
 
   return (
     <aside
-      aria-label="Garden news"
+      aria-label={t.news.title}
       className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col toon"
     >
       <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-sun">
         <Newspaper className="size-4" />
-        <h2 className="flex-1 text-base font-bold">Garden news</h2>
-        <Button variant="ghost" size="icon-sm" aria-label="Close garden news" onClick={onClose}>
+        <h2 className="flex-1 text-base font-bold">{t.news.title}</h2>
+        <Button variant="ghost" size="icon-sm" aria-label={t.news.close} onClick={onClose}>
           <X />
         </Button>
       </header>
       <div className="overflow-y-auto p-2" aria-live="polite">
         {error && !news ? (
-          <LoadFailed error={error} what="news" onRetry={() => setAttempt((n) => n + 1)} />
+          <LoadFailed error={error} title={t.news.failed} offline={t.news.offline} onRetry={() => setAttempt((n) => n + 1)} />
         ) : !news ? (
-          <p className="p-1 text-sm text-muted-foreground">Loading…</p>
+          <p className="p-1 text-sm text-muted-foreground">{t.common.loading}</p>
         ) : news.events.length === 0 ? (
-          <EmptyState face="sleepy" title="All quiet for now">
-            Couples, births, breakups and big fights will show up here. Give the garden a little time.
+          <EmptyState face="sleepy" title={t.news.quiet}>
+            {t.news.quietText}
           </EmptyState>
         ) : (
           <ul className="flex flex-col gap-1.5">
             {news.events.map((e) => {
               const style = STYLE[e.kind];
               const Icon = style.icon;
-              const names = { a: e.aName ?? "a blob", b: e.bName ?? "a blob", c: e.cName ?? "a little one" };
+              const [a, b] = [e.aName ?? t.common.aBlob, e.bName ?? t.common.aBlob];
+              const text = e.kind === "birth" ? t.news.birth(a, b, e.cName ?? t.news.littleOne) : t.news[e.kind](a, b);
               return (
                 <li key={`${e.kind}-${e.a}-${e.b}-${e.at}`} className={`flex items-center gap-3 rounded-lg border-l-4 p-2 ${style.row}`}>
                   <span className="relative flex shrink-0">
@@ -79,7 +81,7 @@ export function GardenNewsPanel({ token, onClose }: { token: string; onClose: ()
                     <Blobatar name={e.kind === "birth" && e.c ? e.c : e.b} size={32} className="-ml-3" />
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-sm">{style.text(names)}</span>
+                    <span className="text-sm">{text}</span>
                     <span className="text-[11px] text-muted-foreground">{since(news.now - e.at)}</span>
                   </span>
                   <span className={`flex size-6 shrink-0 items-center justify-center rounded-full ${style.badge}`}>

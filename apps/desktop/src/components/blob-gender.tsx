@@ -1,8 +1,8 @@
 import { ATTRACTIONS, SEXES, type Attraction, type Identity, type Sex } from "@blob-land/sim";
+import { Blobatar } from "@blobatar/react";
 import { blobatar } from "blobatar";
-
-export const SEX_LABELS: Record<Sex, string> = { female: "Female", male: "Male", none: "Neither" };
-export const ATTRACTION_LABELS: Record<Attraction, string> = { women: "Women", men: "Men", any: "Anyone" };
+import type { ReactNode } from "react";
+import { useT } from "@/i18n";
 
 /** Where the sign sits on a blob, in the blobatar's own 0–100 viewBox. */
 export interface Anchor {
@@ -97,30 +97,91 @@ export const SIGNS: Record<"female" | "male", { tilt: number; shapes: SignShape[
   },
 };
 
-/** Sex and attraction pickers, as two rows of toggle buttons. */
-export function IdentityFields({ value, onChange }: { value: Identity; onChange: (identity: Identity) => void }) {
-  const row = <T extends string>(legend: string, options: readonly T[], labels: Record<T, string>, current: T, set: (v: T) => void) => (
-    <fieldset>
-      <legend className="mb-1.5 text-sm text-muted-foreground">{legend}</legend>
-      <div className="flex gap-1.5">
-        {options.map((o) => (
-          <button
-            key={o}
-            type="button"
-            aria-pressed={current === o}
-            onClick={() => set(o)}
-            className={`flex-1 rounded-xl border-[2.5px] border-ink px-2 py-1.5 text-sm font-semibold transition-colors ${current === o ? "bg-sun shadow-[0_3px_0_var(--ink)]" : "bg-white hover:bg-accent"}`}
-          >
-            {labels[o]}
-          </button>
-        ))}
-      </div>
-    </fieldset>
+/** A sign's shapes, as SVG, around (0, 0): the spot where it's worn. */
+function SignShapes({ sex }: { sex: "female" | "male" }) {
+  return SIGNS[sex].shapes.map((shape, i) =>
+    "ellipse" in shape ? (
+      <ellipse key={i} cx={shape.ellipse[0]} cy={shape.ellipse[1]} rx={shape.ellipse[2]} ry={shape.ellipse[3]} fill={shape.fill} stroke={shape.stroke} strokeWidth={shape.width} />
+    ) : (
+      <path key={i} d={shape.d} fill={shape.fill ?? "none"} stroke={shape.stroke} strokeWidth={shape.width} strokeLinecap={shape.cap ?? "butt"} strokeLinejoin="round" />
+    ),
   );
+}
+
+/** A blob as the garden draws it: its blobatar, wearing its sex's sign. Still: the sign doesn't breathe with it. */
+export function DressedBlob({ seed, sex, className = "size-16" }: { seed: string; sex: Sex; className?: string }) {
+  const anchor = genderAnchor(seed, sex);
+  return (
+    <span className={`relative inline-block shrink-0 ${className}`}>
+      <Blobatar name={seed} className="block size-full" />
+      {anchor && sex !== "none" ? (
+        <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 size-full overflow-visible" aria-hidden="true">
+          <g transform={`translate(${anchor.x} ${anchor.y}) rotate(${anchor.tilt + SIGNS[sex].tilt})`}>
+            <SignShapes sex={sex} />
+          </g>
+        </svg>
+      ) : null}
+    </span>
+  );
+}
+
+/** Who a blob falls for, as signs: a bow, a hat, or both. */
+function AttractionIcon({ attraction }: { attraction: Attraction }) {
+  const signs = attraction === "women" ? (["female"] as const) : attraction === "men" ? (["male"] as const) : (["female", "male"] as const);
+  return (
+    <svg viewBox={`-17 -15 ${34 * signs.length} 22`} className="h-5 w-auto" aria-hidden="true">
+      {signs.map((sex, i) => (
+        <g key={sex} transform={`translate(${34 * i} 0)`}>
+          <SignShapes sex={sex} />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function Choice({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={`flex flex-1 flex-col items-center gap-1 rounded-xl border-[2.5px] border-ink px-2 py-1.5 text-sm font-semibold transition-[background-color,translate] ${pressed ? "bg-sun shadow-[0_3px_0_var(--ink)]" : "bg-white hover:-translate-y-px hover:bg-accent"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Who `seed`'s blob is and who it falls for: its sex as three pictures of it
+ * wearing each sign, its attraction as the signs it's drawn to.
+ */
+export function IdentityFields({ seed, value, onChange }: { seed: string; value: Identity; onChange: (identity: Identity) => void }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-3">
-      {row("Your blob is", SEXES, SEX_LABELS, value.sex, (sex) => onChange({ ...value, sex }))}
-      {row("It falls for", ATTRACTIONS, ATTRACTION_LABELS, value.attraction, (attraction) => onChange({ ...value, attraction }))}
+      <fieldset>
+        <legend className="mb-1.5 text-sm text-muted-foreground">{t.identity.is}</legend>
+        <div className="flex gap-1.5">
+          {SEXES.map((sex) => (
+            <Choice key={sex} pressed={value.sex === sex} onClick={() => onChange({ ...value, sex })}>
+              <DressedBlob seed={seed} sex={sex} className="size-12" />
+              {t.sex[sex]}
+            </Choice>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend className="mb-1.5 text-sm text-muted-foreground">{t.identity.fallsFor}</legend>
+        <div className="flex gap-1.5">
+          {ATTRACTIONS.map((attraction) => (
+            <Choice key={attraction} pressed={value.attraction === attraction} onClick={() => onChange({ ...value, attraction })}>
+              <AttractionIcon attraction={attraction} />
+              {t.attraction[attraction]}
+            </Choice>
+          ))}
+        </div>
+      </fieldset>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { sad, sleepy, thinking, unsure } from "blobatar/expression";
 import { RotateCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { ApiError } from "@/lib/api";
 
 const FACES = { sad, sleepy, thinking, unsure };
@@ -33,16 +34,20 @@ export function EmptyState({
   );
 }
 
-/** A panel's load that failed: out of reach, or something else; `onRetry` tries again. */
-export function LoadFailed({ error, what, onRetry }: { error: unknown; what: string; onRetry: () => void }) {
-  const offline = error instanceof ApiError && error.offline;
+/**
+ * A panel's load that failed: out of reach (`offline` says what lives
+ * online), or something else (`title` says what couldn't load); `onRetry`
+ * tries again.
+ */
+export function LoadFailed({ error, title, offline, onRetry }: { error: unknown; title: string; offline: string; onRetry: () => void }) {
+  const t = useT();
   const retry = <RetryButton onRetry={onRetry} />;
-  return offline ? (
-    <EmptyState face="sad" title="No connection" action={retry}>
-      The {what} lives online, in the garden. Check your internet connection, then try again.
+  return error instanceof ApiError && error.offline ? (
+    <EmptyState face="sad" title={t.common.noConnection} action={retry}>
+      {offline}
     </EmptyState>
   ) : (
-    <EmptyState face="unsure" title={`Couldn't load the ${what}`} action={retry}>
+    <EmptyState face="unsure" title={title} action={retry}>
       {error instanceof Error ? error.message : String(error)}
     </EmptyState>
   );
@@ -50,6 +55,7 @@ export function LoadFailed({ error, what, onRetry }: { error: unknown; what: str
 
 export function RetryButton({ onRetry }: { onRetry: () => void | Promise<unknown> }) {
   const [busy, setBusy] = useState(false);
+  const t = useT();
   return (
     <Button
       variant="outline"
@@ -59,7 +65,7 @@ export function RetryButton({ onRetry }: { onRetry: () => void | Promise<unknown
         await Promise.resolve(onRetry()).finally(() => setBusy(false));
       }}
     >
-      <RotateCw className={busy ? "animate-spin" : undefined} /> Try again
+      <RotateCw className={busy ? "animate-spin" : undefined} /> {t.common.tryAgain}
     </Button>
   );
 }

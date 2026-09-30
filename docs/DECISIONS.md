@@ -34,9 +34,9 @@ A union starts when a relationship is in love enough, and ends when the couple b
 
 ## Sex and attraction are the player's choice
 
-A blob is female, male or neither, and is drawn to women, men or anyone. The player picks both for their own blob (and can change them); children roll theirs at birth. A blob with no sex draws only those drawn to anyone. The sex shows as a sign on the blob — a bow or a bowler hat — measured onto its silhouette, since blobs come in ten shapes.
+A blob is female, male or neither, and is drawn to women, men or anyone. The player picks both for their own blob (and can change them, in the settings); children roll theirs at birth. A blob with no sex draws only those drawn to anyone. The sex shows as a sign on the blob — a bow or a bowler hat — measured onto its silhouette, since blobs come in ten shapes.
 
-A change the blob's couple can't survive (they're no longer drawn to each other) breaks it up at once, as exes, and any romance it can no longer feel fades. Nothing else is taken back: friendships, family and history stay.
+A change the blob's couple can't survive (they're no longer drawn to each other) breaks it up at once, as exes, and any romance it can no longer feel fades; the settings say so before it's saved. Nothing else is taken back: friendships, family and history stay.
 
 ## Hidden means hidden everywhere
 
@@ -45,6 +45,10 @@ An account can hide from the garden. Its seed is its normalized pseudo, so hidin
 ## Deleting an account deletes the blob, not its children
 
 Deleting an account (with its password again) takes its blob out of the garden with its pseudo, timeline, meetings and relationships, and ends its couple. Its children are the garden's too, so they stay, with their other parent: the unions they were born to keep a placeholder seed no one can take, so a new account with the same pseudo inherits nothing. The private island stays on the device.
+
+## Languages: typed dictionaries, no library
+
+Every word the app shows is in `apps/desktop/src/i18n`, one file per language. `en.tsx` is the source and every other language is typed as its `Messages`, so a missing line fails the typecheck rather than showing up blank. Lines that depend on a name or a number are functions, which covers plurals and word order per language without a message syntax; dates, times, lists and country names come from `Intl` in the language on screen. The sim stores facts, never sentences (a journal entry is a segment, a find is its English key), and the app words them. It starts from the system's language and the choice is saved with the rest of the app's state.
 
 ## UTC everywhere
 

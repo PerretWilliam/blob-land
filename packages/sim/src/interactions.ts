@@ -177,20 +177,3 @@ export function interactionExpression(kind: InteractionKind, outcome: Outcome): 
       return "happy";
   }
 }
-
-const TEXT: Record<InteractionKind, Record<Outcome, string>> = {
-  chat: { good: "Had a lovely chat with {other}.", meh: "Chatted with {other}.", bad: "Had an awkward chat with {other}." },
-  play: { good: "Played with {other}.", meh: "Played a bit with {other}.", bad: "Played with {other}, and it went wrong." },
-  dance: { good: "Danced with {other}.", meh: "Shuffled around with {other}.", bad: "Stepped on {other}'s toes while dancing." },
-  hug: { good: "Hugged {other}.", meh: "Gave {other} a quick hug.", bad: "Tried to hug {other}, who pulled away." },
-  gift: { good: "Gave {other} a gift, and they loved it.", meh: "Gave {other} a little gift.", bad: "Gave {other} a gift they didn't like." },
-  flirt: { good: "Flirted with {other}.", meh: "Blushed near {other}.", bad: "Flirted with {other}, who wasn't having it." },
-  kiss: { good: "Kissed {other}.", meh: "Pecked {other} on the cheek.", bad: "Went for a kiss; {other} turned away." },
-  argue: { good: "Argued with {other}, then cleared the air.", meh: "Argued with {other}.", bad: "Had a big fight with {other}." },
-  make_up: { good: "Made up with {other}.", meh: "Almost made up with {other}.", bad: "Tried to make up with {other}. No luck." },
-  sulk: { good: "Sulked near {other}, then let it go.", meh: "Sulked at {other}.", bad: "Sulked at {other} for ages." },
-  ignore: { good: "Nodded at {other} and moved on.", meh: "Ignored {other}.", bad: "Pointedly ignored {other}." },
-  parent_play: { good: "Played with {other}, all giggles.", meh: "Played with {other}.", bad: "Played with {other}, who got cranky." },
-};
-
-export const interactionText = (kind: InteractionKind, outcome: Outcome, other: string) => TEXT[kind][outcome].replace("{other}", other);

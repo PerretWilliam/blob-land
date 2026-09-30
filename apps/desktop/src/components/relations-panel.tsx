@@ -4,20 +4,21 @@ import { Hand, Heart, HeartCrack, HeartHandshake, House, type LucideIcon, Search
 import { useEffect, useState } from "react";
 import { EmptyState, LoadFailed } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { getRelationships, type Relation } from "@/lib/api";
 
-/** How each status looks: its own colour, icon and words. Full class names, so Tailwind sees them. */
-const STYLE: Record<RelationStatus, { label: string; icon: LucideIcon; badge: string; row: string }> = {
-  lovers: { label: "In love", icon: Heart, badge: "bg-rose-500 text-white", row: "border-rose-400 bg-rose-500/10" },
-  crush: { label: "Crush", icon: Sparkles, badge: "bg-pink-400 text-white", row: "border-pink-300 bg-pink-400/10" },
-  best_friends: { label: "Best friends", icon: Star, badge: "bg-amber-400 text-amber-950", row: "border-amber-300 bg-amber-400/10" },
-  friends: { label: "Friends", icon: Smile, badge: "bg-emerald-500 text-white", row: "border-emerald-400 bg-emerald-500/10" },
-  family: { label: "Family", icon: House, badge: "bg-violet-500 text-white", row: "border-violet-400 bg-violet-500/10" },
-  acquaintances: { label: "Acquaintances", icon: Hand, badge: "bg-sky-500 text-white", row: "border-sky-300 bg-sky-500/10" },
-  strangers: { label: "Strangers", icon: UserRound, badge: "bg-slate-400 text-white", row: "border-slate-300 bg-slate-400/10" },
-  complicated: { label: "It's complicated", icon: Zap, badge: "bg-orange-500 text-white", row: "border-orange-400 bg-orange-500/10" },
-  rivals: { label: "Rivals", icon: Swords, badge: "bg-red-600 text-white", row: "border-red-500 bg-red-600/10" },
-  ex: { label: "Ex", icon: HeartCrack, badge: "bg-stone-500 text-white", row: "border-stone-400 bg-stone-500/10" },
+/** How each status looks: its own colour and icon (its words are in i18n). Full class names, so Tailwind sees them. */
+const STYLE: Record<RelationStatus, { icon: LucideIcon; badge: string; row: string }> = {
+  lovers: { icon: Heart, badge: "bg-rose-500 text-white", row: "border-rose-400 bg-rose-500/10" },
+  crush: { icon: Sparkles, badge: "bg-pink-400 text-white", row: "border-pink-300 bg-pink-400/10" },
+  best_friends: { icon: Star, badge: "bg-amber-400 text-amber-950", row: "border-amber-300 bg-amber-400/10" },
+  friends: { icon: Smile, badge: "bg-emerald-500 text-white", row: "border-emerald-400 bg-emerald-500/10" },
+  family: { icon: House, badge: "bg-violet-500 text-white", row: "border-violet-400 bg-violet-500/10" },
+  acquaintances: { icon: Hand, badge: "bg-sky-500 text-white", row: "border-sky-300 bg-sky-500/10" },
+  strangers: { icon: UserRound, badge: "bg-slate-400 text-white", row: "border-slate-300 bg-slate-400/10" },
+  complicated: { icon: Zap, badge: "bg-orange-500 text-white", row: "border-orange-400 bg-orange-500/10" },
+  rivals: { icon: Swords, badge: "bg-red-600 text-white", row: "border-red-500 bg-red-600/10" },
+  ex: { icon: HeartCrack, badge: "bg-stone-500 text-white", row: "border-stone-400 bg-stone-500/10" },
 };
 
 // Warmest first: love and friendship at the top, feuds at the bottom.
@@ -25,16 +26,14 @@ const ORDER: RelationStatus[] = ["lovers", "crush", "best_friends", "family", "f
 const rank = (r: Relation) => ORDER.indexOf(r.status) * 1000 - (r.friendship + r.romance - r.tension);
 
 const SORTS = {
-  warmest: { label: "Warmest first", compare: (a: Relation, b: Relation) => rank(a) - rank(b) },
-  name: { label: "Name", compare: (a: Relation, b: Relation) => (a.name ?? "").localeCompare(b.name ?? "") },
-  friendship: { label: "Friendship", compare: (a: Relation, b: Relation) => b.friendship - a.friendship },
-  love: { label: "Love", compare: (a: Relation, b: Relation) => b.romance - a.romance },
-  tension: { label: "Tension", compare: (a: Relation, b: Relation) => b.tension - a.tension },
-  meetings: { label: "Most met", compare: (a: Relation, b: Relation) => b.meetings - a.meetings },
+  warmest: (a: Relation, b: Relation) => rank(a) - rank(b),
+  name: (a: Relation, b: Relation) => (a.name ?? "").localeCompare(b.name ?? ""),
+  friendship: (a: Relation, b: Relation) => b.friendship - a.friendship,
+  love: (a: Relation, b: Relation) => b.romance - a.romance,
+  tension: (a: Relation, b: Relation) => b.tension - a.tension,
+  meetings: (a: Relation, b: Relation) => b.meetings - a.meetings,
 } as const;
 type Sort = keyof typeof SORTS;
-
-const KIN = { parent: "Parent or child", sibling: "Sibling" } as const;
 
 function Gauge({ label, value, color }: { label: string; value: number; color: string }) {
   return (
@@ -48,15 +47,17 @@ function Gauge({ label, value, color }: { label: string; value: number; color: s
 }
 
 function RelationRow({ relation, onOpen }: { relation: Relation; onOpen: (seed: string, name: string) => void }) {
+  const t = useT();
   const style = STYLE[relation.status];
   const Icon = style.icon;
-  const name = relation.name ?? "A garden sprout";
+  const name = relation.name ?? t.common.aSprout;
+  const label = t.relations.status[relation.status];
   return (
     <li>
       <button
         type="button"
         onClick={() => onOpen(relation.seed, name)}
-        aria-label={`${name}: ${style.label}. See their relations`}
+        aria-label={t.relations.row(name, label)}
         className={`flex w-full items-center gap-3 rounded-lg border-l-4 p-2 text-left transition-[filter] hover:brightness-95 ${style.row}`}
       >
         <Blobatar name={relation.seed} size={48} className="shrink-0" />
@@ -65,12 +66,12 @@ function RelationRow({ relation, onOpen }: { relation: Relation; onOpen: (seed: 
             <span className="truncate text-sm font-medium">{name}</span>
             <span className={`ml-auto flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${style.badge}`}>
               <Icon className="size-3" aria-hidden="true" />
-              {relation.kin ? KIN[relation.kin] : style.label}
+              {relation.kin ? t.relations.kin[relation.kin] : label}
             </span>
           </span>
-          <Gauge label="Friends" value={relation.friendship} color="bg-emerald-500" />
-          <Gauge label="Love" value={relation.romance} color="bg-rose-500" />
-          <Gauge label="Tension" value={relation.tension} color="bg-orange-500" />
+          <Gauge label={t.relations.friends} value={relation.friendship} color="bg-emerald-500" />
+          <Gauge label={t.relations.love} value={relation.romance} color="bg-rose-500" />
+          <Gauge label={t.relations.tension} value={relation.tension} color="bg-orange-500" />
         </span>
       </button>
     </li>
@@ -82,8 +83,20 @@ function RelationRow({ relation, onOpen }: { relation: Relation; onOpen: (seed: 
  * colour, searchable by name, filtered by status (the summary chips) and
  * sorted as you like. Any blob in the list opens its own relations.
  * `start`: whose relations to open on (the player's own by default).
+ * `token`, when signed in: a hidden player still sees their own.
  */
-export function RelationsPanel({ seed, start, onClose }: { seed: string | null; start?: { seed: string; name: string }; onClose: () => void }) {
+export function RelationsPanel({
+  seed,
+  token,
+  start,
+  onClose,
+}: {
+  seed: string | null;
+  token: string | null;
+  start?: { seed: string; name: string };
+  onClose: () => void;
+}) {
+  const t = useT();
   const [root, setRoot] = useState<{ seed: string; name: string } | null>(start ?? (seed ? { seed, name: "" } : null));
   const [query, setQuery] = useState("");
   const [only, setOnly] = useState<RelationStatus | null>(null);
@@ -99,14 +112,14 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
   useEffect(() => {
     if (!root) return;
     let live = true;
-    getRelationships(root.seed).then(
+    getRelationships(root.seed, token).then(
       ({ relationships }) => live && setResult({ seed: root.seed, relations: relationships }),
       (e: unknown) => live && setResult({ seed: root.seed, error: e }),
     );
     return () => {
       live = false;
     };
-  }, [root, attempt]);
+  }, [root, token, attempt]);
   const current = result?.seed === root?.seed ? result : null;
   const mine = root?.seed === seed;
   const counts = new Map<RelationStatus, number>();
@@ -114,29 +127,29 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
   const needle = query.trim().toLowerCase();
   const shown = (current?.relations ?? [])
     .filter((r) => (!only || r.status === only) && (!needle || (r.name ?? "").toLowerCase().includes(needle)))
-    .sort(SORTS[sort].compare);
+    .sort(SORTS[sort]);
 
   return (
     <aside
-      aria-label="Relations"
+      aria-label={t.relations.title}
       className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col toon"
     >
       <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-berry">
         <HeartHandshake className="size-4" />
-        <h2 className="flex-1 truncate text-base font-bold">{mine || !root ? "Relations" : `${root.name}'s relations`}</h2>
+        <h2 className="flex-1 truncate text-base font-bold">{mine || !root ? t.relations.title : t.relations.of(root.name)}</h2>
         {!mine && seed ? (
           <Button variant="ghost" size="sm" onClick={() => setRoot({ seed, name: "" })}>
-            Back to mine
+            {t.common.backToMine}
           </Button>
         ) : null}
-        <Button variant="ghost" size="icon-sm" aria-label="Close relations" onClick={onClose}>
+        <Button variant="ghost" size="icon-sm" aria-label={t.relations.close} onClick={onClose}>
           <X />
         </Button>
       </header>
       {counts.size > 0 ? (
         <div className="flex flex-col gap-2 border-b px-3 py-2">
           {/* The summary doubles as a filter: click a status to see only those. */}
-          <p className="flex flex-wrap gap-1" aria-label="Filter by relation">
+          <p className="flex flex-wrap gap-1" aria-label={t.relations.filter}>
             {STATUSES.filter((s) => counts.has(s))
               .sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b))
               .map((s) => (
@@ -147,32 +160,32 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
                   onClick={() => setOnly((o) => (o === s ? null : s))}
                   className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-opacity ${STYLE[s].badge} ${only && only !== s ? "opacity-35" : ""} ${only === s ? "ring-2 ring-foreground/60 ring-offset-1" : ""}`}
                 >
-                  {counts.get(s)} {STYLE[s].label.toLowerCase()}
+                  {counts.get(s)} {t.relations.status[s].toLocaleLowerCase()}
                 </button>
               ))}
           </p>
           <div className="flex gap-1.5">
             <label className="relative flex-1">
-              <span className="sr-only">Search by name</span>
+              <span className="sr-only">{t.relations.search}</span>
               <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <input
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by name"
+                placeholder={t.relations.search}
                 className="h-7 w-full rounded-lg border-2 border-ink bg-white pr-2 pl-7 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </label>
             <label>
-              <span className="sr-only">Sort by</span>
+              <span className="sr-only">{t.relations.sortBy}</span>
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as Sort)}
                 className="h-7 rounded-lg border-2 border-ink bg-white px-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                {Object.entries(SORTS).map(([key, { label }]) => (
+                {(Object.keys(SORTS) as Sort[]).map((key) => (
                   <option key={key} value={key}>
-                    {label}
+                    {t.relations.sort[key]}
                   </option>
                 ))}
               </select>
@@ -182,17 +195,17 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
       ) : null}
       <div className="overflow-y-auto p-2">
         {!seed ? (
-          <EmptyState face="sleepy" title="No one to meet here">
-            Relations grow in the garden. Join it from the main menu, and your blob will start meeting others.
+          <EmptyState face="sleepy" title={t.relations.noGarden}>
+            {t.relations.noGardenText}
           </EmptyState>
         ) : current?.relations ? (
           current.relations.length === 0 ? (
-            <EmptyState face="thinking" seed={root?.seed} title="No one met yet">
-              Blobs meet as they wander the garden. Give it a little time, and friends will show up here.
+            <EmptyState face="thinking" seed={root?.seed} title={t.relations.noneYet}>
+              {t.relations.noneYetText}
             </EmptyState>
           ) : shown.length === 0 ? (
-            <EmptyState face="unsure" title="No one matches">
-              No relation fits that search or filter. Try another name, or clear the filter.
+            <EmptyState face="unsure" title={t.relations.noMatch}>
+              {t.relations.noMatchText}
             </EmptyState>
           ) : (
             <ul className="flex flex-col gap-1.5">
@@ -202,10 +215,10 @@ export function RelationsPanel({ seed, start, onClose }: { seed: string | null; 
             </ul>
           )
         ) : current && "error" in current ? (
-          <LoadFailed error={current.error} what="relations" onRetry={() => setAttempt((n) => n + 1)} />
+          <LoadFailed error={current.error} title={t.relations.failed} offline={t.relations.offline} onRetry={() => setAttempt((n) => n + 1)} />
         ) : (
           <p className="p-1 text-sm text-muted-foreground" aria-live="polite">
-            Loading…
+            {t.common.loading}
           </p>
         )}
       </div>

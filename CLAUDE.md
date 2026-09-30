@@ -8,8 +8,9 @@ joins, in the shared garden (server-simulated regions everyone sees alike).
 ## Language
 
 All code, comments, commit messages, PRs and docs in this repo are in
-**English**, whatever language the conversation is in. The app's text is
-English too.
+**English**, whatever language the conversation is in. The app speaks
+several: every word it shows lives in `apps/desktop/src/i18n` (`en.tsx` is
+the source, each other language is typed against it), never in a component.
 
 ## Structure
 

@@ -4,6 +4,7 @@ import { IdentityFields } from "@/components/blob-gender";
 import { normalizeSeed } from "blobatar";
 import { MenuScreen } from "@/components/main-menu";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 
 export interface PseudoScreenProps {
   onChosen: (pseudo: string, identity: Identity) => void;
@@ -12,6 +13,8 @@ export interface PseudoScreenProps {
 export function PseudoScreen({ onChosen }: PseudoScreenProps) {
   const [pseudo, setPseudo] = useState("");
   const [identity, setIdentity] = useState<Identity>({ sex: "none", attraction: "any" });
+  const t = useT();
+  const seed = normalizeSeed(pseudo.trim());
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -20,23 +23,21 @@ export function PseudoScreen({ onChosen }: PseudoScreenProps) {
 
   return (
     // The top blob of the stack is the one being named, as it's typed.
-    <MenuScreen seed={normalizeSeed(pseudo.trim())}>
+    <MenuScreen seed={seed}>
       <form onSubmit={submit} className="toon flex w-full flex-col gap-4 p-5">
-        <h2 className="text-xl font-bold">Name your blob</h2>
-        <p className="text-sm text-muted-foreground">
-          This becomes your blob right away, on this device — no account, no network yet.
-        </p>
+        <h2 className="text-xl font-bold">{t.pseudo.title}</h2>
+        <p className="text-sm text-muted-foreground">{t.pseudo.intro}</p>
         <input
           className="toon-input"
-          placeholder="pseudo"
+          placeholder={t.pseudo.placeholder}
           maxLength={MAX_NAME_LENGTH}
           value={pseudo}
           onChange={(e) => setPseudo(e.target.value)}
           autoFocus
         />
-        <IdentityFields value={identity} onChange={setIdentity} />
+        <IdentityFields seed={seed || "blob"} value={identity} onChange={setIdentity} />
         <Button type="submit" size="lg" disabled={!pseudo.trim()}>
-          Continue
+          {t.pseudo.next}
         </Button>
       </form>
     </MenuScreen>

@@ -4,16 +4,17 @@ import { Check, Heart, Network, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { EmptyState, LoadFailed } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
+import { language, useT } from "@/i18n";
 import { getTree, renameChild, type FamilyChild, type FamilyMember, type FamilyTree } from "@/lib/api";
 
-const GENERATIONS = ["Children", "Grandchildren", "Great-grandchildren"];
-const generation = (depth: number) => GENERATIONS[depth - 1] ?? `Generation ${depth + 1}`;
-const date = (t: number) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+const date = (t: number) => new Date(t).toLocaleDateString(language(), { day: "numeric", month: "short", year: "numeric" });
 
 /**
- * The family around one blob, top to bottom: its two parents, the blob with
- * its current partner, then its descendants, one generation per row, each
+ * The family around one blob, top to bottom: its parents, the blob with its
+ * current partner, then its descendants, one generation per row, each
  * grouped under the couple it was born to. Any member opens its own tree.
+ * A parent hidden from the garden, or gone from it, isn't shown: its
+ * children show under the other one alone.
  */
 export function FamilyTreeView({
   tree,
@@ -28,47 +29,52 @@ export function FamilyTreeView({
   /** Resolves once renamed; rejects with the server's reason. */
   onRename: (seed: string, name: string) => Promise<void>;
 }) {
+  const t = useT();
   const depths = [...new Set(tree.children.map((c) => c.depth))].sort((a, b) => a - b);
   return (
     <div className="flex flex-col items-center gap-3 p-3 text-center">
-      {tree.parents ? (
+      {tree.parents?.length ? (
         <>
-          <Couple a={tree.parents[0]!} b={tree.parents[1]!} onOpen={onOpen} label="Parents" />
+          <Couple members={tree.parents} onOpen={onOpen} label={t.family.parents} />
           <span className="h-4 w-px bg-border" aria-hidden="true" />
         </>
       ) : null}
 
       <div className="flex items-center gap-2">
-        <Member seed={tree.seed} name={tree.name ?? "A garden sprout"} size={72} current />
+        <Member seed={tree.seed} name={tree.name ?? t.common.aSprout} size={72} current />
         {tree.partner ? (
           <>
-            <Heart className="size-4 fill-rose-400 text-rose-400" aria-label="In a union with" role="img" />
+            <Heart className="size-4 fill-rose-400 text-rose-400" aria-label={t.family.together} role="img" />
             <Member seed={tree.partner.seed} name={tree.partner.pseudo} onOpen={onOpen} />
           </>
         ) : null}
       </div>
 
       {depths.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No children yet. Blobs that pair up in the garden have them.</p>
+        <p className="text-xs text-muted-foreground">{t.family.noChildren}</p>
       ) : (
         depths.map((depth) => (
-          <section key={depth} className="flex w-full flex-col items-center gap-2" aria-label={generation(depth)}>
+          <section key={depth} className="flex w-full flex-col items-center gap-2" aria-label={t.family.generation(depth)}>
             <span className="h-4 w-px bg-border" aria-hidden="true" />
-            <h3 className="text-xs font-medium text-muted-foreground">{generation(depth)}</h3>
+            <h3 className="text-xs font-medium text-muted-foreground">{t.family.generation(depth)}</h3>
             {couples(tree.children.filter((c) => c.depth === depth)).map(([key, kids]) => {
-              const [a, b] = kids[0]!.parents;
+              const parents = kids[0]!.parents;
               // Your own children are grouped by who you had them with.
-              const other = a.seed === tree.seed ? b : b.seed === tree.seed ? a : null;
+              const others = parents.filter((p) => p.seed !== tree.seed);
+              const caption =
+                others.length < parents.length ? (others[0] ? t.family.with(others[0].pseudo) : null)
+                : parents.length === 2 ? t.family.couple(parents[0]!.pseudo, parents[1]!.pseudo)
+                : (parents[0]?.pseudo ?? null);
               return (
                 <div key={key} className="flex w-full flex-col items-center gap-1 rounded-lg border border-dashed p-2">
-                  <p className="text-[11px] text-muted-foreground">{other ? `With ${other.pseudo}` : `${a.pseudo} & ${b.pseudo}`}</p>
+                  {caption ? <p className="text-[11px] text-muted-foreground">{caption}</p> : null}
                   <div className="flex flex-wrap justify-center gap-2">
                     {kids.map((c) => (
                       <Member
                         key={c.seed}
                         seed={c.seed}
-                        name={c.name ?? "Unnamed"}
-                        note={`Born ${date(c.born_at)}`}
+                        name={c.name ?? t.family.unnamed}
+                        note={t.family.born(date(c.born_at))}
                         onOpen={onOpen}
                         onRename={c.parents.some((p) => p.seed === viewer) ? (name) => onRename(c.seed, name) : undefined}
                       />
@@ -94,12 +100,16 @@ function couples(children: FamilyChild[]): [string, FamilyChild[]][] {
   return [...groups];
 }
 
-function Couple({ a, b, onOpen, label }: { a: FamilyMember; b: FamilyMember; onOpen: (seed: string) => void; label: string }) {
+/** Both parents with a heart between them, or the one there is. */
+function Couple({ members, onOpen, label }: { members: FamilyMember[]; onOpen: (seed: string) => void; label: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <Member seed={a.seed} name={a.pseudo} onOpen={onOpen} />
-      <Heart className="size-4 fill-rose-400 text-rose-400" aria-label={label} role="img" />
-      <Member seed={b.seed} name={b.pseudo} onOpen={onOpen} />
+    <div className="flex items-center gap-2" role="group" aria-label={label}>
+      {members.map((m, i) => (
+        <span key={m.seed} className="contents">
+          {i > 0 ? <Heart className="size-4 fill-rose-400 text-rose-400" aria-hidden="true" /> : null}
+          <Member seed={m.seed} name={m.pseudo} onOpen={onOpen} />
+        </span>
+      ))}
     </div>
   );
 }
@@ -122,6 +132,7 @@ function Member({
   onRename?: (name: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const t = useT();
   const face = (
     <>
       <Blobatar name={seed} size={size} />
@@ -137,7 +148,7 @@ function Member({
         <button
           type="button"
           className="flex flex-col items-center gap-0.5 rounded-lg p-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-          title={`Open ${name}'s family`}
+          title={t.family.open(name)}
           onClick={() => onOpen(seed)}
         >
           {face}
@@ -148,7 +159,7 @@ function Member({
           <RenameForm initial={name} onRename={onRename} onDone={() => setEditing(false)} />
         ) : (
           <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => setEditing(true)}>
-            <Pencil className="size-3" /> Rename
+            <Pencil className="size-3" /> {t.family.rename}
           </Button>
         )
       ) : null}
@@ -161,6 +172,7 @@ function RenameForm({ initial, onRename, onDone }: { initial: string; onRename: 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const t = useT();
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (value.trim() === initial) return onDone();
@@ -183,14 +195,14 @@ function RenameForm({ initial, onRename, onDone }: { initial: string; onRename: 
           ref={input}
           autoFocus
           onFocus={(e) => e.target.select()}
-          aria-label="New name"
+          aria-label={t.family.newName}
           aria-invalid={error ? true : undefined}
           maxLength={MAX_NAME_LENGTH}
           className="h-6 min-w-0 flex-1 rounded-md border-2 border-ink bg-white px-1.5 text-xs"
           value={value}
           onChange={(e) => setValue(e.target.value)}
         />
-        <Button type="submit" size="icon-sm" className="size-6" aria-label="Save name" disabled={busy || !value.trim()}>
+        <Button type="submit" size="icon-sm" className="size-6" aria-label={t.family.saveName} disabled={busy || !value.trim()}>
           <Check className="size-3" />
         </Button>
       </div>
@@ -218,54 +230,55 @@ export function FamilyPanel({
   const [result, setResult] = useState<{ seed: string; tree?: FamilyTree; error?: unknown } | null>(null);
   // Bumped after a rename (to show the new name) and by "Try again".
   const [version, setVersion] = useState(0);
+  const t = useT();
   useEffect(() => {
     if (!root) return;
     let live = true;
-    getTree(root).then(
+    getTree(root, token).then(
       (tree) => live && setResult({ seed: root, tree }),
       (e: unknown) => live && setResult({ seed: root, error: e }),
     );
     return () => {
       live = false;
     };
-  }, [root, version]);
+  }, [root, token, version]);
   const current = result?.seed === root ? result : null;
 
   async function rename(child: string, name: string) {
-    if (!token) throw new Error("Log in to the garden to name this blob.");
+    if (!token) throw new Error(t.family.logInToName);
     await renameChild(token, child, name);
     setVersion((v) => v + 1);
   }
 
   return (
     <aside
-      aria-label="Family tree"
+      aria-label={t.family.title}
       className="absolute top-4 right-4 z-10 flex max-h-[calc(100%-2rem)] w-80 flex-col toon"
     >
       <header className="flex items-center gap-2 rounded-t-[1rem] border-b-[3px] border-ink px-3 py-2 bg-berry">
         <Network className="size-4" />
-        <h2 className="flex-1 text-base font-bold">Family tree</h2>
+        <h2 className="flex-1 text-base font-bold">{t.family.title}</h2>
         {root !== seed && seed ? (
           <Button variant="ghost" size="sm" onClick={() => setRoot(seed)}>
-            Back to mine
+            {t.common.backToMine}
           </Button>
         ) : null}
-        <Button variant="ghost" size="icon-sm" aria-label="Close family tree" onClick={onClose}>
+        <Button variant="ghost" size="icon-sm" aria-label={t.family.close} onClick={onClose}>
           <X />
         </Button>
       </header>
       <div className="overflow-y-auto">
         {!seed ? (
-          <EmptyState face="sleepy" title="No family yet">
-            Families grow in the garden. Join it from the main menu, pair up with another blob, and your children will show up here.
+          <EmptyState face="sleepy" title={t.family.none}>
+            {t.family.noneText}
           </EmptyState>
         ) : current?.tree ? (
           <FamilyTreeView tree={current.tree} viewer={seed} onOpen={setRoot} onRename={rename} />
         ) : current && "error" in current ? (
-          <LoadFailed error={current.error} what="family tree" onRetry={() => setVersion((v) => v + 1)} />
+          <LoadFailed error={current.error} title={t.family.failed} offline={t.family.offline} onRetry={() => setVersion((v) => v + 1)} />
         ) : (
           <p className="p-3 text-sm text-muted-foreground" aria-live="polite">
-            Loading…
+            {t.common.loading}
           </p>
         )}
       </div>

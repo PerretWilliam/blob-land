@@ -1,10 +1,11 @@
 import { Blobatar } from "@blobatar/react";
-import { Play, Trees, UserPlus, WifiOff } from "lucide-react";
+import { Play, Settings, Trees, UserPlus, WifiOff } from "lucide-react";
 import type { ReactNode } from "react";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
 import island from "@/assets/menu-island.png";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 
 // The two blobs under yours, as on the app's icon (scripts/brand.mjs).
 const STACK = ["mochi", "land"];
@@ -74,7 +75,7 @@ function Island({ seed }: { seed: string }) {
   );
 }
 
-/** The main menu: into your island, into the garden, or join it. */
+/** The main menu: into your island, into the garden (or join it), or the settings. */
 export function MainMenu({
   seed,
   name,
@@ -83,6 +84,7 @@ export function MainMenu({
   onPlay,
   onGarden,
   onJoin,
+  onSettings,
 }: {
   seed: string;
   name: string;
@@ -92,29 +94,34 @@ export function MainMenu({
   onPlay: () => void;
   onGarden: () => void;
   onJoin: () => void;
+  onSettings: () => void;
 }) {
+  const t = useT();
   return (
     <MenuScreen seed={seed}>
       <p className="text-center text-lg font-medium text-ink/80 md:text-left">
-        Hi, <span className="font-bold text-ink">{name}</span>!
+        {t.menu.hi(<span className="font-bold text-ink">{name}</span>)}
       </p>
-      <nav aria-label="Main menu" className="flex w-full max-w-72 flex-col gap-3">
+      <nav aria-label={t.menu.label} className="flex w-full max-w-72 flex-col gap-3">
         <Button size="lg" onClick={onPlay} autoFocus>
-          <Play className="fill-current" /> My island
+          <Play className="fill-current" /> {t.menu.myIsland}
         </Button>
         {inGarden ? (
           <Button size="lg" variant="secondary" onClick={onGarden} disabled={!online}>
-            <Trees /> The garden
+            <Trees /> {t.menu.garden}
           </Button>
         ) : (
           <Button size="lg" variant="secondary" onClick={onJoin} disabled={!online}>
-            <UserPlus /> Join the garden
+            <UserPlus /> {t.menu.join}
           </Button>
         )}
+        <Button size="lg" variant="outline" onClick={onSettings}>
+          <Settings /> {t.menu.settings}
+        </Button>
         {!online ? (
           <p className="flex items-start gap-2 rounded-xl border-2 border-ink bg-card px-3 py-2 text-sm font-medium" role="status">
             <WifiOff className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            No connection: the garden needs the internet. Your own island keeps living offline.
+            {t.menu.offline}
           </p>
         ) : null}
       </nav>
