@@ -63,8 +63,8 @@ Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 ```bash
 pnpm install
 cp apps/api/.env.example apps/api/.env                   # once
-docker compose -f apps/api/docker-compose.yml up -d db   # Postgres for the API and its tests
-pnpm dev                                                 # the API (stepping the garden) and the desktop app
+pnpm db:up   # Postgres for the API and its tests (pnpm dev runs it too)
+pnpm dev     # Postgres, the API (stepping the garden) and the desktop app
 ```
 
 The code is organised in three packages: see the [README](README.md#how-its-built), and [docs/DECISIONS.md](docs/DECISIONS.md) for why things are the way they are.

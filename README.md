@@ -46,8 +46,7 @@ A pnpm monorepo in TypeScript:
 ```bash
 pnpm install
 cp apps/api/.env.example apps/api/.env                   # once
-docker compose -f apps/api/docker-compose.yml up -d db   # Postgres
-pnpm dev                                                 # API + desktop app, in parallel
+pnpm dev   # Postgres (docker), the API and the desktop app, in parallel
 pnpm -r test
 ```
 
