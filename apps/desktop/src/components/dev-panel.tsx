@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, FlaskConical } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { GardenBlob } from "@/lib/api";
 import { resetKnobs, setKnobs, useKnobs } from "@/lib/dev";
 
 const SPEEDS = [0, 0.25, 1, 5, 20, 100];
@@ -12,7 +13,7 @@ const GARDEN_SPEEDS = [1, 5, 20, 100];
  * translated, since no player sees it. In the garden, `garden` says its speed
  * and asks the server to change it; the private island's runs on this clock.
  */
-export function DevPanel({ time, garden, onReset }: { time: () => number; garden?: { rate: number; set?: (scale: number) => Promise<void> }; onReset?: () => Promise<void> }) {
+export function DevPanel({ time, garden, onReset }: { time: () => number; garden?: { rate: number; set?: (scale: number) => Promise<void>; blobs: GardenBlob[] }; onReset?: () => Promise<void> }) {
   const knobs = useKnobs();
   const [open, setOpen] = useState(true);
   const [shown, setShown] = useState(time);
@@ -49,6 +50,7 @@ export function DevPanel({ time, garden, onReset }: { time: () => number; garden
             </div>
             {failed && <p className="mt-1 text-xs">The API refused: DEV_TOOLS=1 in apps/api/.env?</p>}
           </div>
+          {garden && <Timeline blobs={garden.blobs} now={shown} />}
           <label className="flex flex-col">
             <span className="flex justify-between">
               Sky <button type="button" className="underline" onClick={() => setKnobs({ sky: null })}>{knobs.sky === null ? "auto" : "reset"}</button>
@@ -81,5 +83,18 @@ export function DevPanel({ time, garden, onReset }: { time: () => number; garden
         </div>
       )}
     </aside>
+  );
+}
+
+/** What the garden's timelines hold against the clock: where a stall shows (blobs out of timeline, or with none). */
+function Timeline({ blobs, now }: { blobs: GardenBlob[]; now: number }) {
+  const ends = blobs.map((b) => b.segments.at(-1)?.end ?? -Infinity);
+  const none = blobs.filter((b) => b.segments.length === 0).length;
+  const out = ends.filter((e) => e < now).length;
+  const ahead = Math.round((Math.min(...ends) - now) / 60_000);
+  return (
+    <p className="text-xs tabular-nums">
+      {blobs.length} blobs · {none} without timeline · {out} past its end · least ahead {isFinite(ahead) ? `${ahead} min` : "n/a"}
+    </p>
   );
 }

@@ -203,7 +203,7 @@ export function GardenScreen({
         />
       )}
 
-      {DEV && <DevPanel time={inGarden ? gardenClockNow : devNow} garden={inGarden ? { rate: gardenClock.rate, set: onGardenSpeed } : undefined} onReset={onReset} />}
+      {DEV && <DevPanel time={inGarden ? gardenClockNow : devNow} garden={inGarden ? { rate: gardenClock.rate, set: onGardenSpeed, blobs } : undefined} onReset={onReset} />}
 
       <nav
         aria-label={t.game.menu}
