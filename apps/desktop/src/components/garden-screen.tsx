@@ -2,6 +2,7 @@ import { activityLog, gardenSize, segmentAt } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
+  Clock,
   DoorOpen,
   ChevronDown,
   ChevronLeft,
@@ -27,12 +28,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { EmptyState, RetryButton } from "@/components/empty-state";
 import { FamilyPanel } from "@/components/family-tree";
 import { GardenNewsPanel } from "@/components/garden-news-panel";
+import { DevPanel } from "@/components/dev-panel";
 import { RelationsPanel } from "@/components/relations-panel";
 import { Button } from "@/components/ui/button";
 import { ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import { journalLine, language, listNames, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
 import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
+import { DEV, devNow, useKnobs } from "@/lib/dev";
 import type { LocalLife } from "@/lib/life";
 import { canQuit, quit } from "@/lib/quit";
 import { useGardenIsland } from "@/lib/use-garden-island";
@@ -59,6 +62,10 @@ export interface GardenScreenProps {
   onVisit: (region: number) => void;
   /** The garden's time, which may run faster than the private blob's (dev). */
   gardenClock: GardenClock;
+  /** Dev: runs the garden `scale` times faster (the server does it). */
+  onGardenSpeed?: (scale: number) => Promise<void>;
+  /** Dev: wipes everything, here and on the server, and seeds a garden. */
+  onReset?: () => Promise<void>;
   onJoinGarden: () => void;
   onSettings: () => void;
   /** The private island's layout — local only, edited here. */
@@ -85,6 +92,8 @@ export function GardenScreen({
   regions,
   onVisit,
   gardenClock,
+  onGardenSpeed,
+  onReset,
   onJoinGarden,
   onSettings,
   island,
@@ -101,12 +110,14 @@ export function GardenScreen({
   // Whose relations the panel opens on: the player's own unless a blob's ID card asked.
   const [relationsOf, setRelationsOf] = useState<{ seed: string; name: string } | undefined>(undefined);
   // Re-render now and then, so states (and expressions) follow the clock.
-  const [now, setNow] = useState(() => Date.now());
+  const dev = useKnobs();
+  const [now, setNow] = useState(devNow);
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), Math.max(500, STATE_TICK_MS / gardenClock.rate));
+    const id = setInterval(() => setNow(devNow()), Math.max(500, STATE_TICK_MS / (gardenClock.rate * Math.max(1, dev.speed))));
     return () => clearInterval(id);
-  }, [gardenClock.rate]);
-  const gardenNow = gardenTime(gardenClock);
+  }, [gardenClock.rate, dev.speed]);
+  const gardenClockNow = () => gardenTime(gardenClock);
+  const gardenNow = gardenClockNow();
   const nameOf = (seed: string) => blobs.find((b) => b.seed === seed)?.pseudo ?? t.common.aBlob;
   // A garden blob as the scene draws it: its face and activity right now, off its timeline.
   const fromGarden = (blob: GardenBlob, label = blob.pseudo ?? t.common.aNewBlob): SceneBlob => {
@@ -129,7 +140,7 @@ export function GardenScreen({
       country: blob.country,
     };
   };
-  const reducedMotion = usePrefersReducedMotion();
+  const reducedMotion = usePrefersReducedMotion() || dev.reducedMotion;
   // Losing the account (or never having one) means there's no garden to show.
   const inGarden = view === "garden" && account !== null;
   // The shared garden is never edited: everyone sees the same generated
@@ -172,9 +183,9 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        gardenLayout && <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={atHome ? account.seed : undefined}
+        gardenLayout && <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55 * dev.blobSize} startAt={atHome ? account.seed : undefined}
           cardHidden={panel === "relations"}
-          clock={() => gardenTime(gardenClock)}
+          clock={gardenClockNow}
           onShowRelations={(seed, name) => {
             setRelationsOf({ seed, name });
             setPanel("relations");
@@ -186,10 +197,14 @@ export function GardenScreen({
           blobs={privateBlobs}
           reducedMotion={reducedMotion}
           layout={island}
+          blobScale={0.6 * dev.blobSize}
+          clock={devNow}
           cardHidden={panel === "relations"}
           onCellPaint={editing ? (n) => onIslandChange(paintCell(island, n, tool)) : undefined}
         />
       )}
+
+      {DEV && <DevPanel time={inGarden ? gardenClockNow : devNow} garden={inGarden ? { rate: gardenClock.rate, set: onGardenSpeed, blobs } : undefined} onReset={onReset} />}
 
       <nav
         aria-label={t.game.menu}
@@ -322,6 +337,8 @@ export function GardenScreen({
         </div>
       ) : null}
 
+      {inGarden ? <WorldClock at={gardenNow} /> : null}
+
       {inGarden && regions && regions.list.length > 1 ? <RegionSwitcher regions={regions} onVisit={onVisit} /> : null}
 
       {panel === "journal" ? <JournalPanel segments={life.segments} name={localPseudo} now={now} onClose={() => setPanel(null)} /> : null}
@@ -405,6 +422,17 @@ function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["s
   );
 }
 
+/** The garden's time, UTC, the same for everyone: top centre, with the island switcher just under it. */
+function WorldClock({ at }: { at: number }) {
+  const t = useT();
+  const time = new Intl.DateTimeFormat(language(), { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }).format(at);
+  return (
+    <p aria-label={t.game.worldClock(time)} title={t.game.worldClock(time)} className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 toon px-3 py-1.5 text-sm font-medium tabular-nums">
+      <Clock className="size-4" /> {time} <span className="text-muted-foreground">UTC</span>
+    </p>
+  );
+}
+
 /** The garden's islands, one per region: step through them, and back home. */
 function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScreenProps["regions"]>; onVisit: (region: number) => void }) {
   const { list, region, home } = regions;
@@ -415,7 +443,7 @@ function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScree
   return (
     <nav
       aria-label={t.game.islands}
-      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 toon p-1.5"
+      className="absolute top-16 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 toon p-1.5"
     >
       <Button variant="ghost" size="icon-sm" aria-label={t.game.previousIsland} disabled={!prev} onClick={() => prev && onVisit(prev.region)}>
         <ChevronLeft />

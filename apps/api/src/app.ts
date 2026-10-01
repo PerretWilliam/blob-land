@@ -10,12 +10,12 @@ import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
-import { gardenNow } from "./clock";
+import { gardenNow, resetTimeScale, setTimeScale } from "./clock";
 import { db, isTaken, type Db } from "./db";
 import { config } from "./env";
 import { forget, join, journal, LOOKAHEAD, reconsider, relationshipsOf, type Newcomer } from "./garden";
 import { cleanName, nameTaken } from "./names";
-import { live, regionGarden, touch } from "./region";
+import { forgetViews, live, regionGarden, touch } from "./region";
 import { blobs, regions, unions, users } from "./schema";
 import { familyTree } from "./tree";
 
@@ -369,11 +369,32 @@ app.post("/__dev/step", devTools, async (c) => {
   return c.json({ regions: all.length });
 });
 
+// How many times faster than real time the garden runs, from now on (the desktop's dev panel).
+app.post("/__dev/time-scale", devTools, async (c) => {
+  const { scale } = await body<{ scale?: number }>(c);
+  if (typeof scale !== "number" || !(scale >= 1 && scale <= 1000)) return c.json({ error: "scale must be 1 to 1000" }, 400);
+  return c.json({ now: await setTimeScale(scale), rate: scale });
+});
+
 // `count` blobs without accounts, filling new regions (for the load test,
 // scripts/load.mjs), or topping up `region` to see an island at its fullest.
 app.post("/__dev/populate", devTools, async (c) => {
   const { count, region: into } = await c.req.json<{ count: number; region?: number }>();
   if (!Number.isInteger(count) || count < 1 || count > 10_000) return c.json({ error: "count must be 1 to 10 000" }, 400);
+  return c.json({ regions: await populate(count, into) });
+});
+
+// Back to zero: every table emptied, the garden's clock back to real time, then `count` blobs seeded.
+app.post("/__dev/reset", devTools, async (c) => {
+  const { count = 16 } = await body<{ count?: number }>(c);
+  if (!Number.isInteger(count) || count < 0 || count > 10_000) return c.json({ error: "count must be 0 to 10 000" }, 400);
+  await db.execute(sql`TRUNCATE users, regions, blobs, unions, segments, relationships, interactions, dev_clock RESTART IDENTITY CASCADE`);
+  resetTimeScale();
+  forgetViews();
+  return c.json({ regions: count > 0 ? await populate(count) : [], rate: config.timeScale });
+});
+
+async function populate(count: number, into?: number): Promise<number[]> {
   const now = await gardenNow();
   const [{ first }] = (await db.select({ first: sql<number>`COALESCE(MAX(${regions.region}) + 1, 0)` }).from(regions)) as [{ first: number }];
   const sexes = ["female", "male", "none"] as const;
@@ -398,8 +419,8 @@ app.post("/__dev/populate", devTools, async (c) => {
     await join(db, n, newcomers, now, randomRng);
     await live(n, now, now + LOOKAHEAD);
   }
-  return c.json({ regions: [...byRegion.keys()] });
-});
+  return [...byRegion.keys()];
+}
 
 // Anything that breaks is logged whole, as one JSON line, for whatever collects the container's logs.
 app.onError((e, c) => {

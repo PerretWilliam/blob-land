@@ -12,6 +12,8 @@ import {
   deleteAccount,
   gardenTime,
   getGarden,
+  resetGarden,
+  setGardenSpeed,
   ping,
   setCountry,
   setIdentity,
@@ -24,21 +26,27 @@ import {
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { useOnline } from "@/lib/online";
-import { loadState, saveState, type AppState } from "@/lib/state";
+import { DEV, devNow, useKnobs } from "@/lib/dev";
+import { loadState, resetState, saveState, type AppState } from "@/lib/state";
 
 const PING_INTERVAL_MS = 60_000;
 // A sped-up dev garden is lived only minutes ahead of now, in real time: refresh often.
-const FAST_GARDEN_REFRESH_MS = 10_000;
+// The server lives the garden this far ahead (the API's LOOKAHEAD): a refresh must land well within it, in garden time.
+const GARDEN_LOOKAHEAD_MS = 30 * 60_000;
 // Played timeline kept per blob, in garden time: what the API sends in a full answer.
 const SEGMENT_HISTORY_MS = 15 * 60_000;
 // How often the private blob's life is lived a bit further and saved.
 const LIFE_TICK_MS = 60_000;
+// Blobs the dev panel's reset seeds the garden with.
+const DEV_SEED_BLOBS = 16;
 
 export default function App() {
   const [appState, setAppState] = useState<AppState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [joining, setJoining] = useState(false);
   const { online, check: checkOnline } = useOnline();
+  // Dev: the faster the clock, the more often the private blob lives on.
+  const { speed } = useKnobs();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   // Redrawn in the language picked.
@@ -131,15 +139,17 @@ export default function App() {
     const id = setInterval(() => {
       setAppState((prev) => {
         if (!prev) return prev;
-        const next = { ...prev, life: advanceLife(prev.localSeed, prev.life, Date.now()).life, lastOpenedAt: Date.now() };
+        const next = { ...prev, life: advanceLife(prev.localSeed, prev.life, devNow()).life, lastOpenedAt: Date.now() };
         void saveState(next);
         return next;
       });
-    }, LIFE_TICK_MS);
+    }, Math.max(1000, LIFE_TICK_MS / Math.max(1, speed)));
     return () => clearInterval(id);
-  }, [appState?.localSeed]);
+  }, [appState?.localSeed, speed]);
 
-  const fast = gardenClock.rate > 1;
+  // Real time between refreshes: a minute, or at a faster rate a third of the lookahead (1 to 10 s).
+  const rate = gardenClock.rate;
+  const refreshEvery = rate > 1 ? Math.min(10_000, Math.max(1_000, GARDEN_LOOKAHEAD_MS / (3 * rate))) : PING_INTERVAL_MS;
   // Presence ping + garden refresh while the app is active — only once an
   // account exists, since /garden and /me/ping both require a token.
   useEffect(() => {
@@ -151,9 +161,32 @@ export default function App() {
       ping(token)
         .then(() => refreshGarden(token))
         .catch(() => {});
-    }, fast ? FAST_GARDEN_REFRESH_MS : PING_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [appState?.account?.token, refreshGarden, fast, visiting]);
+    }, refreshEvery);
+    // A hidden window's timers are throttled: catch up the moment it's back.
+    const back = () => document.visibilityState === "visible" && refreshGarden(token).catch(() => {});
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", back);
+    };
+  }, [appState?.account?.token, refreshGarden, refreshEvery, visiting]);
+
+  // Dev panel: the server runs the garden faster, then the answers follow at once.
+  async function handleGardenSpeed(scale: number) {
+    const token = appState?.account?.token;
+    if (!token) return;
+    const { now, rate } = await setGardenSpeed(scale);
+    setGardenClock({ at: now, readAt: Date.now(), rate });
+    known.current = null;
+    await refreshGarden(token);
+  }
+
+  // Dev panel: back to a first start, on a freshly seeded garden.
+  async function handleReset() {
+    await resetGarden(DEV_SEED_BLOBS);
+    await Promise.all([resetState(), saveIsland(defaultIsland(ISLAND_SIZE))]);
+    window.location.reload();
+  }
 
   function handlePseudoChosen(pseudo: string, identity: Identity) {
     const now = Date.now();
@@ -176,6 +209,8 @@ export default function App() {
     void saveState(next);
     setAppState(next);
     setJoining(false);
+    // Joined to be there: straight to the garden, not back to where it was asked from.
+    setPlaying("garden");
   }
 
   // One identity for both: the private blob and its garden sprout.
@@ -304,6 +339,8 @@ export default function App() {
         regions={regions}
         onVisit={(region) => setVisiting(region === regions?.home ? null : region)}
         gardenClock={gardenClock}
+        onGardenSpeed={DEV ? handleGardenSpeed : undefined}
+        onReset={DEV ? handleReset : undefined}
         onJoinGarden={() => setJoining(true)}
         onSettings={() => setSettingsOpen(true)}
         island={island}

@@ -65,13 +65,13 @@ pnpm --filter @blob-land/api seed 20   # register 20 random blobs and run a worl
 ```
 
 `seed` and `load` use dev-only routes (`/__dev/*`), open only with
-`DEV_TOOLS=1` in `apps/api/.env`. Never set it in production.
+`DEV_TOOLS=1` in `apps/api/.env`. Never set it in production. The desktop's Dev box has a **Reset everything** button on them (`/__dev/reset`): it empties the database and the garden's clock, seeds 16 blobs, and sends the app back to a first start.
 
 To watch relationships unfold in minutes instead of days, speed the garden's
 clock up: add `TIME_SCALE=60` to `apps/api/.env` (a garden day then lasts
 24 minutes; 10 is easier to follow) and restart `pnpm dev`. The desktop app
 reads the rate from `/garden` and plays everything back at that speed.
-Changing the scale carries on from the garden's current time; going back to
+With `DEV_TOOLS=1`, the desktop's Dev box changes the scale live instead (no restart). Changing the scale carries on from the garden's current time; going back to
 real time (removing it) leaves blobs lived ahead, so reset the local
 database: `docker compose down -v`, `up -d db` and seed again.
 
