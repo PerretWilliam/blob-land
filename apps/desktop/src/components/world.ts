@@ -181,9 +181,11 @@ function riverBankAt(layout: IslandLayout, i: number, j: number): string {
   return bank;
 }
 
-/** Water a river runs on into: a river, a lake, ice, or the stream past the grid. */
-function wet(layout: IslandLayout, i: number, j: number): boolean {
+/** Water a river runs on into: a river, a lake, ice, or the stream past the
+ * grid; for a lake, the open sea all round too. */
+function wet(layout: IslandLayout, i: number, j: number, sea = false): boolean {
   if (i === layout.size && j >= 0 && j < layout.size) return true;
+  if (sea && !cellAt(layout, i, j)) return true;
   const g = cellAt(layout, i, j)?.ground;
   return g === "river" || g === "water" || g === "ice";
 }
@@ -232,13 +234,16 @@ const EDGE_ORDER: Record<Edge, number> = { nw: 0, ne: 1, se: 2, sw: 3 };
  * pool reads as one sheet of water. The pack doesn't draw every mix: the
  * piece that keeps the fewest nubs it shouldn't.
  */
-function riverPiece(layout: IslandLayout, i: number, j: number, bridge: boolean): string {
-  const bank = riverBankAt(layout, i, j);
-  const edges = linkedEdges(layout, i, j, "river");
+function riverPiece(layout: IslandLayout, i: number, j: number, kind: "river" | "bridge" | "lake"): string {
+  const lake = kind === "lake";
+  const bank = lake ? bankAt(layout, i, j) : riverBankAt(layout, i, j);
+  // A lake or the sea opens onto all the water round it, and keeps a bank where it meets land.
+  const edges = lake ? EDGES.filter(([, di, dj]) => wet(layout, i + di, j + dj, true)).map(([edge]) => edge) : linkedEdges(layout, i, j, "river");
+  if (lake && !edges.length) return piece("tile-water");
   if (!edges.length) edges.push("nw", "se");
-  const open = CORNERS.filter(([, a, b]) => edges.includes(a) && edges.includes(b) && wet(layout, i + STEP[a][0] + STEP[b][0], j + STEP[a][1] + STEP[b][1])).map(([c]) => c);
-  if (!bridge && open.length === 4) return piece(bank === "-ice" ? "tile-ice" : "tile-water");
-  const base = `${bridge ? "bridge" : "river"}${bank}-${edges.join("-")}`;
+  const open = CORNERS.filter(([, a, b]) => edges.includes(a) && edges.includes(b) && wet(layout, i + STEP[a][0] + STEP[b][0], j + STEP[a][1] + STEP[b][1], lake)).map(([c]) => c);
+  if (kind !== "bridge" && open.length === 4) return piece(bank === "-ice" ? "tile-ice" : "tile-water");
+  const base = `${kind === "bridge" ? "bridge" : "river"}${bank}-${edges.join("-")}`;
   let best = hasPiece(base) ? base : null;
   let most = 0;
   for (let mask = 1; mask < 1 << open.length; mask++) {
@@ -290,7 +295,8 @@ function cellStack(layout: IslandLayout, i: number, j: number): string[] {
   const stack = Array.from({ length: height }, () => block);
   const slope = slopeAt(layout, i, j, ground, bank);
   if (slope) return [...stack, block, slope];
-  const top = ground === "river" ? riverPiece(layout, i, j, !!cell.bridge) : ground === "road" ? roadPiece(layout, i, j, bank) : piece(`tile-${ground}`);
+  const top =
+    ground === "river" ? riverPiece(layout, i, j, cell.bridge ? "bridge" : "river") : ground === "water" ? riverPiece(layout, i, j, "lake") : ground === "road" ? roadPiece(layout, i, j, bank) : piece(`tile-${ground}`);
   return [...stack, top];
 }
 
@@ -448,6 +454,62 @@ function nightMatrix(light: number): number[] {
     ...row(0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s),
     0, 0, 0, 1, 0,
   ];
+}
+
+/**
+ * A nest, `w` pack px wide, centred on (cx, cy), in the pack's style: twigs
+ * poking out, a woven rim, and in its hollow a bed of straw with two leaves
+ * caught on the edge. Drawn in a 120 x 60 box, scaled.
+ */
+function drawNest(g: Graphics, cx: number, cy: number, w: number) {
+  const s = w / 120;
+  const p = (x: number, y: number) => [cx + (x - 60) * s, cy + (y - 30) * s] as const;
+  const ink = (width: number) => ({ color: 0x000000, width: width * s, join: "round" as const, cap: "round" as const });
+  g.ellipse(...p(60, 38), 62 * s, 27 * s).fill({ color: 0x000000, alpha: 0.12 });
+  for (const [x1, y1, x2, y2] of [
+    [10, 22, -4, 13],
+    [102, 16, 117, 7],
+    [18, 46, 4, 55],
+    [98, 45, 113, 53],
+    [62, 7, 66, -5],
+  ] as const) {
+    g.moveTo(...p(x1, y1)).lineTo(...p(x2, y2)).stroke(ink(7.5));
+    g.moveTo(...p(x1, y1)).lineTo(...p(x2, y2)).stroke({ color: 0xa8683a, width: 3.5 * s, cap: "round" });
+  }
+  // The rim: its outer wall, then its top, woven.
+  g.ellipse(...p(60, 36), 57 * s, 25 * s).fill(0x8f5530).stroke(ink(4.5));
+  g.ellipse(...p(60, 30), 57 * s, 24 * s).fill(0xd29a5c).stroke(ink(4.5));
+  for (let k = 0; k < 16; k++) {
+    const at = (t: number, rx: number, ry: number) => p(60 + rx * Math.cos(t), 30 + ry * Math.sin(t));
+    const t = (k / 16) * 2 * Math.PI;
+    g.moveTo(...at(t - 0.16, 54, 22.5))
+      .quadraticCurveTo(...at(t, 47, 19), ...at(t + 0.16, 54, 22.5))
+      .stroke({ color: 0x8f5530, width: 2.5 * s, cap: "round" });
+  }
+  // The hollow, and the straw blobs sleep on.
+  g.ellipse(...p(60, 31), 40 * s, 15 * s).fill(0x6b3f22).stroke(ink(4));
+  g.ellipse(...p(60, 34), 33 * s, 10.5 * s).fill(0xf3d27e).stroke(ink(3.5));
+  for (const [x1, y1, x2, y2] of [
+    [38, 33, 49, 35],
+    [54, 38, 65, 37],
+    [70, 31, 81, 33],
+    [46, 30, 53, 29],
+    [74, 37, 82, 36],
+  ] as const)
+    g.moveTo(...p(x1, y1)).lineTo(...p(x2, y2)).stroke({ color: 0xd39b3c, width: 2.2 * s, cap: "round" });
+  for (const [bx, by, ax, ay, tx, ty, cx2, cy2] of [
+    [22, 42, 12, 37, 5, 49, 16, 53],
+    [93, 15, 99, 4, 111, 7, 106, 18],
+  ] as const) {
+    g.moveTo(...p(bx, by))
+      .quadraticCurveTo(...p(ax, ay), ...p(tx, ty))
+      .quadraticCurveTo(...p(cx2, cy2), ...p(bx, by))
+      .fill(0x91db69)
+      .stroke(ink(3.5));
+    g.moveTo(...p(bx, by))
+      .lineTo(...p(bx + (tx - bx) * 0.75, by + (ty - by) * 0.75))
+      .stroke(ink(2));
+  }
 }
 
 /** A blob's figure, from its blobatar: shapes drawn once per seed, in white, coloured by tint. */
@@ -847,22 +909,7 @@ export class World {
     const tiles = layout.size;
     for (const nest of nests) {
       const at = island.at(nest.x * tiles, nest.y * tiles);
-      const w = nest.r * 2 * tiles * 2 * HALF_W + 40;
-      const s = w / 120;
-      const [x0, y0] = [at.x - w / 2, at.y - w / 4];
-      const pt = (x: number, y: number) => [x0 + x * s, y0 + y * s] as const;
-      this.nests
-        .ellipse(...pt(60, 30), 56 * s, 27 * s)
-        .fill(0x8a5a33)
-        .stroke({ color: 0x000000, width: 5 * s })
-        .ellipse(...pt(60, 31), 36 * s, 15 * s)
-        .fill(0x5e3b20)
-        .stroke({ color: 0x000000, width: 4 * s })
-        .moveTo(...pt(14, 26))
-        .quadraticCurveTo(...pt(40, 14), ...pt(70, 18))
-        .moveTo(...pt(50, 46))
-        .quadraticCurveTo(...pt(80, 44), ...pt(104, 30))
-        .stroke({ color: 0x000000, width: 3 * s, cap: "round" });
+      drawNest(this.nests, at.x, at.y + nest.r * tiles * HALF_H * 0.15, nest.r * 2 * tiles * 2 * HALF_W + 40);
     }
     for (const key of keys) if (chunks.has(key)) this.mount(key);
     if (this.map) this.setMap(true);

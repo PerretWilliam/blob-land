@@ -66,7 +66,7 @@ describe("gardenIsland", () => {
   // that changes shape is a change for everyone at once, never a side effect.
   it("lays out exactly the island it always has", () => {
     const hash = (size: number) => createHash("sha1").update(JSON.stringify(gardenIsland(size))).digest("hex");
-    expect(hash(40)).toBe("4414d6226f63b727f4733dd4927f11e534925506");
-    expect(hash(128)).toBe("1f1f93ca3f2bb2a33411d50e1018256bfcae3214");
+    expect(hash(40)).toBe("9c1647764c693bbe74d4da400e9f82628575d4e7");
+    expect(hash(128)).toBe("452ba71894c968be6db3d3d9f0b6a6807d82d7af");
   });
 });

@@ -217,12 +217,18 @@ export const cellAt = (island: IslandLayout, i: number, j: number): IslandCell |
 const heightAt = (island: IslandLayout, i: number, j: number) => cellAt(island, i, j)?.height ?? 0;
 
 /** Which way a ramp cell climbs: towards the first neighbour exactly one block
- * higher. `null` (drawn flat) when there's none to climb to. */
+ * higher. `null` (drawn flat) when there's none to climb to. A river needs
+ * no ramp: it falls on its own from more river a block up, as a waterfall. */
 export function rampDirection(island: IslandLayout, i: number, j: number): Edge | null {
   const cell = cellAt(island, i, j);
-  if (!cell?.ramp || !canRamp(cell.ground)) return null;
+  if (!cell || !canRamp(cell.ground)) return null;
+  const falls = !cell.ramp && cell.ground === "river";
+  if (!cell.ramp && !falls) return null;
   const h = cell.height ?? 0;
-  for (const [edge, di, dj] of EDGES) if (heightAt(island, i + di, j + dj) === h + 1) return edge;
+  for (const [edge, di, dj] of EDGES) {
+    const n = cellAt(island, i + di, j + dj);
+    if ((n?.height ?? 0) === h + 1 && (!falls || n?.ground === "river")) return edge;
+  }
   return null;
 }
 

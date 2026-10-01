@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canStep, defaultIsland, paintCell, rampInside, rampOutside, surfaceHeight, type IslandLayout } from "./island";
+import { canStep, defaultIsland, paintCell, rampDirection, rampInside, rampOutside, surfaceHeight, type IslandLayout } from "./island";
 
 /** A 3x3 island of grass at `heights` (row by row), with a ramp on the middle cell. */
 function hill(heights: number[]): IslandLayout {
@@ -26,6 +26,18 @@ describe("ramps round a corner", () => {
     expect(surfaceHeight(island, 1, 1, 1, 1)).toBe(1);
     expect(surfaceHeight(island, 1, 1, 1, 2)).toBe(0);
     expect(surfaceHeight(island, 1, 1, 2, 1)).toBe(0);
+  });
+});
+
+describe("rivers", () => {
+  it("fall on their own from more river a block up, as a waterfall", () => {
+    const island: IslandLayout = { size: 3, cells: Array.from({ length: 9 }, () => ({ ground: "grass" as const })) };
+    island.cells[1] = { ground: "river", height: 1 };
+    island.cells[4] = { ground: "river" };
+    expect(rampDirection(island, 1, 1)).toBe("ne");
+    // Not from a hill that isn't river.
+    island.cells[1] = { ground: "grass", height: 1 };
+    expect(rampDirection(island, 1, 1)).toBeNull();
   });
 });
 
