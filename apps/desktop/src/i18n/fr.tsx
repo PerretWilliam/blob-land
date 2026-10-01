@@ -122,6 +122,7 @@ export const fr: Messages = {
     raise: "Monter",
     lower: "Descendre",
     ramp: "Pente",
+    bridge: "Pont",
     decor: (family, ground, n) =>
       `${{ tree: "Arbre", bush: "Buisson", rock: "Rocher", cactus: "Cactus" }[family]}${ground ? { snow: " enneigé", dirt: " de terre", sand: " de sable" }[ground] : ""} ${n}`,
     erase: "Gomme",

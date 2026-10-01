@@ -21,8 +21,10 @@ export type Ground = (typeof GROUNDS)[number];
 export const canHoldDecor = (ground: Ground) => ground === "grass" || ground === "sand" || ground === "dirt" || ground === "snow";
 /** Grounds whose surface sits lower than the banks around them (a blob wades into them). */
 export const isSunken = (ground: Ground) => ground === "water" || ground === "ice" || ground === "river";
-/** Grounds the pack draws as a slope. Dirt has no ramp of its own, and water can't run uphill. */
-export const canRamp = (ground: Ground) => ground === "grass" || ground === "sand" || ground === "snow" || ground === "road";
+/** Grounds the pack draws as a slope. Dirt has no ramp of its own, and still water lies flat. */
+export const canRamp = (ground: Ground) => ground === "grass" || ground === "sand" || ground === "snow" || ground === "road" || ground === "river";
+/** Grounds whose slopes the pack also draws round a corner (see `rampInside`, `rampOutside`). */
+const turnsCorners = (ground: Ground) => ground === "grass" || ground === "sand" || ground === "snow";
 /** How many blocks a cell can be stacked above the base level. */
 export const MAX_HEIGHT = 2;
 
@@ -31,7 +33,7 @@ export interface IslandCell {
   decor?: DecorKind;
   /** Blocks stacked above the base level, 0 (default) to MAX_HEIGHT. */
   height?: number;
-  /** A slope up to the neighbour one block higher (see `rampDirection`). */
+  /** A slope up to the neighbours one block higher (see `rampDirection`, `rampInside`, `rampOutside`). */
   ramp?: true;
   /** On a river: a footbridge, straight across it. Walked over, never stopped on. */
   bridge?: true;
@@ -107,13 +109,15 @@ function parseIsland(value: unknown): IslandLayout | null {
   const parsed: IslandCell[] = [];
   for (const c of cells as unknown[]) {
     if (typeof c !== "object" || c === null) return null;
-    const { ground, decor, height, ramp } = c as { ground?: unknown; decor?: unknown; height?: unknown; ramp?: unknown };
+    const { ground, decor, height, ramp, bridge } = c as { ground?: unknown; decor?: unknown; height?: unknown; ramp?: unknown; bridge?: unknown };
     if (!GROUNDS.includes(ground as Ground)) return null;
     if (height !== undefined && !(Number.isInteger(height) && (height as number) >= 0 && (height as number) <= MAX_HEIGHT)) return null;
     if (ramp !== undefined && ramp !== true) return null;
+    if (bridge !== undefined && bridge !== true) return null;
     const cell: IslandCell = { ground: ground as Ground };
     if (height) cell.height = height as number;
     if (ramp) cell.ramp = true;
+    if (bridge && ground === "river" && !ramp) cell.bridge = true;
     if (decor !== undefined) {
       if (!DECOR_KINDS.includes(decor as DecorKind)) return null;
       cell.decor = decor as DecorKind;
@@ -140,14 +144,14 @@ export async function saveIsland(island: IslandLayout): Promise<void> {
   await writeTextFile(ISLAND_FILE, JSON.stringify(island), { baseDir: BaseDirectory.AppData });
 }
 
-export type IslandTool = Ground | DecorKind | "erase" | "raise" | "lower" | "ramp";
+export type IslandTool = Ground | DecorKind | "erase" | "raise" | "lower" | "ramp" | "bridge";
 
 /** One stroke of the editor on cell `n`. Returns a new layout (or the same one
  * when nothing changes, so React can skip the re-render and the save). */
 export function paintCell(island: IslandLayout, n: number, tool: IslandTool): IslandLayout {
   const cell = island.cells[n];
   if (!cell || n === nestCell(island.size)) return island;
-  const { ground, decor, height = 0, ramp } = cell;
+  const { ground, decor, height = 0, ramp, bridge } = cell;
   const [i, j] = [n % island.size, Math.floor(n / island.size)];
   // A step bigger than one block would leave a cliff no ramp can climb.
   const stepOk = (h: number) =>
@@ -156,7 +160,7 @@ export function paintCell(island: IslandLayout, n: number, tool: IslandTool): Is
       return !neighbour || Math.abs((neighbour.height ?? 0) - h) <= 1;
     });
   let next: IslandCell;
-  if (tool === "erase") next = { ground, height, ramp };
+  if (tool === "erase") next = { ground, height, ramp, bridge };
   else if (tool === "raise") {
     const h = Math.min(MAX_HEIGHT, height + 1);
     next = stepOk(h) ? { ...cell, height: h } : cell;
@@ -166,17 +170,20 @@ export function paintCell(island: IslandLayout, n: number, tool: IslandTool): Is
   }
   // A slope has nowhere to put a tree.
   else if (tool === "ramp") next = canRamp(ground) ? { ground, height, ramp: ramp ? undefined : true } : cell;
+  // A footbridge goes across a river, never down a slope.
+  else if (tool === "bridge") next = ground === "river" && !ramp ? { ground, height, bridge: bridge ? undefined : true } : cell;
   // Repainting the ground keeps what stands there, unless the new ground can't hold it.
   else if ((GROUNDS as readonly string[]).includes(tool)) {
     const g = tool as Ground;
-    next = { ground: g, height, ramp: ramp && canRamp(g) ? true : undefined, decor: canHoldDecor(g) && !ramp ? decor : undefined };
+    next = { ground: g, height, ramp: ramp && canRamp(g) ? true : undefined, bridge: bridge && g === "river" ? true : undefined, decor: canHoldDecor(g) && !ramp ? decor : undefined };
   } else next = canHoldDecor(ground) && !ramp ? { ...cell, decor: tool as DecorKind } : cell;
-  if (next.ground === ground && next.decor === decor && (next.height ?? 0) === height && next.ramp === ramp) return island;
+  if (next.ground === ground && next.decor === decor && (next.height ?? 0) === height && next.ramp === ramp && next.bridge === bridge) return island;
   // Keep the saved file free of default values.
   const clean: IslandCell = { ground: next.ground };
   if (next.decor) clean.decor = next.decor;
   if (next.height) clean.height = next.height;
   if (next.ramp) clean.ramp = true;
+  if (next.bridge) clean.bridge = true;
   const cells = island.cells.slice();
   cells[n] = clean;
   return { ...island, cells };
@@ -191,9 +198,23 @@ export const EDGES: [Edge, number, number][] = [
   ["sw", 0, 1],
 ];
 export const OPPOSITE_EDGE: Record<Edge, Edge> = { nw: "se", ne: "sw", se: "nw", sw: "ne" };
+/** The step across each edge, as (di, dj). */
+export const STEP: Record<Edge, readonly [number, number]> = { nw: [-1, 0], ne: [0, -1], se: [1, 0], sw: [0, 1] };
+
+export type Corner = "n" | "e" | "s" | "w";
+/** A cell's corners, top one first, each with the two edges that meet there. */
+export const CORNERS: readonly (readonly [Corner, Edge, Edge])[] = [
+  ["n", "nw", "ne"],
+  ["e", "ne", "se"],
+  ["s", "se", "sw"],
+  ["w", "nw", "sw"],
+];
+const CORNER_INDEX = { n: 0, e: 1, s: 2, w: 3 } as const;
+const cornerEdges = (corner: Corner) => CORNERS[CORNER_INDEX[corner]]!;
 
 export const cellAt = (island: IslandLayout, i: number, j: number): IslandCell | undefined =>
   i >= 0 && j >= 0 && i < island.size && j < island.size ? island.cells[j * island.size + i] : undefined;
+const heightAt = (island: IslandLayout, i: number, j: number) => cellAt(island, i, j)?.height ?? 0;
 
 /** Which way a ramp cell climbs: towards the first neighbour exactly one block
  * higher. `null` (drawn flat) when there's none to climb to. */
@@ -201,18 +222,44 @@ export function rampDirection(island: IslandLayout, i: number, j: number): Edge 
   const cell = cellAt(island, i, j);
   if (!cell?.ramp || !canRamp(cell.ground)) return null;
   const h = cell.height ?? 0;
-  for (const [edge, di, dj] of EDGES) if ((cellAt(island, i + di, j + dj)?.height ?? 0) === h + 1) return edge;
+  for (const [edge, di, dj] of EDGES) if (heightAt(island, i + di, j + dj) === h + 1) return edge;
   return null;
 }
 
+/** A ramp up to two neighbours at once, the edges either side of this corner: an inside corner. */
+export function rampInside(island: IslandLayout, i: number, j: number): Corner | null {
+  const cell = cellAt(island, i, j);
+  if (!cell?.ramp || !turnsCorners(cell.ground)) return null;
+  const up = (cell.height ?? 0) + 1;
+  for (const [corner, a, b] of CORNERS) if (heightAt(island, i + STEP[a][0], j + STEP[a][1]) === up && heightAt(island, i + STEP[b][0], j + STEP[b][1]) === up) return corner;
+  return null;
+}
+
+/** A ramp with no neighbour a block up, rising to the cell across this corner: an outside corner. */
+export function rampOutside(island: IslandLayout, i: number, j: number): Corner | null {
+  const cell = cellAt(island, i, j);
+  if (!cell?.ramp || !turnsCorners(cell.ground) || rampDirection(island, i, j)) return null;
+  const up = (cell.height ?? 0) + 1;
+  for (const [corner, a, b] of CORNERS) if (heightAt(island, i + STEP[a][0] + STEP[b][0], j + STEP[a][1] + STEP[b][1]) === up) return corner;
+  return null;
+}
+
+/** How far up a slope towards `edge` (u, v) is, 0 to 1, in cell units from the cell's own corner. */
+const rise = (edge: Edge, fu: number, fv: number) => (edge === "nw" ? 1 - fu : edge === "ne" ? 1 - fv : edge === "se" ? fu : fv);
+
 /** Ground height, in blocks, at (u, v) in cell units, inside cell (i, j):
- * the cell's height, or on a ramp, a straight climb to the next block. */
+ * the cell's height, or on a ramp, a climb to the next block: straight, or
+ * round a corner as the pack draws it. */
 export function surfaceHeight(island: IslandLayout, i: number, j: number, u: number, v: number): number {
-  const h = cellAt(island, i, j)?.height ?? 0;
+  const h = heightAt(island, i, j);
   const dir = rampDirection(island, i, j);
-  if (!dir) return h;
+  const corner = dir ? rampInside(island, i, j) : rampOutside(island, i, j);
+  if (!dir && !corner) return h;
   const [fu, fv] = [Math.min(1, Math.max(0, u - i)), Math.min(1, Math.max(0, v - j))];
-  return h + { nw: 1 - fu, ne: 1 - fv, se: fu, sw: fv }[dir];
+  if (!corner) return h + rise(dir!, fu, fv);
+  const [, a, b] = cornerEdges(corner);
+  // Inside, the higher of the two slopes; outside, only the corner itself is up.
+  return h + (dir ? Math.max : Math.min)(rise(a, fu, fv), rise(b, fu, fv));
 }
 
 /** Ground a blob can ever be on, standing or passing through: not water, not
@@ -288,7 +335,9 @@ const cellOf = (size: number, p: GroundPoint) =>
 
 /** Whether a blob may step directly from one orthogonally adjacent cell to
  * another: neither is water (bar a bridge), and any height difference is bridged by a ramp
- * climbing the right way (see `rampDirection`) — never a bare cliff. */
+ * climbing the right way (see `rampDirection`) — never a bare cliff. A ramp
+ * round an inside corner is still walked up its first side only: the garden
+ * every client lays out stays the same. */
 // Called millions of times while an island is laid out and routed: no temporary arrays in here.
 export function canStep(island: IslandLayout, i1: number, j1: number, i2: number, j2: number): boolean {
   const a = cellAt(island, i1, j1);

@@ -123,6 +123,7 @@ export const en = {
     raise: "Raise",
     lower: "Lower",
     ramp: "Ramp",
+    bridge: "Bridge",
     /** "Snowy tree 1": a kind of decor, the ground it's made for if any, and its number. */
     decor: (family: DecorFamily, ground: DecorGround | null, n: string) =>
       capital(`${ground ? { snow: "snowy ", dirt: "dirt ", sand: "sand " }[ground] : ""}${family} ${n}`),

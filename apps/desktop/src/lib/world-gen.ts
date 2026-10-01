@@ -123,8 +123,8 @@ export function gardenIsland(size: number): IslandLayout {
       c.ground = "road";
     }
 
-  // A river from the mountain's foot down to the sea, at ground level (the
-  // pack's river pieces don't climb). It meanders but always heads out.
+  // A river from the mountain's foot down to the sea, at ground level. It
+  // meanders but always heads out.
   // It starts at the mountain's foot on the screen's left, well clear of the village.
   let [ri, rj] = [Math.round(half + peak.x), Math.round(half + peak.y + peak.r)];
   // Its cells in order, with whether a road ran there before it.
@@ -198,7 +198,8 @@ export function gardenIsland(size: number): IslandLayout {
     const candidates: number[] = [];
     for (let n = 0; n < size * size; n++) {
       const c = cells[n]!;
-      if (c.ramp || !canRamp(c.ground)) continue;
+      // A river is never walked: a slope of it would lead nowhere.
+      if (c.ramp || !canRamp(c.ground) || c.ground === "river") continue;
       const i = n % size;
       const j = (n - i) / size;
       const h = c.height ?? 0;

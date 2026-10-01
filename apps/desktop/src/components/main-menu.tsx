@@ -1,8 +1,10 @@
 import { Blobatar } from "@blobatar/react";
 import { Play, Power, Settings, Trees, UserPlus, WifiOff } from "lucide-react";
 import type { ReactNode } from "react";
-import cloudLarge from "@/assets/iso/cloud-large.png";
-import cloudSmall from "@/assets/iso/cloud-small.png";
+import cloudSmall from "@/assets/iso/cloud-1.png";
+import cloudMedium from "@/assets/iso/cloud-3.png";
+import cloudLarge from "@/assets/iso/cloud-5.png";
+import cloudLargest from "@/assets/iso/cloud-7.png";
 import island from "@/assets/menu-island.png";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/i18n";
@@ -15,9 +17,9 @@ const STACK = ["mochi", "land"];
 // (% of the height), how big (% of the width), how slow (s).
 const CLOUDS = [
   { src: cloudLarge, top: 3, width: 22, duration: 95, delay: -30 },
-  { src: cloudSmall, top: 12, width: 13, duration: 70, delay: -55 },
-  { src: cloudLarge, top: 80, width: 18, duration: 120, delay: -90 },
-  { src: cloudSmall, top: 88, width: 11, duration: 80, delay: -10 },
+  { src: cloudMedium, top: 12, width: 13, duration: 70, delay: -55 },
+  { src: cloudLargest, top: 80, width: 18, duration: 120, delay: -90 },
+  { src: cloudSmall, top: 88, width: 9, duration: 80, delay: -10 },
 ];
 
 /**
