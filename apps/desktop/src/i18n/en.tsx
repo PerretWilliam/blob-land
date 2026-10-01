@@ -111,6 +111,7 @@ export const en = {
     nextIsland: "Next island",
     yourIsland: "Your island",
     island: (n: number) => `Island ${n}`,
+    worldClock: (time: string) => `World time: ${time} UTC`,
     blobs: (n: number) => (n === 1 ? "1 blob" : `${n} blobs`),
     home: "Home",
   },
@@ -306,6 +307,23 @@ export const en = {
     confirmDelete: "Delete it for good",
     cancel: "Cancel",
     languageText: "The language Blob Land speaks. More are on the way.",
+  },
+  // The dev panel (dev builds only), spoken like the rest.
+  dev: {
+    title: "Dev",
+    timeSpeed: "Time speed",
+    sky: "Sky",
+    auto: "auto",
+    reset: "reset",
+    blobSize: (x: string) => `Blob size ${x}x`,
+    reducedMotion: "Reduced motion",
+    resetKnobs: "Reset knobs",
+    resetEverything: "Reset everything",
+    confirmReset: "Wipe the garden's database and this device's blob and island, then seed a new garden?",
+    apiRefused: "The API refused: is DEV_TOOLS=1 set in apps/api/.env?",
+    timeline: (blobs: number, none: number, past: number, ahead: string) => `${blobs} blobs · ${none} without timeline · ${past} past its end · least ahead ${ahead}`,
+    minutes: (n: number) => `${n} min`,
+    notAvailable: "n/a",
   },
 };
 

@@ -209,6 +209,8 @@ export default function App() {
     void saveState(next);
     setAppState(next);
     setJoining(false);
+    // Joined to be there: straight to the garden, not back to where it was asked from.
+    setPlaying("garden");
   }
 
   // One identity for both: the private blob and its garden sprout.

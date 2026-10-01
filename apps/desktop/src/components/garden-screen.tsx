@@ -2,6 +2,7 @@ import { activityLog, gardenSize, segmentAt } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
+  Clock,
   DoorOpen,
   ChevronDown,
   ChevronLeft,
@@ -336,6 +337,8 @@ export function GardenScreen({
         </div>
       ) : null}
 
+      {inGarden ? <WorldClock at={gardenNow} /> : null}
+
       {inGarden && regions && regions.list.length > 1 ? <RegionSwitcher regions={regions} onVisit={onVisit} /> : null}
 
       {panel === "journal" ? <JournalPanel segments={life.segments} name={localPseudo} now={now} onClose={() => setPanel(null)} /> : null}
@@ -419,6 +422,17 @@ function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["s
   );
 }
 
+/** The garden's time, UTC, the same for everyone: top centre, with the island switcher just under it. */
+function WorldClock({ at }: { at: number }) {
+  const t = useT();
+  const time = new Intl.DateTimeFormat(language(), { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }).format(at);
+  return (
+    <p aria-label={t.game.worldClock(time)} title={t.game.worldClock(time)} className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 toon px-3 py-1.5 text-sm font-medium tabular-nums">
+      <Clock className="size-4" /> {time} <span className="text-muted-foreground">UTC</span>
+    </p>
+  );
+}
+
 /** The garden's islands, one per region: step through them, and back home. */
 function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScreenProps["regions"]>; onVisit: (region: number) => void }) {
   const { list, region, home } = regions;
@@ -429,7 +443,7 @@ function RegionSwitcher({ regions, onVisit }: { regions: NonNullable<GardenScree
   return (
     <nav
       aria-label={t.game.islands}
-      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 toon p-1.5"
+      className="absolute top-16 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 toon p-1.5"
     >
       <Button variant="ghost" size="icon-sm" aria-label={t.game.previousIsland} disabled={!prev} onClick={() => prev && onVisit(prev.region)}>
         <ChevronLeft />
