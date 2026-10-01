@@ -88,7 +88,7 @@ export function DevPanel({ time, garden, onReset }: { time: () => number; garden
 
 /** What the garden's timelines hold against the clock: where a stall shows (blobs out of timeline, or with none). */
 function Timeline({ blobs, now }: { blobs: GardenBlob[]; now: number }) {
-  const ends = blobs.map((b) => b.segments.at(-1)?.end ?? -Infinity);
+  const ends = blobs.map((b) => b.segments[b.segments.length - 1]?.end ?? -Infinity);
   const none = blobs.filter((b) => b.segments.length === 0).length;
   const out = ends.filter((e) => e < now).length;
   const ahead = Math.round((Math.min(...ends) - now) / 60_000);
