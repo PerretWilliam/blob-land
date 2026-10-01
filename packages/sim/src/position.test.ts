@@ -81,4 +81,17 @@ describe("legIn", () => {
     expect(far).toBeGreaterThan(mid);
     expect(far).toBeLessThan(8 * 60);
   });
+
+  it("spreads a long explore's stops over the way, so no leg dashes across a big map", () => {
+    const explore: Segment = { start: T0, end: T0 + 40 * 60_000, activity: "explore", expression: "idle", x: 0.9, y: 0.9, rng: 42, with: null, detail: null };
+    const from = { x: 0.1, y: 0.1 };
+    const legs = Math.round((explore.end - explore.start) / 45_000);
+    let longest = 0;
+    for (let k = 0; k < legs; k++) {
+      const { from: a, to: b } = legIn(explore, from, explore.start + (k + 0.5) * 45_000, undefined, 16);
+      longest = Math.max(longest, Math.hypot(b.x - a.x, b.y - a.y));
+    }
+    // The whole way is 1.13: a leg is its share of it, and a wander of at most 1 / zoom either way.
+    expect(longest).toBeLessThan(0.15);
+  });
 });

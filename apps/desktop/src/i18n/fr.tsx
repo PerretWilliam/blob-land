@@ -44,6 +44,7 @@ export const fr: Messages = {
     garden: "Le jardin",
     join: "Rejoindre le jardin",
     settings: "Paramètres",
+    quit: "Quitter",
     offline: `Pas de connexion${nb}: le jardin a besoin d'internet. Ton île à toi continue de vivre hors ligne.`,
   },
 
@@ -97,6 +98,7 @@ export const fr: Messages = {
     news: "Nouvelles du jardin",
     settings: "Paramètres",
     mainMenu: "Menu principal",
+    quit: "Quitter le jeu",
     edit: "Modifier l'île",
     stopEditing: "Terminer",
     notSaved: "Pas enregistré.",

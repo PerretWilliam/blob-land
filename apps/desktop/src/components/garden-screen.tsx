@@ -15,6 +15,7 @@ import {
   Network,
   Newspaper,
   Pencil,
+  Power,
   RotateCcw,
   Settings,
   Trees,
@@ -33,6 +34,7 @@ import { journalLine, language, listNames, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
 import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import type { LocalLife } from "@/lib/life";
+import { canQuit, quit } from "@/lib/quit";
 import { useGardenIsland } from "@/lib/use-garden-island";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
 import { usePrefersReducedMotion } from "@/lib/motion";
@@ -171,6 +173,7 @@ export function GardenScreen({
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
         gardenLayout && <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={atHome ? account.seed : undefined}
+          cardHidden={panel === "relations"}
           clock={() => gardenTime(gardenClock)}
           onShowRelations={(seed, name) => {
             setRelationsOf({ seed, name });
@@ -183,6 +186,7 @@ export function GardenScreen({
           blobs={privateBlobs}
           reducedMotion={reducedMotion}
           layout={island}
+          cardHidden={panel === "relations"}
           onCellPaint={editing ? (n) => onIslandChange(paintCell(island, n, tool)) : undefined}
         />
       )}
@@ -275,6 +279,11 @@ export function GardenScreen({
             <MenuItem icon={<DoorOpen />} onClick={onMainMenu}>
               {t.game.mainMenu}
             </MenuItem>
+            {canQuit ? (
+              <MenuItem icon={<Power />} onClick={() => void quit()}>
+                {t.game.quit}
+              </MenuItem>
+            ) : null}
             {inGarden ? null : (
               <MenuItem
                 icon={<Pencil />}

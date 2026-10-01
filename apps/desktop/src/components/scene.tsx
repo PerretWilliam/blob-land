@@ -1,4 +1,4 @@
-import { daylight, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Segment, type Sex } from "@blob-land/sim";
+import { alongPath, daylight, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Route, type Segment, type Sex } from "@blob-land/sim";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { Button } from "@/components/ui/button";
 import { AuraFx, InteractionFx, momentAt, type Aura } from "@/components/interaction-fx";
 import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
-import { cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
+import { canWalkStraight, cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
 import { useInView } from "@/lib/motion";
 import { countryName, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
@@ -63,6 +63,8 @@ export interface SceneProps {
   clock?: () => number;
   /** Shows a "See relations" button on a blob's ID card. */
   onShowRelations?: (seed: string, name: string) => void;
+  /** Hides the ID card of the blob followed (a panel is taking its place); the blob stays followed. */
+  cardHidden?: boolean;
   /** On a map too big to show whole, the blob the camera starts on. */
   startAt?: string;
 }
@@ -87,7 +89,7 @@ const JUMP_SPEED = 0.3 / 1000;
 // Walk cycle: hops per second while moving, and how fast the gait fades in/out.
 const HOP_HZ = 2.4;
 const GAIT_EASE_S = 0.25;
-// Below this ground speed (units/s) a blob counts as standing still: it's
+// Below this speed (units/s, on a small island's scale) a blob counts as standing still: it's
 // where the position easing's long tail ends, not a real step.
 const WALK_SPEED = 0.006;
 // Above this speed a blob hops; below it waddles. 99% of a stroll stays under
@@ -98,6 +100,10 @@ const FOCUS_ZOOM = 2;
 // On a big map, following a blob shows about this many tiles across.
 const FOCUS_TILES = 6;
 const CAMERA_EASE_S = 0.45;
+// Letting go of a blob zooms out to this share of the followed zoom.
+const UNFOLLOW_ZOOM = 0.5;
+// Zooming in starts once what's left to pan is under 1 / this of the screen's diagonal.
+const ZOOM_AFTER_PAN = 3;
 // The outline around a blob under the pointer, focused or followed, in screen px.
 const OUTLINE_PX = 2;
 
@@ -118,27 +124,6 @@ const STARS = [
   [8, 12], [17, 30], [26, 8], [38, 22], [47, 5], [55, 34], [63, 14], [72, 27], [81, 9], [90, 20], [95, 38], [33, 40],
 ];
 
-/** How far along a `findPath` walk a blob has got at progress `e` in [0, 1]:
- * arc-length along the route, not a straight-line lerp, so a walk bends
- * around cliffs and water instead of cutting through them. */
-function alongPath(path: GroundPoint[], e: number): GroundPoint {
-  if (path.length < 2) return path[0] ?? { x: 0.5, y: 0.5 };
-  const lens = path.slice(1).map((p, k) => Math.hypot(p.x - path[k]!.x, p.y - path[k]!.y));
-  const total = lens.reduce((a, b) => a + b, 0);
-  if (total === 0) return path[path.length - 1]!;
-  let left = e * total;
-  for (let k = 0; k < lens.length; k++) {
-    const len = lens[k]!;
-    if (left <= len || k === lens.length - 1) {
-      const [a, b] = [path[k]!, path[k + 1]!];
-      const f = len === 0 ? 0 : Math.min(1, left / len);
-      return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
-    }
-    left -= len;
-  }
-  return path[path.length - 1]!;
-}
-
 // Free to wander off with a partner: not asleep, not busy with someone else.
 const FREE = new Set<Activity>(["explore", "rest", "discover"]);
 
@@ -153,10 +138,17 @@ type Target = GroundPoint & { comingToMeet?: boolean };
 export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]))): Target[] {
   const zoom = walkZoom(layout.size);
   const gap = PAIR_GAP / zoom;
+  const route: Route = (a, b) => findPath(layout, a, b);
   const ps = blobs.map((b): Target => {
     // Each to its own nest at night.
     const home = homeNest(layout, b.seed, b.partner);
-    const snap = (p: GroundPoint) => snapToGround(layout, p, home);
+    const snap = (p: GroundPoint, from?: GroundPoint) => {
+      const to = snapToGround(layout, p, home);
+      if (!from) return to;
+      // An explore's stop is one a straight walk reaches: a blob out for a stroll
+      // doesn't go the long way round a lake or along a cliff.
+      return canWalkStraight(layout, from, to) ? to : from;
+    };
     const endOf = (seg: Segment) => endPoint(seg, segmentsOf, snap, zoom);
     const at = segmentAt(b.segments, t, snap);
     if (!at) return { x: 0.5, y: 0.5 };
@@ -164,7 +156,7 @@ export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, seg
     const before = b.segments[b.segments.indexOf(at.seg) - 1];
     const start = before ? endOf(before) : at.from;
     const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, segmentsOf, snap, zoom) : null;
-    const { from, to, e } = legIn(at.seg, start, t, spot ? () => spot : snap, zoom);
+    const { from, to, e } = legIn(at.seg, start, t, spot ? () => spot : snap, zoom, route);
     return { ...alongPath(findPath(layout, from, to), e), comingToMeet: spot !== null && !allThere(layout, at.seg, b.segments, t, segmentsOf, zoom) };
   });
   const index = new Map(blobs.map((b, i) => [b.seed, i]));
@@ -202,7 +194,7 @@ function allThere(layout: IslandLayout, seg: Segment, mine: Segment[], t: number
     const own = i === 0 ? mine : segmentsOf.get(seg.with![i - 1]!)!;
     const before = own[own.indexOf(x) - 1];
     const from = before ? endPoint(before, segmentsOf, snap, zoom) : snap({ x: x.x, y: x.y });
-    return x.start + walkMs(x, from, meetingSpot(x, segmentsOf, snap, zoom), zoom) <= t;
+    return x.start + walkMs(x, from, meetingSpot(x, segmentsOf, snap, zoom), zoom, (a, b) => findPath(layout, a, b)) <= t;
   });
 }
 
@@ -226,7 +218,7 @@ function meetingSpot(seg: Segment, segmentsOf: Map<string, Segment[]>, snap: (p:
   return { x: moved.x + (seg.x - mid.x) / zoom, y: moved.y + (seg.y - mid.y) / zoom };
 }
 
-export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations, startAt }: SceneProps) {
+export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations, cardHidden, startAt }: SceneProps) {
   const t = useT();
   const tiles = layout.size;
   // Fitting the whole map is zoom 1; how far in the camera starts, and follows a blob.
@@ -304,6 +296,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   const focused = useRef<string | null>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const camera = useRef<{ x: number; y: number; z: number } | null>(null);
+  // Whether the camera was following a blob last frame.
+  const following = useRef(false);
   useEffect(() => {
     if (!selected) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSelected(null);
@@ -477,8 +471,13 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const seed = selectedRef.current;
     const p = seed ? shown.current.get(seed) : undefined;
     let target: { x: number; y: number; z: number };
-    if (p && bySeedRef.current.has(seed!)) target = { ...headOf(p), z: focusZoom };
-    else {
+    if (p && bySeedRef.current.has(seed!)) {
+      target = { ...headOf(p), z: focusZoom };
+      following.current = true;
+    } else {
+      // Let go of a blob: back off a little from where the camera is, not all the way to where it came from.
+      if (following.current && camera.current) view.current = { ...camera.current, z: camera.current.z * UNFOLLOW_ZOOM };
+      following.current = false;
       if (!view.current) {
         const start = startAt ? shown.current.get(startAt) : undefined;
         view.current = start ? { ...headOf(start), z: baseZoom } : { x: w / 2, y: h / 2, z: baseZoom };
@@ -489,7 +488,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     // Easing never quite arrives: settle once what's left is a twentieth of a
     // pixel on screen, so a camera at rest stops redrawing the world.
     const close = Math.hypot(target.x - c.x, target.y - c.y) * c.z < 0.05 && Math.abs(target.z - c.z) / c.z < 1e-4;
-    const next = close ? target : { x: c.x + (target.x - c.x) * kc, y: c.y + (target.y - c.y) * kc, z: c.z + (target.z - c.z) * kc };
+    // Zooming in waits for the pan: from far off, the camera first travels to the
+    // target, then closes in on it, instead of zooming where it stands.
+    const toPan = (Math.hypot(target.x - c.x, target.y - c.y) * c.z) / Math.hypot(w, h);
+    const kz = kc < 1 && target.z > c.z ? kc * Math.max(0, 1 - toPan * ZOOM_AFTER_PAN) : kc;
+    const next = close ? target : { x: c.x + (target.x - c.x) * kc, y: c.y + (target.y - c.y) * kc, z: c.z + (target.z - c.z) * kz };
     camera.current = next;
     // Always: the world may have come up after the camera settled.
     worldRef.current?.setCamera(next.z * s, w / 2 + (left - next.x) * next.z, h / 2 + (top - next.y) * next.z);
@@ -662,6 +665,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   function steer(change: (v: { x: number; y: number; z: number }) => { x: number; y: number; z: number }) {
     const from = steerFrom();
     if (!from) return;
+    following.current = false;
     if (selectedRef.current) setSelected(null);
     view.current = clampView(change({ ...from }));
     if (reducedMotion) applyCamera(1);
@@ -805,11 +809,13 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           // Screen-space direction: +x on screen is ground (x - y).
           const [dx, dy] = [p.x - prev.x, p.y - prev.y];
           const dist = Math.hypot(dx, dy);
-          const walking = dist / dt > WALK_SPEED;
+          // Per tile, like the walks themselves (see walkZoom): a stroll across a big island is as slow as one across a small one.
+          const pace = (dist / dt) * walkZoom(layoutRef.current.size);
+          const walking = pace > WALK_SPEED;
           const g = gait.current.get(b.seed) ?? { phase: 0, walk: 0, hop: 0, lean: 0 };
           g.walk += ((walking ? 1 : 0) - g.walk) * kGait;
           // Only change gait while moving, so a stop ends the way it started.
-          if (walking) g.hop += ((dist / dt > HOP_SPEED ? 1 : 0) - g.hop) * kGait;
+          if (walking) g.hop += ((pace > HOP_SPEED ? 1 : 0) - g.hop) * kGait;
           g.lean += ((walking ? ((dx - dy) / dist) * 5 : 0) - g.lean) * kGait;
           // Keep the gait going while fading out, so the last hop lands instead of freezing.
           if (g.walk > 0.01) g.phase += dt * Math.PI * HOP_HZ;
@@ -989,7 +995,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       {/* The selected blob's ID card: everything known about it, at a glance. */}
       {(() => {
         const blob = bySeed.get(selected ?? "");
-        if (!blob) return null;
+        if (!blob || cardHidden) return null;
         const mood = moodOf(blob.expression);
         return (
           <aside
@@ -1058,8 +1064,6 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
             {onShowRelations ? (
               <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => {
                   onShowRelations(blob.seed, blob.label);
-                  // The relations panel takes over from the card, on the same side.
-                  setSelected(null);
                 }}
               >
                 <HeartHandshake />

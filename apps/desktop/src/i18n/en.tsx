@@ -44,6 +44,7 @@ export const en = {
     garden: "The garden",
     join: "Join the garden",
     settings: "Settings",
+    quit: "Quit",
     offline: "No connection: the garden needs the internet. Your own island keeps living offline.",
   },
 
@@ -98,6 +99,7 @@ export const en = {
     news: "Garden news",
     settings: "Settings",
     mainMenu: "Main menu",
+    quit: "Quit the game",
     edit: "Edit island",
     stopEditing: "Stop editing",
     notSaved: "Not saved.",

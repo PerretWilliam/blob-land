@@ -1,11 +1,12 @@
 import { Blobatar } from "@blobatar/react";
-import { Play, Settings, Trees, UserPlus, WifiOff } from "lucide-react";
+import { Play, Power, Settings, Trees, UserPlus, WifiOff } from "lucide-react";
 import type { ReactNode } from "react";
 import cloudLarge from "@/assets/iso/cloud-large.png";
 import cloudSmall from "@/assets/iso/cloud-small.png";
 import island from "@/assets/menu-island.png";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/i18n";
+import { canQuit, quit } from "@/lib/quit";
 
 // The two blobs under yours, as on the app's icon (scripts/brand.mjs).
 const STACK = ["mochi", "land"];
@@ -118,6 +119,11 @@ export function MainMenu({
         <Button size="lg" variant="outline" onClick={onSettings}>
           <Settings /> {t.menu.settings}
         </Button>
+        {canQuit ? (
+          <Button size="lg" variant="outline" onClick={() => void quit()}>
+            <Power /> {t.menu.quit}
+          </Button>
+        ) : null}
         {!online ? (
           <p className="flex items-start gap-2 rounded-xl border-2 border-ink bg-card px-3 py-2 text-sm font-medium" role="status">
             <WifiOff className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
