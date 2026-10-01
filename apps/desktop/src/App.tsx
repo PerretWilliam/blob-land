@@ -31,7 +31,8 @@ import { loadState, resetState, saveState, type AppState } from "@/lib/state";
 
 const PING_INTERVAL_MS = 60_000;
 // A sped-up dev garden is lived only minutes ahead of now, in real time: refresh often.
-const FAST_GARDEN_REFRESH_MS = 10_000;
+// The server lives the garden this far ahead (the API's LOOKAHEAD): a refresh must land well within it, in garden time.
+const GARDEN_LOOKAHEAD_MS = 30 * 60_000;
 // Played timeline kept per blob, in garden time: what the API sends in a full answer.
 const SEGMENT_HISTORY_MS = 15 * 60_000;
 // How often the private blob's life is lived a bit further and saved.
@@ -146,7 +147,9 @@ export default function App() {
     return () => clearInterval(id);
   }, [appState?.localSeed, speed]);
 
-  const fast = gardenClock.rate > 1;
+  // Real time between refreshes: a minute, or at a faster rate a third of the lookahead (2 to 10 s).
+  const rate = gardenClock.rate;
+  const refreshEvery = rate > 1 ? Math.min(10_000, Math.max(2_000, GARDEN_LOOKAHEAD_MS / (3 * rate))) : PING_INTERVAL_MS;
   // Presence ping + garden refresh while the app is active — only once an
   // account exists, since /garden and /me/ping both require a token.
   useEffect(() => {
@@ -158,9 +161,15 @@ export default function App() {
       ping(token)
         .then(() => refreshGarden(token))
         .catch(() => {});
-    }, fast ? FAST_GARDEN_REFRESH_MS : PING_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [appState?.account?.token, refreshGarden, fast, visiting]);
+    }, refreshEvery);
+    // A hidden window's timers are throttled: catch up the moment it's back.
+    const back = () => document.visibilityState === "visible" && refreshGarden(token).catch(() => {});
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", back);
+    };
+  }, [appState?.account?.token, refreshGarden, refreshEvery, visiting]);
 
   // Dev panel: the server runs the garden faster, then the answers follow at once.
   async function handleGardenSpeed(scale: number) {
