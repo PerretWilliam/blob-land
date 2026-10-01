@@ -706,6 +706,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       const [px, py] = [v.x + (sx - w / 2) / v.z, v.y + (sy - h / 2) / v.z];
       return { x: px - (sx - w / 2) / z, y: py - (sy - h / 2) / z, z };
     });
+    // Straight to it: easing x, y and the zoom apart would curve the point under the pointer off its place.
+    applyCamera(1);
   }
   // Wheel (or a trackpad's scroll and pinch) zooms. Listened to natively:
   // React's wheel listener is passive, so it can't keep the webview from
