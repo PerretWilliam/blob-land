@@ -13,6 +13,7 @@ import { devClock } from "./schema";
  */
 // Once the dev panel has changed the scale, the anchored clock stays in charge, even back at 1x: going back to real time would jump the garden back.
 let scaledLive = false;
+const envScale = config.timeScale;
 
 /** Local dev only (the /__dev/time-scale route): changes how fast the garden runs, from now on. */
 export async function setTimeScale(scale: number): Promise<number> {
@@ -20,6 +21,12 @@ export async function setTimeScale(scale: number): Promise<number> {
   config.timeScale = scale;
   scaledLive = true;
   return gardenNow();
+}
+
+/** Local dev only: back to the scale .env says, on real time. */
+export function resetTimeScale() {
+  config.timeScale = envScale;
+  scaledLive = false;
 }
 
 export async function gardenNow(scale = config.timeScale): Promise<number> {

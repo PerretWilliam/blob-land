@@ -51,6 +51,8 @@ interface Answer {
 
 // This server's views, by region; the oldest are dropped past this many.
 const views = new Map<number, View>();
+/** Dev reset: what was cached no longer exists. */
+export const forgetViews = () => views.clear();
 const MAX_VIEWS = 200;
 
 const publicJson = ({ owner: _owner, visible: _visible, ...blob }: ViewBlob) => JSON.stringify(blob);

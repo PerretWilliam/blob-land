@@ -12,7 +12,7 @@ const GARDEN_SPEEDS = [1, 5, 20, 100];
  * translated, since no player sees it. In the garden, `garden` says its speed
  * and asks the server to change it; the private island's runs on this clock.
  */
-export function DevPanel({ time, garden }: { time: () => number; garden?: { rate: number; set?: (scale: number) => Promise<void> } }) {
+export function DevPanel({ time, garden, onReset }: { time: () => number; garden?: { rate: number; set?: (scale: number) => Promise<void> }; onReset?: () => Promise<void> }) {
   const knobs = useKnobs();
   const [open, setOpen] = useState(true);
   const [shown, setShown] = useState(time);
@@ -63,8 +63,21 @@ export function DevPanel({ time, garden }: { time: () => number; garden?: { rate
             <input type="checkbox" checked={knobs.reducedMotion} onChange={(e) => setKnobs({ reducedMotion: e.target.checked })} /> Reduced motion
           </label>
           <button type="button" className="underline self-start" onClick={resetKnobs}>
-            Reset
+            Reset knobs
           </button>
+          {onReset && (
+            <button
+              type="button"
+              className="toon-input px-2 py-0.5 font-semibold"
+              onClick={() => {
+                if (!window.confirm("Wipe the garden's database and this device's blob and island, then seed a new garden?")) return;
+                setFailed(false);
+                onReset().catch(() => setFailed(true));
+              }}
+            >
+              Reset everything
+            </button>
+          )}
         </div>
       )}
     </aside>

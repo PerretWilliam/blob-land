@@ -12,6 +12,7 @@ import {
   deleteAccount,
   gardenTime,
   getGarden,
+  resetGarden,
   setGardenSpeed,
   ping,
   setCountry,
@@ -26,7 +27,7 @@ import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout }
 import { advanceLife, newLife } from "@/lib/life";
 import { useOnline } from "@/lib/online";
 import { DEV, devNow, useKnobs } from "@/lib/dev";
-import { loadState, saveState, type AppState } from "@/lib/state";
+import { loadState, resetState, saveState, type AppState } from "@/lib/state";
 
 const PING_INTERVAL_MS = 60_000;
 // A sped-up dev garden is lived only minutes ahead of now, in real time: refresh often.
@@ -35,6 +36,8 @@ const FAST_GARDEN_REFRESH_MS = 10_000;
 const SEGMENT_HISTORY_MS = 15 * 60_000;
 // How often the private blob's life is lived a bit further and saved.
 const LIFE_TICK_MS = 60_000;
+// Blobs the dev panel's reset seeds the garden with.
+const DEV_SEED_BLOBS = 16;
 
 export default function App() {
   const [appState, setAppState] = useState<AppState | null>(null);
@@ -167,6 +170,13 @@ export default function App() {
     setGardenClock({ at: now, readAt: Date.now(), rate });
     known.current = null;
     await refreshGarden(token);
+  }
+
+  // Dev panel: back to a first start, on a freshly seeded garden.
+  async function handleReset() {
+    await resetGarden(DEV_SEED_BLOBS);
+    await Promise.all([resetState(), saveIsland(defaultIsland(ISLAND_SIZE))]);
+    window.location.reload();
   }
 
   function handlePseudoChosen(pseudo: string, identity: Identity) {
@@ -319,6 +329,7 @@ export default function App() {
         onVisit={(region) => setVisiting(region === regions?.home ? null : region)}
         gardenClock={gardenClock}
         onGardenSpeed={DEV ? handleGardenSpeed : undefined}
+        onReset={DEV ? handleReset : undefined}
         onJoinGarden={() => setJoining(true)}
         onSettings={() => setSettingsOpen(true)}
         island={island}

@@ -63,6 +63,8 @@ export interface GardenScreenProps {
   gardenClock: GardenClock;
   /** Dev: runs the garden `scale` times faster (the server does it). */
   onGardenSpeed?: (scale: number) => Promise<void>;
+  /** Dev: wipes everything, here and on the server, and seeds a garden. */
+  onReset?: () => Promise<void>;
   onJoinGarden: () => void;
   onSettings: () => void;
   /** The private island's layout — local only, edited here. */
@@ -90,6 +92,7 @@ export function GardenScreen({
   onVisit,
   gardenClock,
   onGardenSpeed,
+  onReset,
   onJoinGarden,
   onSettings,
   island,
@@ -200,7 +203,7 @@ export function GardenScreen({
         />
       )}
 
-      {DEV && <DevPanel time={inGarden ? gardenClockNow : devNow} garden={inGarden ? { rate: gardenClock.rate, set: onGardenSpeed } : undefined} />}
+      {DEV && <DevPanel time={inGarden ? gardenClockNow : devNow} garden={inGarden ? { rate: gardenClock.rate, set: onGardenSpeed } : undefined} onReset={onReset} />}
 
       <nav
         aria-label={t.game.menu}

@@ -108,6 +108,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const setGardenSpeed = (scale: number) =>
   request<{ now: number; rate: number }>("/__dev/time-scale", { method: "POST", body: JSON.stringify({ scale }) });
 
+/** Dev only: empties the garden's database and its clock, then seeds `count` blobs (the API needs DEV_TOOLS=1). */
+export const resetGarden = (count: number) => request<{ regions: number[] }>("/__dev/reset", { method: "POST", body: JSON.stringify({ count }) });
+
 /** Whether the garden's server answers at all (any answer will do). */
 export function reachable(): Promise<boolean> {
   return fetch(API_URL, { signal: AbortSignal.timeout(5_000) }).then(

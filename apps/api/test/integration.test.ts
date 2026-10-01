@@ -363,6 +363,14 @@ describe("security", () => {
     expect(res.status).toBe(400);
   });
 
+  it("resets the garden to a seeded blank slate", async () => {
+    const res = await call("/__dev/reset", { method: "POST", body: JSON.stringify({ count: 3 }) });
+    expect(res.status).toBe(200);
+    expect(await db.select().from(users)).toHaveLength(0);
+    expect(await db.select().from(blobs)).toHaveLength(3);
+    expect((await call("/__dev/reset", { method: "POST", body: JSON.stringify({ count: -1 }) })).status).toBe(400);
+  });
+
   it("refuses a nonsense garden speed", async () => {
     for (const scale of [0, -3, 5000, "fast"]) {
       const res = await call("/__dev/time-scale", { method: "POST", body: JSON.stringify({ scale }) });

@@ -39,10 +39,13 @@ const STATE_FILE = "state.json";
 export async function loadState(): Promise<AppState | null> {
   if (!(await exists(STATE_FILE, { baseDir: BaseDirectory.AppData }))) return null;
   const text = await readTextFile(STATE_FILE, { baseDir: BaseDirectory.AppData });
-  return JSON.parse(text) as AppState;
+  return JSON.parse(text) as AppState | null;
 }
 
 export async function saveState(state: AppState): Promise<void> {
   await mkdir("", { baseDir: BaseDirectory.AppData, recursive: true }).catch(() => {});
   await writeTextFile(STATE_FILE, JSON.stringify(state, null, 2), { baseDir: BaseDirectory.AppData });
 }
+
+/** Dev reset: back to a first start (a file holding `null` reads as no state). */
+export const resetState = () => writeTextFile(STATE_FILE, "null", { baseDir: BaseDirectory.AppData });
