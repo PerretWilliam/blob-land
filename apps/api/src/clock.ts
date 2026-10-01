@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { config } from "./env";
-import { devClock } from "./schema";
+import { devClock, regions } from "./schema";
 
 /**
  * The garden's time. Real time, unless TIME_SCALE is set (local dev only, in
@@ -20,6 +20,9 @@ export async function setTimeScale(scale: number): Promise<number> {
   await gardenNow();
   config.timeScale = scale;
   scaledLive = true;
+  // Steps were set apart at the old speed: faster now, blobs would run out of
+  // timeline before the next one. Every region steps at once, on the new period.
+  await db.update(regions).set({ nextStepAt: Date.now() });
   return gardenNow();
 }
 

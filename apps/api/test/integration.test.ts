@@ -377,6 +377,13 @@ describe("security", () => {
       expect(res.status).toBe(400);
     }
   });
+
+  it("steps every region at once when the garden speeds up, before timelines run out", async () => {
+    await db.update(regions).set({ nextStepAt: Date.now() + 5 * 60_000 });
+    expect((await call("/__dev/time-scale", { method: "POST", body: JSON.stringify({ scale: 1000 }) })).status).toBe(200);
+    for (const r of await db.select({ at: regions.nextStepAt }).from(regions)) expect(r.at).toBeLessThanOrEqual(Date.now());
+    await call("/__dev/reset", { method: "POST", body: JSON.stringify({ count: 3 }) });
+  });
 });
 
 /**

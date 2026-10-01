@@ -333,11 +333,24 @@ function terrainOf(layout: IslandLayout, island: IslandGeometry): Map<string, Ch
     (a, b) => a.i + a.j - (b.i + b.j),
   );
   // Open sea (water all round) isn't drawn: the island floats in the sky
-  // with just a ring of shallows, however big the map around it.
-  const wet = (i: number, j: number) => {
-    const g = cellAt(layout, i, j)?.ground;
-    return !g || g === "water";
-  };
+  // with just a ring of shallows, however big the map around it. The sea is
+  // the water that reaches the map's edge: a lake inland is drawn whole.
+  const sea = new Uint8Array(tiles * tiles);
+  const flood: number[] = [];
+  layout.cells.forEach((c, n) => {
+    const [i, j] = [n % tiles, Math.floor(n / tiles)];
+    if (c.ground === "water" && (i === 0 || j === 0 || i === tiles - 1 || j === tiles - 1)) flood.push(n), (sea[n] = 1);
+  });
+  for (let head = 0; head < flood.length; head++) {
+    const n = flood[head]!;
+    for (const [, di, dj] of EDGES) {
+      const [a, b] = [(n % tiles) + di, Math.floor(n / tiles) + dj];
+      if (a < 0 || b < 0 || a >= tiles || b >= tiles || sea[b * tiles + a] || layout.cells[b * tiles + a]!.ground !== "water") continue;
+      sea[b * tiles + a] = 1;
+      flood.push(b * tiles + a);
+    }
+  }
+  const wet = (i: number, j: number) => !cellAt(layout, i, j) || sea[j * tiles + i] === 1;
   const openSea = (i: number, j: number) => {
     for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (!wet(i + di, j + dj)) return false;
     return true;

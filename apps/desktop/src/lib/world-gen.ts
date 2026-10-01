@@ -4,19 +4,22 @@ import { canHoldDecor, canRamp, canStep, cellAt, EDGES, type DecorKind, type Isl
 /*
  * The public garden: one procedural island, the same on every client (it's
  * a pure function of its size, which the server sends — see gardenSize), so
- * nothing about the terrain is stored or sent. An ocean all round, a beach,
- * plains and woods with rolling hills, a small desert, a mountain with a snowy
- * top, a river from a frozen tarn down waterfalls to the sea, with footbridges,
- * culverts and a wide mouth, and a village clearing in the middle. Blobs
- * sleep in nests scattered over the island, a few to each.
+ * nothing about the terrain is stored or sent. Four roads leave the village
+ * in the middle for the sea, and each quarter between them is one biome: the
+ * mountain at the back, the desert on the right, the meadow in front and the
+ * forest on the left. They're laid out in fractions of the island, so each
+ * grows with it. Only the mountain rises, in terraces up to a snowy top with
+ * a frozen tarn; a road climbs it, and the river leaves the tarn down
+ * waterfalls, under the west road, through the forest and its lake to a wide
+ * mouth on the sea. A beach all round. Blobs sleep in nests, a few to each.
  */
 
-// Village clearing radius, in cells: grass and roads, no decor, a nest in the middle.
+// Village radius, in cells: a ring road round a green with a nest in the middle.
 const VILLAGE = 3;
 // How many blocks the mountain rises.
 const PEAK = 4;
 // A footbridge at least this often along the river, in cells.
-const BRIDGE_EVERY = 10;
+const BRIDGE_EVERY = 8;
 // Roughly how many blobs share a nest, on an island sized for its garden
 // (gardenSize gives about (side / 6)² blobs); and how far apart nests keep, in cells.
 const PER_NEST = 8;
@@ -55,207 +58,152 @@ const CACTI = family("cactus", 5);
 export function gardenIsland(size: number): IslandLayout {
   const rng = seededRng(0x61a4d3 ^ size);
   const pick = <T>(list: readonly T[]) => list[Math.floor(rng() * list.length)]!;
-  const [coast, forest, dry, hills, lakes] = [1, 2, 3, 4, 5].map(valueNoise) as ReturnType<typeof valueNoise>[];
+  const [coast, woods] = [1, 2].map(valueNoise) as ReturnType<typeof valueNoise>[];
   const half = size / 2;
+  const mid = Math.floor(half);
   // Centred coordinates, so the noise under a spot stays put when the map grows.
   const centred = (i: number, j: number) => [i + 0.5 - half, j + 0.5 - half] as const;
-  const inVillage = (i: number, j: number, margin = 0) => Math.max(...centred(i, j).map(Math.abs)) <= VILLAGE + margin;
-  // The mountain sits towards the back (top of the screen), the desert towards the right.
-  const peak = { x: -0.26 * size, y: -0.22 * size, r: Math.max(6, 0.24 * size) };
-  const desert = { x: 0.3 * size, y: -0.16 * size, r: 0.18 * size };
+  const inVillage = (i: number, j: number, margin = 0) => Math.max(Math.abs(i - mid), Math.abs(j - mid)) <= VILLAGE + margin;
+  // The roads run along row and column `mid`: the quarters between them are the biomes.
+  const biome = (i: number, j: number) => (i < mid ? (j < mid ? "mountain" : "forest") : j < mid ? "desert" : "meadow");
+  // The mountain fills the back quarter: rounded-square terraces T cells wide.
+  const peak = { x: -0.24 * size, y: -0.24 * size, r: Math.max(7, 0.22 * size) };
+  const T = Math.max(2, Math.round(peak.r / (PEAK + 1.5)));
 
-  const cells: IslandCell[] = [];
+  // > 0 is land: a round island with a ragged coast.
   const land: number[] = [];
-  // The plains' low hills, by cell: their sides slope all round.
-  const knolls = new Set<number>();
   for (let j = 0; j < size; j++)
     for (let i = 0; i < size; i++) {
       const [x, y] = centred(i, j);
       const d = Math.hypot(x, y) / half;
-      // > 0 is land: a round island with a ragged coast.
-      const l = 0.82 - d * d + (coast(x, y, 7) - 0.5) * 0.6;
-      land.push(l);
-      const bump = Math.max(0, 1 - Math.hypot(x - peak.x, y - peak.y) / peak.r);
-      let height = l > 0.15 ? Math.min(PEAK, Math.floor(bump * (PEAK + 0.9) * (0.85 + 0.3 * hills(x, y, 4)))) : 0;
-      // A few low hills out in the plains.
-      if (height === 0 && l > 0.3 && hills(x + 90, y, 5) > 0.72) {
-        height = 1;
-        knolls.add(cells.length);
-      }
-      let ground: IslandCell["ground"];
-      if (l <= 0) ground = "water";
-      else if (l < 0.13 && height === 0) ground = "sand";
-      else if (height >= 3) ground = "snow";
-      else if (height === 2) ground = forest(x, y, 3) > 0.5 ? "dirt" : "grass";
-      else if (Math.hypot(x - desert.x, y - desert.y) < desert.r + (dry(x, y, 4) - 0.5) * 6) ground = "sand";
-      else if (height === 0 && l > 0.3 && lakes(x, y, 5) > 0.78) ground = "water";
-      else ground = "grass";
-      cells.push(height && ground !== "water" ? { ground, height } : { ground });
+      land.push(0.82 - d * d + (coast(x, y, 7) - 0.5) * 0.45);
     }
+  // How many steps each cell is from the sea: the mountain comes down to it in terraces too.
+  const shore = new Int32Array(size * size).fill(-1);
+  const front: number[] = [];
+  land.forEach((l, n) => l <= 0 && front.push(n) && (shore[n] = 0));
+  for (let head = 0; head < front.length; head++) {
+    const n = front[head]!;
+    const [i, j] = [n % size, Math.floor(n / size)];
+    for (const [, di, dj] of EDGES) {
+      const [a, b] = [i + di, j + dj];
+      if (a < 0 || b < 0 || a >= size || b >= size || shore[b * size + a] !== -1) continue;
+      shore[b * size + a] = shore[n]! + 1;
+      front.push(b * size + a);
+    }
+  }
+  const heights = land.map((_, n) => {
+    const [i, j] = [n % size, Math.floor(n / size)];
+    if (biome(i, j) !== "mountain") return 0;
+    const [x, y] = centred(i, j);
+    const out = ((x - peak.x) ** 4 + (y - peak.y) ** 4) ** 0.25;
+    // Down to the ground short of the roads, the village and the beach, whatever the island's size.
+    const edge = Math.min(-x - 1, -y - 1, Math.max(-x, -y) - VILLAGE - 0.5, shore[n]! - 2);
+    return Math.max(0, Math.min(PEAK, Math.ceil((peak.r - out) / T), Math.ceil(edge / T)));
+  });
+  // Snow on the top two levels (just the top on a small island's low mountain), bare earth below.
+  const top = Math.max(...heights);
+  const cells: IslandCell[] = heights.map((height, n) => {
+    const l = land[n]!;
+    let ground: IslandCell["ground"];
+    if (l <= 0) ground = "water";
+    else if (height >= Math.max(2, top - 1)) ground = "snow";
+    else if (height >= 2) ground = "dirt";
+    else if ((l < 0.13 && !height) || biome(n % size, Math.floor(n / size)) === "desert") ground = "sand";
+    else ground = "grass";
+    return height ? { ground, height } : { ground };
+  });
   const layout: IslandLayout = { size, cells };
   const at = (i: number, j: number) => cellAt(layout, i, j);
   const neighbours = (i: number, j: number) => EDGES.map(([, di, dj]) => [i + di, j + dj] as const);
-
-  // No cliff taller than one block: carve every cell down to one above its lowest neighbour.
+  const sea = (i: number, j: number) => (land[j * size + i] ?? 0) <= 0;
   // (The loops below run over every cell many times: no temporary arrays in them.)
-  for (let changed = true; changed; ) {
-    changed = false;
-    for (let j = 0; j < size; j++)
-      for (let i = 0; i < size; i++) {
-        const c = at(i, j)!;
-        let low = Infinity;
-        for (const e of EDGES) low = Math.min(low, at(i + e[1], j + e[2])?.height ?? 0);
-        if ((c.height ?? 0) > low + 1) {
-          c.height = low + 1;
-          changed = true;
-        }
-      }
-  }
 
-  // The village: flat grass around the middle.
+  // A frozen tarn on the top: the highest two by two cells that are level,
+  // nearest the peak. Its far corner (pi, pj) is where the road arrives.
+  let [pi, pj] = [mid, mid];
+  for (let h = PEAK, best = Infinity; h > 0 && best === Infinity; h--)
+    for (let j = 1; j < size; j++)
+      for (let i = 1; i < size; i++) {
+        const block = [at(i - 1, j - 1), at(i, j - 1), at(i - 1, j), at(i, j)];
+        const far = Math.hypot(...centred(i, j).map((v, k) => v - (k ? peak.y : peak.x)));
+        if (block.every((c) => c?.height === h) && far < best) [best, pi, pj] = [far, i, j];
+      }
+  for (const [a, b] of [[pi - 1, pj - 1], [pi, pj - 1], [pi - 1, pj], [pi, pj]] as const) at(a, b)!.ground = "ice";
+
+  // The village: a green inside a ring road, and four roads from it to the sea.
   for (let j = 0; j < size; j++)
     for (let i = 0; i < size; i++) {
       if (!inVillage(i, j, 1)) continue;
       const c = at(i, j)!;
-      c.ground = "grass";
+      c.ground = Math.max(Math.abs(i - mid), Math.abs(j - mid)) === VILLAGE ? "road" : "grass";
       delete c.height;
     }
-  // Four roads out of it, through grass and sand, until they meet water or a
-  // slope, each with one jog sideways on the way: a bend each way.
-  const mid = Math.floor(half);
   const pave = (i: number, j: number) => {
     const c = at(i, j);
     if (!c || (c.ground !== "grass" && c.ground !== "sand") || c.height) return false;
     c.ground = "road";
     return true;
   };
-  for (const [, di, dj] of EDGES) {
-    let [i, j] = [mid + di, mid + dj];
-    for (let k = 2; k < VILLAGE + Math.max(12, size / 3); k++) {
-      [i, j] = [i + di, j + dj];
-      if (!pave(i, j)) break;
-      if (k === VILLAGE + 4) {
-        [i, j] = [i + dj, j + di];
-        if (!pave(i, j)) break;
-      }
-    }
+  for (const [, di, dj] of EDGES) for (let k = VILLAGE + 1; pave(mid + di * k, mid + dj * k); k++);
+  // The mountain road: off the back road, up the terraces to the tarn, a slope at each step.
+  for (let i = mid - 1; ; i--) {
+    const [c, next] = [at(i + 1, pj)!, at(i, pj)];
+    if (!next || next.ground === "ice" || next.ground === "water") break;
+    const rise = (next.height ?? 0) - (c.height ?? 0);
+    if (rise < 0 || rise > 1) break;
+    if (rise === 1) c.ramp = true;
+    next.ground = "road";
   }
 
-  // A river from a frozen tarn high on the mountain down to the sea. It
-  // keeps to the ground, falling a block at a time as waterfalls (a river
-  // falls on its own, see rampDirection), and meanders but always heads out.
-  // The tarn is on the mountain's flank on the screen's left, well clear of the village.
-  let [ri, rj] = [Math.round(half + peak.x), Math.round(half + peak.y + peak.r * 0.45)];
-  const tarn = at(ri, rj - 1);
-  if (tarn?.height) tarn.ground = "ice";
-  // Its cells in order, with whether a road ran there before it.
+  // The river, from the tarn straight down the mountain (each terrace a
+  // waterfall: a river falls on its own, see rampDirection) and under the
+  // west road, then meandering through the forest to the sea.
   const course: { i: number; j: number; road: boolean }[] = [];
-  const sea = (i: number, j: number) => land[j * size + i]! <= 0;
-  // After a fall or a road the river runs straight on, so the waterfall or the
-  // culvert opens at both ends.
-  let fell = null as readonly [number, number] | null;
+  const bend = Math.max(1, Math.round(0.05 * size));
+  const period = Math.max(3, 0.07 * size);
+  let [ri, rj] = [pi - 1, pj + 1];
+  const base = ri;
   for (let steps = 0; steps < size * 2; steps++) {
     const c = at(ri, rj);
     if (!c || sea(ri, rj)) break;
-    const h = c.height ?? 0;
-    // It runs on through any lake it meets.
-    if (c.ground !== "water") {
-      course.push({ i: ri, j: rj, road: c.ground === "road" });
-      c.ground = "river";
-    }
-    const out = Math.hypot(...centred(ri, rj));
-    const options = neighbours(ri, rj).filter(([a, b]) => {
-      const n = at(a, b);
-      const nh = n?.height ?? 0;
-      // Downhill or level; through a low hill of the plains, it cuts its way.
-      const fits = (nh <= h && nh >= h - 1) || (nh === h + 1 && knolls.has(b * size + a));
-      return n && (n.ground === "water" || (fits && n.ground !== "river" && n.ground !== "ice" && !inVillage(a, b, 2)));
-    });
-    if (!options.length) break;
-    // Mostly towards the front of the island, drifting outwards and now and
-    // then sideways; straight into the sea when it's next door.
-    const ahead: readonly [number, number] | null = fell;
-    const score = ([a, b]: readonly [number, number]): number =>
-      (sea(a, b) ? 9 : b - rj + 0.5 * (Math.hypot(...centred(a, b)) - out) + rng() * 1.4) + (ahead && a - ri === ahead[0] && b - rj === ahead[1] ? 20 : 0);
-    const [ni, nj]: readonly [number, number] = options.reduce((best: readonly [number, number], o) => (score(o) > score(best) ? o : best));
-    const next = at(ni, nj)!;
-    if ((next.height ?? 0) > h) {
-      if (h) next.height = h;
-      else delete next.height;
-    }
-    // Over a fall, or under a road, it carries straight on.
-    fell = (next.height ?? 0) < h || next.ground === "road" ? [ni - ri, nj - rj] : null;
-    [ri, rj] = [ni, nj];
+    course.push({ i: ri, j: rj, road: c.ground === "road" });
+    c.ground = "river";
+    delete c.ramp;
+    // Straight until past the road, then winding: sideways when off its line, else on.
+    const line = rj <= mid + 2 ? base : base + Math.round(bend * Math.sin((rj - mid - 2) / period));
+    if (line !== ri) ri += Math.sign(line - ri);
+    else rj++;
+    const next = at(ri, rj);
+    if (next && (next.height ?? 0) > (c.height ?? 0)) next.height = c.height;
   }
 
   // Down by the sea it widens: the last stretch gets a twin alongside.
   const twins = new Map<number, number>();
-  for (let k = Math.max(1, course.length - 7); k < course.length - 1; k++) {
+  for (let k = Math.max(1, course.length - 6); k < course.length - 1; k++) {
     const [prev, { i, j }, next] = [course[k - 1]!, course[k]!, course[k + 1]!];
-    if (prev.i !== next.i && prev.j !== next.j) continue;
-    // Beside the flow, always on the same side.
-    const [di, dj] = prev.i === next.i ? [1, 0] : [0, 1];
-    const twin = at(i + di, j + dj);
-    if (!twin || !canHoldDecor(twin.ground) || (twin.height ?? 0) !== (at(i, j)!.height ?? 0)) continue;
+    if (prev.i !== next.i) continue;
+    const twin = at(i + 1, j);
+    if (!twin || !canHoldDecor(twin.ground) || twin.height) continue;
     twin.ground = "river";
-    twins.set(k, (j + dj) * size + i + di);
+    twins.set(k, j * size + i + 1);
   }
 
-  // A lane from the village down to the river, across it over a culvert and
-  // on a little way: the shortest way over flat open land to the nearest
-  // straight stretch with a level bank either side.
-  const flat = (c: IslandCell | undefined) => c && (c.ground === "grass" || c.ground === "sand" || c.ground === "road") && !c.height;
-  const from = new Int32Array(size * size).fill(-2);
-  const dist = new Int32Array(size * size);
-  const lanes = [mid * size + mid];
-  from[mid * size + mid] = -1;
-  for (let head = 0; head < lanes.length; head++) {
-    const n = lanes[head]!;
-    for (const [a, b] of neighbours(n % size, Math.floor(n / size))) {
-      const m = b * size + a;
-      if (a < 0 || b < 0 || a >= size || b >= size || from[m] !== -2 || !flat(cells[m])) continue;
-      from[m] = n;
-      dist[m] = dist[n]! + 1;
-      lanes.push(m);
-    }
-  }
-  let lane: { k: number; bank: number; di: number; dj: number } | null = null;
-  course.forEach(({ i, j }, k) => {
-    const [prev, next] = [course[k - 1], course[k + 1]];
-    if (!prev || !next || twins.has(k) || (prev.i !== next.i && prev.j !== next.j) || at(i, j)!.height) return;
-    const [di, dj] = prev.i === next.i ? [1, 0] : [0, 1];
-    for (const side of [-1, 1]) {
-      const [near, far] = [at(i + di * side, j + dj * side), at(i - di * side, j - dj * side)];
-      const bank = (j + dj * side) * size + i + di * side;
-      if (!flat(near) || !flat(far) || from[bank] === -2) continue;
-      if (!lane || dist[bank]! < dist[lane.bank]!) lane = { k, bank, di: -di * side, dj: -dj * side };
-    }
-  });
-  if (lane) {
-    const { k, bank, di, dj } = lane as { k: number; bank: number; di: number; dj: number };
-    // Back to the village one step nearer at a time, turning as little as it can.
-    let [m, step] = [bank, -1];
-    while (dist[m]! > 0) {
-      cells[m]!.ground = "road";
-      const [i, j] = [m % size, Math.floor(m / size)];
-      const nearer = neighbours(i, j)
-        .filter(([a, b]) => a >= 0 && b >= 0 && a < size && b < size)
-        .map(([a, b]) => b * size + a)
-        .filter((o) => from[o] !== -2 && dist[o] === dist[m]! - 1);
-      const next = nearer.find((o) => o - m === step) ?? nearer[0]!;
-      [step, m] = [next - m, next];
-    }
-    let [i, j] = [course[k]!.i, course[k]!.j];
-    at(i, j)!.ground = "road";
-    for (let step = 0; step < 6; step++) {
-      [i, j] = [i + di, j + dj];
-      if (!flat(at(i, j))) break;
-      at(i, j)!.ground = "road";
-    }
-  }
+  // Still water: a lake on the river in the forest, a pond in the meadow.
+  const lake = course.find(({ j }) => j >= mid + 0.18 * size);
+  const ponds = [
+    { i: lake?.i ?? -99, j: lake?.j ?? -99, r: Math.max(2, 0.05 * size) },
+    { i: mid + 0.22 * size, j: mid + 0.24 * size, r: Math.max(1.5, 0.04 * size) },
+  ];
+  for (const p of ponds)
+    for (let j = Math.floor(p.j - p.r); j <= p.j + p.r; j++)
+      for (let i = Math.floor(p.i - p.r); i <= p.i + p.r; i++) {
+        const c = at(i, j);
+        if (c && !c.height && c.ground !== "road" && Math.hypot(i - p.i, j - p.j) <= p.r + 0.3) c.ground = "water";
+      }
 
   // Bridges, only across a straight stretch onto level land on both banks:
-  // every so often a footbridge, and one broad one across the estuary. Where
+  // every so often a footbridge, and one broad one across the mouth. Where
   // a road met the river, the road carries on over it, the river below
   // through a culvert.
   let sinceBridge = BRIDGE_EVERY;
@@ -299,19 +247,10 @@ export function gardenIsland(size: number): IslandLayout {
     }
   }
 
-  // The plains' low hills slope all round, round their corners too.
-  for (let j = 0; j < size; j++)
-    for (let i = 0; i < size; i++) {
-      const c = at(i, j)!;
-      if (c.height || c.ramp || c.ground === "road" || c.ground === "river" || !canRamp(c.ground) || inVillage(i, j, 1)) continue;
-      let near = false;
-      for (let b = j - 1; b <= j + 1; b++) for (let a = i - 1; a <= i + 1; a++) if (knolls.has(b * size + a) && at(a, b)?.height === 1) near = true;
-      if (near) c.ramp = true;
-    }
-
   // Ramps: keep adding one where a reachable cell meets an unreachable one a
-  // block up or down, until everything that can be reached is.
-  const home = Math.floor(half) * size + Math.floor(half);
+  // block up or down, until everything that can be reached is (a terrace the
+  // river cuts off, mostly).
+  const home = mid * size + mid;
   // Asked for again after every ramp: one pair of buffers for every walk, not a new one each time.
   const seen = new Uint8Array(size * size);
   const queue = new Int32Array(size * size);
@@ -358,33 +297,35 @@ export function gardenIsland(size: number): IslandLayout {
     cells[pick(candidates)]!.ramp = true;
   }
 
-  // Decor, by ground, with woods where the forest noise is high. A cell no
-  // one can reach gets something standing on it so nobody is sent there.
+  // Decor, by biome. A cell no one can reach gets something standing on it
+  // so nobody is sent there.
   reachable();
   for (let n = 0; n < size * size; n++) {
     const c = cells[n]!;
-    if (c.ramp || c.ground === "water" || c.ground === "river" || c.ground === "road") continue;
+    if (c.ramp || !canHoldDecor(c.ground)) continue;
     const [i, j] = [n % size, Math.floor(n / size)];
     if (!seen[n]) {
       c.decor = c.ground === "snow" ? pick(SNOW_TREES) : c.ground === "sand" ? pick(SAND_ROCKS) : pick(ROCKS);
       continue;
     }
-    // Keep the village and the foot of every ramp clear.
+    // Keep the village and the foot of every slope clear.
     if (inVillage(i, j, 1) || neighbours(i, j).some(([a, b]) => at(a, b)?.ramp)) continue;
     const [x, y] = centred(i, j);
     const r = rng();
+    const beach = land[n]! < 0.13 && !c.height;
     let decor: DecorKind | undefined;
-    if (c.ground === "snow") decor = r < 0.16 ? pick(SNOW_TREES) : r < 0.22 ? pick(SNOW_BUSHES) : undefined;
-    else if (c.ground === "dirt") decor = r < 0.12 ? pick(DIRT_ROCKS) : r < 0.25 ? pick(TREES) : undefined;
-    else if (c.ground === "sand") decor = land[n]! < 0.13 ? (r < 0.04 ? pick(SAND_ROCKS) : undefined) : r < 0.1 ? pick(CACTI) : r < 0.14 ? pick(SAND_ROCKS) : undefined;
-    else if (forest(x, y, 4) > 0.58) decor = r < 0.6 ? pick(TREES) : r < 0.7 ? pick(BUSHES) : undefined;
-    else decor = r < 0.03 ? pick(TREES) : r < 0.06 ? pick(BUSHES) : r < 0.075 ? pick(ROCKS) : undefined;
+    if (c.ground === "snow") decor = r < 0.14 ? pick(SNOW_TREES) : r < 0.2 ? pick(SNOW_BUSHES) : undefined;
+    else if (c.ground === "dirt") decor = r < 0.12 ? pick(DIRT_ROCKS) : r < 0.18 ? pick(TREES) : undefined;
+    else if (beach) decor = r < 0.03 ? pick(SAND_ROCKS) : undefined;
+    else if (c.ground === "sand") decor = r < 0.08 ? pick(CACTI) : r < 0.12 ? pick(SAND_ROCKS) : undefined;
+    else if (biome(i, j) === "forest") decor = woods(x, y, 5) > 0.42 ? (r < 0.62 ? pick(TREES) : r < 0.72 ? pick(BUSHES) : undefined) : r < 0.05 ? pick(BUSHES) : undefined;
+    else if (biome(i, j) === "mountain") decor = r < 0.08 ? pick(ROCKS) : r < 0.16 ? pick(TREES) : undefined;
+    else decor = r < 0.04 ? pick(BUSHES) : r < 0.06 ? pick(TREES) : r < 0.07 ? pick(ROCKS) : undefined;
     if (decor) c.decor = decor;
   }
 
   // Nests, each two cells wide on a flat clearing: one in the middle of the
-  // village, the others scattered wherever there's room, a few blobs to each.
-  const nests = [{ i: Math.floor(half), j: Math.floor(half) }];
+  // village, the others as near it as they fit, a few blobs to each.
   const want = Math.max(1, Math.round((size / 6) ** 2 / PER_NEST));
   // The 4x4 cells around the corner (i, j) a nest sits on: all level, open ground.
   const clearing = (i: number, j: number) => {
@@ -397,15 +338,11 @@ export function gardenIsland(size: number): IslandLayout {
       }
     return around;
   };
-  const spots: number[] = [];
-  for (let n = 0; n < size * size; n++) if (clearing(n % size, Math.floor(n / size))) spots.push(n);
-  for (let tries = 0; nests.length < want && spots.length && tries < want * 20; tries++) {
-    const n = pick(spots);
-    const [i, j] = [n % size, Math.floor(n / size)];
-    if (nests.some((o) => Math.hypot(o.i - i, o.j - j) < NEST_SPACING)) continue;
-    nests.push({ i, j });
-  }
+  const spots: { i: number; j: number }[] = [];
+  for (let n = 0; n < size * size; n++) if (clearing(n % size, Math.floor(n / size))) spots.push({ i: n % size, j: Math.floor(n / size) });
+  spots.sort((p, q) => Math.hypot(p.i - mid, p.j - mid) - Math.hypot(q.i - mid, q.j - mid));
+  const nests: { i: number; j: number }[] = [];
+  for (const spot of spots) if (nests.length < want && nests.every((o) => Math.hypot(o.i - spot.i, o.j - spot.j) >= NEST_SPACING)) nests.push(spot);
   for (const { i, j } of nests) for (const c of clearing(i, j) ?? []) delete c.decor;
   return { size, cells, nests: nests.map(({ i, j }) => ({ x: i / size, y: j / size, r: 1 / size })) };
 }
-
