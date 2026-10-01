@@ -13,6 +13,8 @@ import { devClock, regions } from "./schema";
  */
 // Once the dev panel has changed the scale, the anchored clock stays in charge, even back at 1x: going back to real time would jump the garden back.
 let scaledLive = false;
+// A restart finds the anchored clock still in the table: the blobs lived ahead of real time stay ahead, so it keeps running (until a reset empties the table).
+let probed = false;
 const envScale = config.timeScale;
 
 /** Local dev only (the /__dev/time-scale route): changes how fast the garden runs, from now on. */
@@ -30,10 +32,15 @@ export async function setTimeScale(scale: number): Promise<number> {
 export function resetTimeScale() {
   config.timeScale = envScale;
   scaledLive = false;
+  probed = true;
 }
 
 export async function gardenNow(scale = config.timeScale): Promise<number> {
   const real = Date.now();
+  if (scale === 1 && !scaledLive && !probed) {
+    probed = true;
+    scaledLive = (await db.select().from(devClock).where(eq(devClock.id, 1))).length > 0;
+  }
   if (scale === 1 && !scaledLive) return real;
   const [row] = await db.select().from(devClock).where(eq(devClock.id, 1));
   if (row?.scale === scale) return Math.floor(row.gardenAt + (real - row.realAt) * scale);
