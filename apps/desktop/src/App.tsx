@@ -101,6 +101,11 @@ export default function App() {
         return refreshGarden(token);
       }
       blobs = sent.map((b) => ({ ...b, segments: [...last.segments.get(b.seed)!.filter((s) => s.end > now - SEGMENT_HISTORY_MS), ...b.segments] }));
+      // The garden's clock leapt (the dev panel changed its speed): what we kept is stale and the delta can't fill the gap, so ask for it all rather than leave blobs without a timeline.
+      if (blobs.some((b) => b.segments.length === 0)) {
+        known.current = null;
+        return refreshGarden(token);
+      }
     }
     known.current = { asked, step, segments: new Map(blobs.map((b) => [b.seed, b.segments])) };
     setBlobs(blobs);
