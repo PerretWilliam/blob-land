@@ -1,5 +1,17 @@
 # @blob-land/desktop
 
+## 0.4.0
+
+### Minor Changes
+
+- c32c257: The game can be quit from the main menu and the in-game menu (closing the window still lets your blob live on in the tray). Opening a blob's relations no longer drops it from the camera, and letting go of a blob eases the view back a little instead of snapping to where it was. Clicking a blob from far away now pans to it first, then zooms in smoothly. In the garden, blobs no longer dash across the map or run along walls to reach a far-off spot: they walk round lakes and cliffs at a stroll, and hop or waddle as they should.
+- 4a897e1: The garden shows the world's time (UTC, the same for everyone) at the top of the screen, above the island switcher. Joining the garden now takes you straight to it instead of back to the menu or your island.
+
+### Patch Changes
+
+- Updated dependencies [c32c257]
+  - @blob-land/sim@0.3.1
+
 ## 0.3.0
 
 ### Minor Changes
