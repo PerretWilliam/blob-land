@@ -330,6 +330,26 @@ export function findPath(island: IslandLayout, from: GroundPoint, to: GroundPoin
   return waypoints;
 }
 
+/** Whether a blob can walk the straight line from `a` to `b`: every cell it
+ * crosses is a legal step from the one before (no water, no bare cliff). */
+export function canWalkStraight(island: IslandLayout, a: GroundPoint, b: GroundPoint): boolean {
+  const { size } = island;
+  const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * size * 2));
+  let [pi, pj] = cellOf(size, a);
+  for (let s = 1; s <= steps; s++) {
+    const [ci, cj] = cellOf(size, { x: a.x + ((b.x - a.x) * s) / steps, y: a.y + ((b.y - a.y) * s) / steps });
+    if (ci === pi && cj === pj) continue;
+    // Crossing a corner takes both ways round it.
+    const ok =
+      ci === pi || cj === pj
+        ? canStep(island, pi, pj, ci, cj)
+        : canStep(island, pi, pj, ci, pj) && canStep(island, ci, pj, ci, cj) && canStep(island, pi, pj, pi, cj) && canStep(island, pi, cj, ci, cj);
+    if (!ok) return false;
+    [pi, pj] = [ci, cj];
+  }
+  return true;
+}
+
 // Routes as cell indices (j * size + i), keyed by both ends.
 const pathCache = new WeakMap<IslandLayout, Map<number, Int32Array | null>>();
 // One set of buffers for every search: a route is asked for often, on a big

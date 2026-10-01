@@ -5,6 +5,12 @@ use tauri::{
     Manager, WindowEvent,
 };
 
+/// Closing the window only hides it (the blob lives on in the tray): this is how the app really quits.
+#[tauri::command]
+fn quit(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -17,6 +23,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .invoke_handler(tauri::generate_handler![quit])
         .setup(|app| {
             // Tray: left-click shows/focuses the main window, "Quit" actually exits.
             // Closing the window instead hides it (see on_window_event below) so the

@@ -3,7 +3,8 @@
   "private": true,
   "packageManager": "pnpm@10.0.0",
   "scripts": {
-    "dev": "pnpm -r --parallel run \"/^dev/\"",
+    "db:up": "docker compose -f apps/api/docker-compose.yml up -d --wait db || docker-compose -f apps/api/docker-compose.yml up -d --wait db",
+    "dev": "pnpm db:up && pnpm -r --parallel run \"/^dev/\"",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "sim:test": "pnpm --filter @blob-land/sim test",
