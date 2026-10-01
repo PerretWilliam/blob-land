@@ -4,10 +4,11 @@ import type { GardenBlob } from "@/lib/api";
 import { useT } from "@/i18n";
 import { resetKnobs, setKnobs, useKnobs } from "@/lib/dev";
 
-const SPEEDS = [0, 0.25, 1, 5, 20, 100];
+const SPEEDS = [0, 0.25, 1, 5, 20, 100, 500, 1000];
 
 // The garden's clock is the server's: it runs ahead there (the API needs DEV_TOOLS=1), and can't go back.
-const GARDEN_SPEEDS = [1, 5, 20, 100];
+// 1000x is the API's ceiling, and about what a 1 s refresh can keep up with.
+const GARDEN_SPEEDS = [1, 5, 20, 100, 500, 1000];
 
 /**
  * Dev only (mounted under `DEV`, never shipped): live knobs for the scenes.

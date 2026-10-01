@@ -147,9 +147,9 @@ export default function App() {
     return () => clearInterval(id);
   }, [appState?.localSeed, speed]);
 
-  // Real time between refreshes: a minute, or at a faster rate a third of the lookahead (2 to 10 s).
+  // Real time between refreshes: a minute, or at a faster rate a third of the lookahead (1 to 10 s).
   const rate = gardenClock.rate;
-  const refreshEvery = rate > 1 ? Math.min(10_000, Math.max(2_000, GARDEN_LOOKAHEAD_MS / (3 * rate))) : PING_INTERVAL_MS;
+  const refreshEvery = rate > 1 ? Math.min(10_000, Math.max(1_000, GARDEN_LOOKAHEAD_MS / (3 * rate))) : PING_INTERVAL_MS;
   // Presence ping + garden refresh while the app is active — only once an
   // account exists, since /garden and /me/ping both require a token.
   useEffect(() => {
