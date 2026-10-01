@@ -31,7 +31,7 @@ export function DevPanel({ time, garden, onReset }: { time: () => number; garden
   }, [time]);
 
   return (
-    <aside className="toon absolute right-4 bottom-4 z-20 w-60 p-2 text-sm">
+    <aside className="toon absolute bottom-4 left-4 z-20 w-60 p-2 text-sm">
       <button type="button" className="flex w-full items-center gap-1.5 font-semibold" onClick={() => setOpen((o) => !o)}>
         <FlaskConical className="size-4" /> Dev
         <span className="ml-auto font-normal tabular-nums">{new Date(shown).toISOString().slice(11, 19)} UTC</span>
