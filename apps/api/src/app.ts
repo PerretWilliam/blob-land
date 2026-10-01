@@ -10,7 +10,7 @@ import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { sign, verify } from "hono/jwt";
 import { hashPassword, verifyPassword } from "./auth";
-import { gardenNow } from "./clock";
+import { gardenNow, setTimeScale } from "./clock";
 import { db, isTaken, type Db } from "./db";
 import { config } from "./env";
 import { forget, join, journal, LOOKAHEAD, reconsider, relationshipsOf, type Newcomer } from "./garden";
@@ -367,6 +367,13 @@ app.post("/__dev/step", devTools, async (c) => {
   const all = await db.select({ region: regions.region }).from(regions);
   await Promise.all(all.map(({ region }) => live(region, now, now + LOOKAHEAD + ahead)));
   return c.json({ regions: all.length });
+});
+
+// How many times faster than real time the garden runs, from now on (the desktop's dev panel).
+app.post("/__dev/time-scale", devTools, async (c) => {
+  const { scale } = await body<{ scale?: number }>(c);
+  if (typeof scale !== "number" || !(scale >= 1 && scale <= 1000)) return c.json({ error: "scale must be 1 to 1000" }, 400);
+  return c.json({ now: await setTimeScale(scale), rate: scale });
 });
 
 // `count` blobs without accounts, filling new regions (for the load test,

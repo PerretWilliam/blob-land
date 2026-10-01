@@ -12,6 +12,7 @@ import {
   deleteAccount,
   gardenTime,
   getGarden,
+  setGardenSpeed,
   ping,
   setCountry,
   setIdentity,
@@ -24,7 +25,7 @@ import {
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { useOnline } from "@/lib/online";
-import { devNow, useKnobs } from "@/lib/dev";
+import { DEV, devNow, useKnobs } from "@/lib/dev";
 import { loadState, saveState, type AppState } from "@/lib/state";
 
 const PING_INTERVAL_MS = 60_000;
@@ -157,6 +158,16 @@ export default function App() {
     }, fast ? FAST_GARDEN_REFRESH_MS : PING_INTERVAL_MS);
     return () => clearInterval(id);
   }, [appState?.account?.token, refreshGarden, fast, visiting]);
+
+  // Dev panel: the server runs the garden faster, then the answers follow at once.
+  async function handleGardenSpeed(scale: number) {
+    const token = appState?.account?.token;
+    if (!token) return;
+    const { now, rate } = await setGardenSpeed(scale);
+    setGardenClock({ at: now, readAt: Date.now(), rate });
+    known.current = null;
+    await refreshGarden(token);
+  }
 
   function handlePseudoChosen(pseudo: string, identity: Identity) {
     const now = Date.now();
@@ -307,6 +318,7 @@ export default function App() {
         regions={regions}
         onVisit={(region) => setVisiting(region === regions?.home ? null : region)}
         gardenClock={gardenClock}
+        onGardenSpeed={DEV ? handleGardenSpeed : undefined}
         onJoinGarden={() => setJoining(true)}
         onSettings={() => setSettingsOpen(true)}
         island={island}

@@ -362,6 +362,13 @@ describe("security", () => {
     const res = await call("/__dev/populate", { method: "POST", body: JSON.stringify({ count: 1e9 }) });
     expect(res.status).toBe(400);
   });
+
+  it("refuses a nonsense garden speed", async () => {
+    for (const scale of [0, -3, 5000, "fast"]) {
+      const res = await call("/__dev/time-scale", { method: "POST", body: JSON.stringify({ scale }) });
+      expect(res.status).toBe(400);
+    }
+  });
 });
 
 /**

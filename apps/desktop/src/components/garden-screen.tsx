@@ -34,7 +34,7 @@ import { ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUM
 import { journalLine, language, listNames, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
 import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
-import { DEV, devNow, devSkew, useKnobs } from "@/lib/dev";
+import { DEV, devNow, useKnobs } from "@/lib/dev";
 import type { LocalLife } from "@/lib/life";
 import { canQuit, quit } from "@/lib/quit";
 import { useGardenIsland } from "@/lib/use-garden-island";
@@ -61,6 +61,8 @@ export interface GardenScreenProps {
   onVisit: (region: number) => void;
   /** The garden's time, which may run faster than the private blob's (dev). */
   gardenClock: GardenClock;
+  /** Dev: runs the garden `scale` times faster (the server does it). */
+  onGardenSpeed?: (scale: number) => Promise<void>;
   onJoinGarden: () => void;
   onSettings: () => void;
   /** The private island's layout — local only, edited here. */
@@ -87,6 +89,7 @@ export function GardenScreen({
   regions,
   onVisit,
   gardenClock,
+  onGardenSpeed,
   onJoinGarden,
   onSettings,
   island,
@@ -109,7 +112,7 @@ export function GardenScreen({
     const id = setInterval(() => setNow(devNow()), Math.max(500, STATE_TICK_MS / (gardenClock.rate * Math.max(1, dev.speed))));
     return () => clearInterval(id);
   }, [gardenClock.rate, dev.speed]);
-  const gardenClockNow = () => gardenTime(gardenClock) + devSkew();
+  const gardenClockNow = () => gardenTime(gardenClock);
   const gardenNow = gardenClockNow();
   const nameOf = (seed: string) => blobs.find((b) => b.seed === seed)?.pseudo ?? t.common.aBlob;
   // A garden blob as the scene draws it: its face and activity right now, off its timeline.
@@ -197,7 +200,7 @@ export function GardenScreen({
         />
       )}
 
-      {DEV && <DevPanel time={inGarden ? gardenClockNow : devNow} />}
+      {DEV && <DevPanel time={inGarden ? gardenClockNow : devNow} garden={inGarden ? { rate: gardenClock.rate, set: onGardenSpeed } : undefined} />}
 
       <nav
         aria-label={t.game.menu}

@@ -104,6 +104,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** Dev only: makes the garden run `scale` times faster than real time (the API needs DEV_TOOLS=1). Says the garden's time and rate then. */
+export const setGardenSpeed = (scale: number) =>
+  request<{ now: number; rate: number }>("/__dev/time-scale", { method: "POST", body: JSON.stringify({ scale }) });
+
 /** Whether the garden's server answers at all (any answer will do). */
 export function reachable(): Promise<boolean> {
   return fetch(API_URL, { signal: AbortSignal.timeout(5_000) }).then(

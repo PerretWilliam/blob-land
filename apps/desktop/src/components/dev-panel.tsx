@@ -4,15 +4,26 @@ import { resetKnobs, setKnobs, useKnobs } from "@/lib/dev";
 
 const SPEEDS = [0, 0.25, 1, 5, 20, 100];
 
+// The garden's clock is the server's: it runs ahead there (the API needs DEV_TOOLS=1), and can't go back.
+const GARDEN_SPEEDS = [1, 5, 20, 100];
+
 /**
  * Dev only (mounted under `DEV`, never shipped): live knobs for the scenes. Not
- * translated, since no player sees it. Past 1x the garden runs out of the
- * timeline the server sent: to run it ahead, set TIME_SCALE on the API.
+ * translated, since no player sees it. In the garden, `garden` says its speed
+ * and asks the server to change it; the private island's runs on this clock.
  */
-export function DevPanel({ time }: { time: () => number }) {
+export function DevPanel({ time, garden }: { time: () => number; garden?: { rate: number; set?: (scale: number) => Promise<void> } }) {
   const knobs = useKnobs();
   const [open, setOpen] = useState(true);
   const [shown, setShown] = useState(time);
+  const [failed, setFailed] = useState(false);
+  const speeds = garden ? GARDEN_SPEEDS : SPEEDS;
+  const speed = garden ? garden.rate : knobs.speed;
+  const pick = (s: number) => {
+    if (!garden) return setKnobs({ speed: s });
+    setFailed(false);
+    garden.set?.(s).catch(() => setFailed(true));
+  };
   useEffect(() => {
     const id = setInterval(() => setShown(time()), 250);
     return () => clearInterval(id);
@@ -30,12 +41,13 @@ export function DevPanel({ time }: { time: () => number }) {
           <div>
             Time speed
             <div className="mt-1 flex flex-wrap gap-1">
-              {SPEEDS.map((s) => (
-                <button key={s} type="button" aria-pressed={knobs.speed === s} className="toon-input px-2 py-0.5 aria-pressed:font-bold aria-pressed:ring-2" onClick={() => setKnobs({ speed: s })}>
+              {speeds.map((s) => (
+                <button key={s} type="button" aria-pressed={speed === s} className="toon-input px-2 py-0.5 aria-pressed:font-bold aria-pressed:ring-2" onClick={() => pick(s)}>
                   {s === 0 ? "⏸" : `${s}x`}
                 </button>
               ))}
             </div>
+            {failed && <p className="mt-1 text-xs">The API refused: DEV_TOOLS=1 in apps/api/.env?</p>}
           </div>
           <label className="flex flex-col">
             <span className="flex justify-between">
