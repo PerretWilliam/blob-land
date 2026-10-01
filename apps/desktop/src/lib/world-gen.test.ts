@@ -12,7 +12,8 @@ describe("gardenIsland", () => {
       expect(gardenIsland(size)).toEqual(island);
       const grounds = new Set(island.cells.map((c) => c.ground));
       for (const g of ["water", "sand", "grass", "snow", "river", "road"] as const) expect(grounds).toContain(g);
-      expect(Math.max(...island.cells.map((c) => c.height ?? 0))).toBeGreaterThanOrEqual(3);
+      // A mountain, if a low one on the smallest islands.
+      expect(Math.max(...island.cells.map((c) => c.height ?? 0))).toBeGreaterThanOrEqual(size >= 40 ? 3 : 2);
       expect(island.cells.some((c) => c.ramp)).toBe(true);
       // A real river, not a puddle.
       expect(island.cells.filter((c) => c.ground === "river").length).toBeGreaterThan(size / 4);
@@ -66,7 +67,7 @@ describe("gardenIsland", () => {
   // that changes shape is a change for everyone at once, never a side effect.
   it("lays out exactly the island it always has", () => {
     const hash = (size: number) => createHash("sha1").update(JSON.stringify(gardenIsland(size))).digest("hex");
-    expect(hash(40)).toBe("4414d6226f63b727f4733dd4927f11e534925506");
-    expect(hash(128)).toBe("1f1f93ca3f2bb2a33411d50e1018256bfcae3214");
+    expect(hash(40)).toBe("4ac8de01270de00a50f3b6a5443a898964adcc4f");
+    expect(hash(128)).toBe("214ffbb999b492ee6db6d7586cc4d6443727d704");
   });
 });

@@ -105,7 +105,7 @@ function icon() {
 <defs>${sky("sky")}<clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
 <filter id="drop" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="10" stdDeviation="14" flood-opacity="0.28"/></filter></defs>
 <g filter="url(#drop)"><rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sky)"/></g>
-<g clip-path="url(#tile)">${cloud("cloud-large", 560, 170, 300, 0.9)}${cloud("cloud-small", 150, 300, 190, 0.8)}
+<g clip-path="url(#tile)">${cloud("cloud-5", 560, 170, 300, 0.9)}${cloud("cloud-3", 150, 300, 190, 0.8)}
 ${fit(sc, 150, 135, 724, 760)}</g>
 </svg>`;
 }
@@ -118,7 +118,7 @@ function banner() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <defs>${sky("sky")}<linearGradient id="word" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8f07a"/><stop offset="1" stop-color="#3fbf6a"/></linearGradient></defs>
 <rect width="${W}" height="${H}" fill="url(#sky)"/>
-${cloud("cloud-large", 1000, 30, 250, 0.9)}${cloud("cloud-small", 420, 470, 170, 0.7)}${cloud("cloud-small", 1080, 490, 150, 0.6)}
+${cloud("cloud-5", 1000, 30, 250, 0.9)}${cloud("cloud-3", 420, 470, 170, 0.7)}${cloud("cloud-3", 1080, 490, 150, 0.6)}
 ${fit(sc, 30, 40, 440, 580)}
 ${title(12, "#0b1a10", 'stroke="#0b1a10" stroke-width="18" stroke-linejoin="round"')}
 ${title(0, "url(#word)", 'stroke="#0b1a10" stroke-width="18" stroke-linejoin="round" paint-order="stroke"')}

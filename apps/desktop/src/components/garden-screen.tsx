@@ -31,7 +31,7 @@ import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { DevPanel } from "@/components/dev-panel";
 import { RelationsPanel } from "@/components/relations-panel";
 import { Button } from "@/components/ui/button";
-import { ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
+import { ActivityIcon, blobStateAt, MoodIcon, moodOf, BRIDGE_THUMB, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import { journalLine, language, listNames, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
 import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
@@ -514,7 +514,11 @@ const categories = (t: Messages): Category[] => [
     id: "paths",
     thumb: GROUND_THUMBS.road,
     labelled: true,
-    tools: (["road", "river"] as const).map((g) => ({ tool: g, label: t.editor.ground[g], thumb: GROUND_THUMBS[g] })),
+    tools: [
+      ...(["road", "river"] as const).map((g) => ({ tool: g, label: t.editor.ground[g], thumb: GROUND_THUMBS[g] })),
+      // Across a river: a road runs on over it, and blobs cross.
+      { tool: "bridge", label: t.editor.bridge, thumb: BRIDGE_THUMB },
+    ],
   },
   {
     id: "relief",
@@ -523,7 +527,7 @@ const categories = (t: Messages): Category[] => [
     tools: [
       { tool: "raise", label: t.editor.raise, thumb: <ArrowUpFromLine /> },
       { tool: "lower", label: t.editor.lower, thumb: <ArrowDownToLine /> },
-      // Climbs towards the neighbour one block higher.
+      // Climbs towards the neighbour one block higher, or two at a corner.
       { tool: "ramp", label: t.editor.ramp, thumb: RAMP_THUMB },
     ],
   },

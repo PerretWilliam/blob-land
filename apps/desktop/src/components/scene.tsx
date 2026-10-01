@@ -12,7 +12,7 @@ import { useInView } from "@/lib/motion";
 import { countryName, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
 
-export { DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB } from "@/components/world";
+export { BRIDGE_THUMB, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB } from "@/components/world";
 
 export interface SceneBlob {
   seed: string;

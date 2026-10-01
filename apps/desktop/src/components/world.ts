@@ -16,12 +16,23 @@ import { _posed, fadeHex, lerpPose } from "blobatar/internal";
 import { Application, ColorMatrixFilter, Container, Graphics, GraphicsContext, GraphicsPath, ImageSource, Matrix, RenderTexture, Sprite, Texture } from "pixi.js";
 import { genderAnchor, SIGNS } from "@/components/blob-gender";
 import type { Moment } from "@/components/interaction-fx";
-import cloudLarge from "@/assets/iso/cloud-large.png";
-import cloudSmall from "@/assets/iso/cloud-small.png";
-import bridgeAcrossNeSw from "@/assets/iso/bridge-ne-sw.svg";
-import bridgeAcrossNwSe from "@/assets/iso/bridge-nw-se.svg";
 import DECOR_WIDTHS from "@/assets/iso/widths.json";
-import { canHoldDecor, cellAt, DECOR_KINDS, EDGES, OPPOSITE_EDGE, rampDirection, type DecorKind, type Ground, type IslandLayout } from "@/lib/island";
+import {
+  canHoldDecor,
+  cellAt,
+  CORNERS,
+  DECOR_KINDS,
+  EDGES,
+  OPPOSITE_EDGE,
+  rampDirection,
+  rampInside,
+  rampOutside,
+  STEP,
+  type DecorKind,
+  type Edge,
+  type Ground,
+  type IslandLayout,
+} from "@/lib/island";
 import {
   Affine,
   breatheTransform,
@@ -58,8 +69,9 @@ export const WATER_DROP = 28;
 const PAD = 8;
 /*
  * Texture pixels per pack pixel. The pack is exported at 2x; drawn at 1x on
- * the GPU, a close-up on a retina screen is a touch soft but the whole pack
- * fits in ~50 MB of video memory instead of ~200.
+ * the GPU, a close-up on a retina screen is a touch soft but a block piece
+ * takes ~360 KB of video memory instead of ~1.4 MB, and only the pieces an
+ * island uses are loaded.
  * ponytail: one resolution for every zoom; load the 2x set for the pieces in
  * view when following a blob if the softness shows.
  */
@@ -122,10 +134,18 @@ export const DECOR_SPRITES = Object.fromEntries(
   DECOR_KINDS.map((kind) => [kind, { src: DECOR_FILES[`../assets/iso/${kind}.png`]!, w: (DECOR_WIDTHS as Record<string, number>)[kind]! }]),
 ) as Record<DecorKind, { src: string; w: number }>;
 
-// Block pieces, by file name: tile-<ground>, road|river[-sand|-snow]-<edges>,
-// ramp[-road][-sand|-snow]-<direction>.
-const PIECES = import.meta.glob<string>("../assets/iso/{tile,road,river,ramp}-*.png", { eager: true, import: "default" });
+/*
+ * Block pieces, by file name (banks: -sand, -snow, and -ice for a frozen river):
+ * - tile-<ground>
+ * - road|river|bridge[<bank>]-<edges>[-open-<corners>], the corners where water
+ *   runs on round the bank instead of a nub; road[<bank>]-<edges>-square
+ * - culvert[<bank>]-<edge>: a road over a river coming in from that edge
+ * - ramp[-road|-river][<bank>]-<edge>, or up two edges (an inside corner), or
+ *   up to one corner (an outside one)
+ */
+const PIECES = import.meta.glob<string>("../assets/iso/{tile,road,river,bridge,culvert,ramp}-*.png", { eager: true, import: "default" });
 const piece = (name: string) => PIECES[`../assets/iso/${name}.png`]!;
+const hasPiece = (name: string) => `../assets/iso/${name}.png` in PIECES;
 
 /** Thumbnails for the editor's tools. */
 export const GROUND_THUMBS = Object.fromEntries(
@@ -134,6 +154,7 @@ export const GROUND_THUMBS = Object.fromEntries(
 GROUND_THUMBS.road = piece("road-nw-se");
 GROUND_THUMBS.river = piece("river-nw-se");
 export const RAMP_THUMB = piece("ramp-nw");
+export const BRIDGE_THUMB = piece("bridge-nw-se");
 
 /*
  * Roads, rivers and ramps come with grass, sand or snow banks: take whichever
@@ -152,20 +173,44 @@ function bankAt(layout: IslandLayout, i: number, j: number): "" | "-sand" | "-sn
   return n.snow > n.grass ? "-snow" : "";
 }
 
+/** A river's banks: as `bankAt`, and in the snow, frozen over when it touches ice. */
+function riverBankAt(layout: IslandLayout, i: number, j: number): string {
+  const bank = bankAt(layout, i, j);
+  if (bank !== "-snow") return bank;
+  for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (cellAt(layout, i + di, j + dj)?.ground === "ice") return "-ice";
+  return bank;
+}
+
+/** Water a river runs on into: a river, a lake, ice, or the stream past the
+ * grid; for a lake, the open sea all round too. */
+function wet(layout: IslandLayout, i: number, j: number, sea = false): boolean {
+  if (i === layout.size && j >= 0 && j < layout.size) return true;
+  if (sea && !cellAt(layout, i, j)) return true;
+  const g = cellAt(layout, i, j)?.ground;
+  return g === "river" || g === "water" || g === "ice";
+}
+
+/** A flat road a river can run under, through a culvert. */
+function culvertAt(layout: IslandLayout, i: number, j: number, height: number): boolean {
+  const c = cellAt(layout, i, j);
+  return c?.ground === "road" && (c.height ?? 0) === height && !c.ramp;
+}
+
 /*
  * Road and river pieces are named by the tile edges they open onto (EDGES:
  * nw = (i-1, j), ne = (i, j-1), se = (i+1, j), sw = (i, j+1)), so corners,
  * junctions and dead ends lay themselves out from the neighbours. Rivers also
- * run into water, including the stream along the front edge.
+ * run into water, including the stream along the front edge, and under a road
+ * they head straight into.
  */
-function linkedEdges(layout: IslandLayout, i: number, j: number, ground: "road" | "river"): string {
+function linkedEdges(layout: IslandLayout, i: number, j: number, ground: "road" | "river"): Edge[] {
   const height = cellAt(layout, i, j)?.height ?? 0;
   const edges = EDGES.filter(([edge, di, dj]) => {
     const [a, b] = [i + di, j + dj];
     if (ground === "river" && a === layout.size && b >= 0 && b < layout.size) return true;
     const neighbour = cellAt(layout, a, b);
     // Roads run on over a bridge; rivers into the sea.
-    if (!(neighbour?.ground === ground || (ground === "river" && neighbour?.ground === "water") || (ground === "road" && neighbour?.bridge))) return false;
+    if (!(neighbour?.ground === ground || (ground === "river" && (neighbour?.ground === "water" || neighbour?.ground === "ice")) || (ground === "road" && neighbour?.bridge))) return false;
     const neighbourHeight = neighbour?.height ?? 0;
     const rampEdge = rampDirection(layout, a, b);
     // Level ground: a ramp only opens onto its flat (low) front, never its side walls.
@@ -174,7 +219,68 @@ function linkedEdges(layout: IslandLayout, i: number, j: number, ground: "road" 
     if (neighbourHeight === height - 1) return rampEdge === OPPOSITE_EDGE[edge];
     return false;
   }).map(([edge]) => edge);
-  return (edges.length ? edges : ["nw", "se"]).join("-");
+  if (ground === "river") {
+    const under = EDGES.filter(([edge, di, dj]) => edges.includes(OPPOSITE_EDGE[edge]) && culvertAt(layout, i + di, j + dj, height)).map(([edge]) => edge);
+    edges.push(...under);
+    edges.sort((a, b) => EDGE_ORDER[a] - EDGE_ORDER[b]);
+  }
+  return edges;
+}
+const EDGE_ORDER: Record<Edge, number> = { nw: 0, ne: 1, se: 2, sw: 3 };
+
+/**
+ * A river or bridge piece: by its open edges, and where two of them meet over
+ * more water, without the nub of bank in that corner, so a wide river or a
+ * pool reads as one sheet of water. The pack doesn't draw every mix: the
+ * piece that keeps the fewest nubs it shouldn't.
+ */
+function riverPiece(layout: IslandLayout, i: number, j: number, kind: "river" | "bridge" | "lake"): string {
+  const lake = kind === "lake";
+  const bank = lake ? bankAt(layout, i, j) : riverBankAt(layout, i, j);
+  // A lake or the sea opens onto all the water round it, and keeps a bank where it meets land.
+  const edges = lake ? EDGES.filter(([, di, dj]) => wet(layout, i + di, j + dj, true)).map(([edge]) => edge) : linkedEdges(layout, i, j, "river");
+  if (lake && !edges.length) return piece("tile-water");
+  if (!edges.length) edges.push("nw", "se");
+  const open = CORNERS.filter(([, a, b]) => edges.includes(a) && edges.includes(b) && wet(layout, i + STEP[a][0] + STEP[b][0], j + STEP[a][1] + STEP[b][1], lake)).map(([c]) => c);
+  if (kind !== "bridge" && open.length === 4) return piece(bank === "-ice" ? "tile-ice" : "tile-water");
+  const base = `${kind === "bridge" ? "bridge" : "river"}${bank}-${edges.join("-")}`;
+  let best = hasPiece(base) ? base : null;
+  let most = 0;
+  for (let mask = 1; mask < 1 << open.length; mask++) {
+    const corners = open.filter((_, k) => mask & (1 << k));
+    const name = `${base}-open-${corners.join("-")}`;
+    if (corners.length > most && hasPiece(name)) [best, most] = [name, corners.length];
+  }
+  // Bridges only come straight across, on a narrow or a wide river.
+  return piece(best ?? `bridge${bank}-${edges.includes("nw") || edges.includes("se") ? "nw-se" : "ne-sw"}`);
+}
+
+/** A road piece: over a culvert where a river runs under it (seen from the front if it can), else by its links. */
+function roadPiece(layout: IslandLayout, i: number, j: number, bank: string): string {
+  const height = cellAt(layout, i, j)?.height ?? 0;
+  for (const edge of ["se", "sw", "nw", "ne"] as const) {
+    const [a, b] = [i + STEP[edge][0], j + STEP[edge][1]];
+    if (cellAt(layout, a, b)?.ground === "river" && (cellAt(layout, a, b)?.height ?? 0) === height && linkedEdges(layout, a, b, "river").includes(OPPOSITE_EDGE[edge]))
+      return piece(`culvert${riverBankAt(layout, a, b) === "-ice" ? "-ice" : bank}-${edge}`);
+  }
+  const edges = linkedEdges(layout, i, j, "road");
+  const name = `road${bank}-${(edges.length ? edges : ["nw", "se"]).join("-")}`;
+  // Bends come rounded or square: each cell picks one by where it is, so a road keeps its look.
+  return (Math.imul(i, 0x9e3779b1) ^ Math.imul(j, 0x85ebca6b)) & 0x10000 && hasPiece(`${name}-square`) ? piece(`${name}-square`) : piece(name);
+}
+
+/** The slope on a ramp cell, if it has one: up an edge, round an inside or an outside corner. */
+function slopeAt(layout: IslandLayout, i: number, j: number, ground: Ground, bank: string): string | null {
+  const material = ground === "road" ? `-road${bank}` : ground === "river" ? `-river${riverBankAt(layout, i, j)}` : ground === "grass" ? "" : `-${ground}`;
+  const inside = rampInside(layout, i, j);
+  if (inside) {
+    const [, a, b] = CORNERS.find(([c]) => c === inside)!;
+    return piece(`ramp${material}-${a}-${b}`);
+  }
+  const outside = rampOutside(layout, i, j);
+  if (outside) return piece(`ramp${material}-${outside}`);
+  const dir = rampDirection(layout, i, j);
+  return dir ? piece(`ramp${material}-${dir}`) : null;
 }
 
 /** The pieces a cell stacks, bottom first: plain blocks up to its height, then
@@ -186,18 +292,13 @@ function cellStack(layout: IslandLayout, i: number, j: number): string[] {
   const { ground, height = 0 } = cell;
   const bank = bankAt(layout, i, j);
   const block = canHoldDecor(ground) ? piece(`tile-${ground}`) : piece(`tile${bank ? bank : "-grass"}`);
-  const dir = rampDirection(layout, i, j);
   const stack = Array.from({ length: height }, () => block);
-  if (dir) {
-    const material = ground === "road" ? `-road${bank}` : ground === "grass" ? "" : `-${ground}`;
-    return [...stack, block, piece(`ramp${material}-${dir}`)];
-  }
-  const top = ground === "road" || ground === "river" ? piece(`${ground}${bank}-${linkedEdges(layout, i, j, ground)}`) : piece(`tile-${ground}`);
+  const slope = slopeAt(layout, i, j, ground, bank);
+  if (slope) return [...stack, block, slope];
+  const top =
+    ground === "river" ? riverPiece(layout, i, j, cell.bridge ? "bridge" : "river") : ground === "water" ? riverPiece(layout, i, j, "lake") : ground === "road" ? roadPiece(layout, i, j, bank) : piece(`tile-${ground}`);
   return [...stack, top];
 }
-
-/** A bridge's deck, across the river's flow (a bridge only sits on a straight stretch). */
-const bridgeOver = (layout: IslandLayout, i: number, j: number) => (linkedEdges(layout, i, j, "river") === "nw-se" ? bridgeAcrossNeSw : bridgeAcrossNwSe);
 
 /** One ground or decor sprite, where the terrain puts it. */
 interface TerrainItem {
@@ -232,11 +333,24 @@ function terrainOf(layout: IslandLayout, island: IslandGeometry): Map<string, Ch
     (a, b) => a.i + a.j - (b.i + b.j),
   );
   // Open sea (water all round) isn't drawn: the island floats in the sky
-  // with just a ring of shallows, however big the map around it.
-  const wet = (i: number, j: number) => {
-    const g = cellAt(layout, i, j)?.ground;
-    return !g || g === "water";
-  };
+  // with just a ring of shallows, however big the map around it. The sea is
+  // the water that reaches the map's edge: a lake inland is drawn whole.
+  const sea = new Uint8Array(tiles * tiles);
+  const flood: number[] = [];
+  layout.cells.forEach((c, n) => {
+    const [i, j] = [n % tiles, Math.floor(n / tiles)];
+    if (c.ground === "water" && (i === 0 || j === 0 || i === tiles - 1 || j === tiles - 1)) flood.push(n), (sea[n] = 1);
+  });
+  for (let head = 0; head < flood.length; head++) {
+    const n = flood[head]!;
+    for (const [, di, dj] of EDGES) {
+      const [a, b] = [(n % tiles) + di, Math.floor(n / tiles) + dj];
+      if (a < 0 || b < 0 || a >= tiles || b >= tiles || sea[b * tiles + a] || layout.cells[b * tiles + a]!.ground !== "water") continue;
+      sea[b * tiles + a] = 1;
+      flood.push(b * tiles + a);
+    }
+  }
+  const wet = (i: number, j: number) => !cellAt(layout, i, j) || sea[j * tiles + i] === 1;
   const openSea = (i: number, j: number) => {
     for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (!wet(i + di, j + dj)) return false;
     return true;
@@ -250,8 +364,6 @@ function terrainOf(layout: IslandLayout, island: IslandGeometry): Map<string, Ch
       // Shift so the image's top vertex (not its corner) lands on the grid point.
       const [x, y] = [at.x - TOP_X, at.y - TOP_Y];
       add({ i, j, src, x, y, w: TILE_IMG_W, z: level === 0 ? 0 : cellZ(i + j), decor: false });
-      // A bridge stands on the river, in its cell's depth band like a hill.
-      if (level === 0 && cellAt(layout, i, j)?.bridge) add({ i, j, src: bridgeOver(layout, i, j), x, y, w: TILE_IMG_W, z: cellZ(i + j), decor: false });
     });
   }
   layout.cells.forEach((cell, n) => {
@@ -286,17 +398,7 @@ function textureOf(src: string, w?: number): Promise<Texture> {
   if (!texture) {
     texture = (async () => {
       // Decoded off the page's rendering: `img.decode()` waits on it, and stalls while the page is hidden.
-      let img: CanvasImageSource & { width: number; height: number };
-      // SVG (the bridges, inlined as data URIs when small) only decodes through an <img>.
-      if (src.endsWith(".svg") || src.startsWith("data:image/svg")) {
-        const el = new Image();
-        await new Promise((resolve, reject) => {
-          el.onload = resolve;
-          el.onerror = reject;
-          el.src = src;
-        });
-        img = el;
-      } else img = await createImageBitmap(await (await fetch(src)).blob());
+      const img = await createImageBitmap(await (await fetch(src)).blob());
       const width = Math.max(1, Math.round(w ? w * TEX_PER_PACK : img.width));
       const canvas = document.createElement("canvas");
       canvas.width = width;
@@ -304,7 +406,7 @@ function textureOf(src: string, w?: number): Promise<Texture> {
       const ctx = canvas.getContext("2d")!;
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      if ("close" in img) img.close();
+      img.close();
       const bitmap = await createImageBitmap(canvas);
       return new Texture({ source: new ImageSource({ resource: bitmap, autoGenerateMipmaps: true }) });
     })()
@@ -332,13 +434,23 @@ function terrainSprite(item: TerrainItem, texture: Texture): Sprite {
   return sprite;
 }
 
-// Fixed decor — ambience only, no behaviour. `top` and `size` are % of the
+// Fixed decor — ambience only, no behaviour. Each of the pack's eight clouds
+// (`kind`), white, or grey over a snowy island. `top` and `size` are % of the
 // scene; `duration` and `offset` time the drift across it.
 const CLOUDS = [
-  { src: cloudLarge, top: 6, size: 16, duration: 240, offset: 0.1 },
-  { src: cloudSmall, top: 20, size: 10, duration: 190, offset: 0.55 },
-  { src: cloudSmall, top: 2, size: 8, duration: 280, offset: 0.8 },
+  { kind: 5, top: 6, size: 16, duration: 240, offset: 0.1 },
+  { kind: 3, top: 20, size: 10, duration: 190, offset: 0.55 },
+  { kind: 1, top: 2, size: 7, duration: 280, offset: 0.8 },
+  { kind: 7, top: 13, size: 14, duration: 330, offset: 0.35 },
+  { kind: 2, top: 25, size: 6, duration: 230, offset: 0.95 },
+  { kind: 4, top: 3, size: 9, duration: 260, offset: 0.62 },
+  { kind: 6, top: 17, size: 12, duration: 300, offset: 0.22 },
+  { kind: 8, top: 9, size: 13, duration: 360, offset: 0.45 },
 ];
+const CLOUD_FILES = import.meta.glob<string>("../assets/iso/cloud-*.png", { eager: true, import: "default" });
+const cloudSrc = (kind: number, grey: boolean) => CLOUD_FILES[`../assets/iso/cloud${grey ? "-grey" : ""}-${kind}.png`]!;
+/** Mostly snow and ice: a winter sky. */
+const snowy = (layout: IslandLayout) => layout.cells.filter((c) => c.ground === "snow" || c.ground === "ice").length * 2 > layout.cells.length;
 // Clouds zoom this fraction as much as the ground: farther away, so they move less.
 const CLOUD_PARALLAX = 0.5;
 
@@ -355,6 +467,62 @@ function nightMatrix(light: number): number[] {
     ...row(0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s),
     0, 0, 0, 1, 0,
   ];
+}
+
+/**
+ * A nest, `w` pack px wide, centred on (cx, cy), in the pack's style: twigs
+ * poking out, a woven rim, and in its hollow a bed of straw with two leaves
+ * caught on the edge. Drawn in a 120 x 60 box, scaled.
+ */
+function drawNest(g: Graphics, cx: number, cy: number, w: number) {
+  const s = w / 120;
+  const p = (x: number, y: number) => [cx + (x - 60) * s, cy + (y - 30) * s] as const;
+  const ink = (width: number) => ({ color: 0x000000, width: width * s, join: "round" as const, cap: "round" as const });
+  g.ellipse(...p(60, 38), 62 * s, 27 * s).fill({ color: 0x000000, alpha: 0.12 });
+  for (const [x1, y1, x2, y2] of [
+    [10, 22, -4, 13],
+    [102, 16, 117, 7],
+    [18, 46, 4, 55],
+    [98, 45, 113, 53],
+    [62, 7, 66, -5],
+  ] as const) {
+    g.moveTo(...p(x1, y1)).lineTo(...p(x2, y2)).stroke(ink(7.5));
+    g.moveTo(...p(x1, y1)).lineTo(...p(x2, y2)).stroke({ color: 0xa8683a, width: 3.5 * s, cap: "round" });
+  }
+  // The rim: its outer wall, then its top, woven.
+  g.ellipse(...p(60, 36), 57 * s, 25 * s).fill(0x8f5530).stroke(ink(4.5));
+  g.ellipse(...p(60, 30), 57 * s, 24 * s).fill(0xd29a5c).stroke(ink(4.5));
+  for (let k = 0; k < 16; k++) {
+    const at = (t: number, rx: number, ry: number) => p(60 + rx * Math.cos(t), 30 + ry * Math.sin(t));
+    const t = (k / 16) * 2 * Math.PI;
+    g.moveTo(...at(t - 0.16, 54, 22.5))
+      .quadraticCurveTo(...at(t, 47, 19), ...at(t + 0.16, 54, 22.5))
+      .stroke({ color: 0x8f5530, width: 2.5 * s, cap: "round" });
+  }
+  // The hollow, and the straw blobs sleep on.
+  g.ellipse(...p(60, 31), 40 * s, 15 * s).fill(0x6b3f22).stroke(ink(4));
+  g.ellipse(...p(60, 34), 33 * s, 10.5 * s).fill(0xf3d27e).stroke(ink(3.5));
+  for (const [x1, y1, x2, y2] of [
+    [38, 33, 49, 35],
+    [54, 38, 65, 37],
+    [70, 31, 81, 33],
+    [46, 30, 53, 29],
+    [74, 37, 82, 36],
+  ] as const)
+    g.moveTo(...p(x1, y1)).lineTo(...p(x2, y2)).stroke({ color: 0xd39b3c, width: 2.2 * s, cap: "round" });
+  for (const [bx, by, ax, ay, tx, ty, cx2, cy2] of [
+    [22, 42, 12, 37, 5, 49, 16, 53],
+    [93, 15, 99, 4, 111, 7, 106, 18],
+  ] as const) {
+    g.moveTo(...p(bx, by))
+      .quadraticCurveTo(...p(ax, ay), ...p(tx, ty))
+      .quadraticCurveTo(...p(cx2, cy2), ...p(bx, by))
+      .fill(0x91db69)
+      .stroke(ink(3.5));
+    g.moveTo(...p(bx, by))
+      .lineTo(...p(bx + (tx - bx) * 0.75, by + (ty - by) * 0.75))
+      .stroke(ink(2));
+  }
 }
 
 /** A blob's figure, from its blobatar: shapes drawn once per seed, in white, coloured by tint. */
@@ -680,12 +848,21 @@ export class World {
     this.dots.visible = false;
     this.lit.addChild(this.clouds, this.camera);
     app.stage.addChild(this.lit);
-    for (const c of CLOUDS) {
+    for (const _ of CLOUDS) {
       const sprite = new Sprite();
-      void textureOf(c.src).then((t) => (sprite.texture = t));
       this.cloudSprites.push(sprite);
       this.clouds.addChild(sprite);
     }
+    this.loadClouds();
+  }
+
+  private greyClouds = false;
+  private loadClouds() {
+    CLOUDS.forEach((c, k) => {
+      const src = cloudSrc(c.kind, this.greyClouds);
+      // Unless the sky changed again while it loaded.
+      void textureOf(src).then((t) => cloudSrc(c.kind, this.greyClouds) === src && (this.cloudSprites[k]!.texture = t));
+    });
   }
 
   static async create(host: HTMLElement): Promise<World> {
@@ -723,6 +900,10 @@ export class World {
    */
   async setTerrain(layout: IslandLayout, island: IslandGeometry, nests: { x: number; y: number; r: number }[]): Promise<void> {
     const generation = ++this.generation;
+    if (snowy(layout) !== this.greyClouds) {
+      this.greyClouds = !this.greyClouds;
+      this.loadClouds();
+    }
     const chunks = terrainOf(layout, island);
     const srcs = new Map<string, number>();
     for (const chunk of chunks.values()) for (const item of chunk.items) srcs.set(item.src, item.w);
@@ -741,22 +922,7 @@ export class World {
     const tiles = layout.size;
     for (const nest of nests) {
       const at = island.at(nest.x * tiles, nest.y * tiles);
-      const w = nest.r * 2 * tiles * 2 * HALF_W + 40;
-      const s = w / 120;
-      const [x0, y0] = [at.x - w / 2, at.y - w / 4];
-      const pt = (x: number, y: number) => [x0 + x * s, y0 + y * s] as const;
-      this.nests
-        .ellipse(...pt(60, 30), 56 * s, 27 * s)
-        .fill(0x8a5a33)
-        .stroke({ color: 0x000000, width: 5 * s })
-        .ellipse(...pt(60, 31), 36 * s, 15 * s)
-        .fill(0x5e3b20)
-        .stroke({ color: 0x000000, width: 4 * s })
-        .moveTo(...pt(14, 26))
-        .quadraticCurveTo(...pt(40, 14), ...pt(70, 18))
-        .moveTo(...pt(50, 46))
-        .quadraticCurveTo(...pt(80, 44), ...pt(104, 30))
-        .stroke({ color: 0x000000, width: 3 * s, cap: "round" });
+      drawNest(this.nests, at.x, at.y + nest.r * tiles * HALF_H * 0.15, nest.r * 2 * tiles * 2 * HALF_W + 40);
     }
     for (const key of keys) if (chunks.has(key)) this.mount(key);
     if (this.map) this.setMap(true);
