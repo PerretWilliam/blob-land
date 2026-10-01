@@ -27,12 +27,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { EmptyState, RetryButton } from "@/components/empty-state";
 import { FamilyPanel } from "@/components/family-tree";
 import { GardenNewsPanel } from "@/components/garden-news-panel";
+import { DevPanel } from "@/components/dev-panel";
 import { RelationsPanel } from "@/components/relations-panel";
 import { Button } from "@/components/ui/button";
 import { ActivityIcon, blobStateAt, MoodIcon, moodOf, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import { journalLine, language, listNames, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
 import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
+import { DEV, devNow, devSkew, useKnobs } from "@/lib/dev";
 import type { LocalLife } from "@/lib/life";
 import { canQuit, quit } from "@/lib/quit";
 import { useGardenIsland } from "@/lib/use-garden-island";
@@ -101,12 +103,14 @@ export function GardenScreen({
   // Whose relations the panel opens on: the player's own unless a blob's ID card asked.
   const [relationsOf, setRelationsOf] = useState<{ seed: string; name: string } | undefined>(undefined);
   // Re-render now and then, so states (and expressions) follow the clock.
-  const [now, setNow] = useState(() => Date.now());
+  const dev = useKnobs();
+  const [now, setNow] = useState(devNow);
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), Math.max(500, STATE_TICK_MS / gardenClock.rate));
+    const id = setInterval(() => setNow(devNow()), Math.max(500, STATE_TICK_MS / (gardenClock.rate * Math.max(1, dev.speed))));
     return () => clearInterval(id);
-  }, [gardenClock.rate]);
-  const gardenNow = gardenTime(gardenClock);
+  }, [gardenClock.rate, dev.speed]);
+  const gardenClockNow = () => gardenTime(gardenClock) + devSkew();
+  const gardenNow = gardenClockNow();
   const nameOf = (seed: string) => blobs.find((b) => b.seed === seed)?.pseudo ?? t.common.aBlob;
   // A garden blob as the scene draws it: its face and activity right now, off its timeline.
   const fromGarden = (blob: GardenBlob, label = blob.pseudo ?? t.common.aNewBlob): SceneBlob => {
@@ -129,7 +133,7 @@ export function GardenScreen({
       country: blob.country,
     };
   };
-  const reducedMotion = usePrefersReducedMotion();
+  const reducedMotion = usePrefersReducedMotion() || dev.reducedMotion;
   // Losing the account (or never having one) means there's no garden to show.
   const inGarden = view === "garden" && account !== null;
   // The shared garden is never edited: everyone sees the same generated
@@ -172,9 +176,9 @@ export function GardenScreen({
   return (
     <main className="fixed inset-0 overflow-hidden bg-background">
       {inGarden ? (
-        gardenLayout && <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55} startAt={atHome ? account.seed : undefined}
+        gardenLayout && <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55 * dev.blobSize} startAt={atHome ? account.seed : undefined}
           cardHidden={panel === "relations"}
-          clock={() => gardenTime(gardenClock)}
+          clock={gardenClockNow}
           onShowRelations={(seed, name) => {
             setRelationsOf({ seed, name });
             setPanel("relations");
@@ -186,10 +190,14 @@ export function GardenScreen({
           blobs={privateBlobs}
           reducedMotion={reducedMotion}
           layout={island}
+          blobScale={0.6 * dev.blobSize}
+          clock={devNow}
           cardHidden={panel === "relations"}
           onCellPaint={editing ? (n) => onIslandChange(paintCell(island, n, tool)) : undefined}
         />
       )}
+
+      {DEV && <DevPanel time={inGarden ? gardenClockNow : devNow} />}
 
       <nav
         aria-label={t.game.menu}

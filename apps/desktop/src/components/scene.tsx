@@ -1,4 +1,4 @@
-import { alongPath, daylight, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Route, type Segment, type Sex } from "@blob-land/sim";
+import { alongPath, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Route, type Segment, type Sex } from "@blob-land/sim";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AuraFx, InteractionFx, momentAt, type Aura } from "@/components/interaction-fx";
 import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
 import { canWalkStraight, cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
+import { skyAt } from "@/lib/dev";
 import { useInView } from "@/lib/motion";
 import { countryName, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
@@ -231,7 +232,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   clockRef.current = clock;
   // Read on each render: the screen re-renders on its own tick.
   const now = clock();
-  const light = daylight(now);
+  const light = skyAt(now);
 
   const island = useMemo(() => islandGeometry(tiles, Math.max(0, ...layout.cells.map((c) => (c.height ?? 0) + (c.ramp ? 1 : 0)))), [layout, tiles]);
   const islandRef = useRef<IslandGeometry>(island);
@@ -834,7 +835,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       applyCamera(kCamera);
       syncMeetings();
       hover(now);
-      const light = daylight(clockRef.current());
+      const light = skyAt(clockRef.current());
       if (Math.abs(light - lastLight) > 0.002) {
         lastLight = light;
         world.setLight(light);

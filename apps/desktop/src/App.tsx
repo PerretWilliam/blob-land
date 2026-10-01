@@ -24,6 +24,7 @@ import {
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
 import { advanceLife, newLife } from "@/lib/life";
 import { useOnline } from "@/lib/online";
+import { devNow, useKnobs } from "@/lib/dev";
 import { loadState, saveState, type AppState } from "@/lib/state";
 
 const PING_INTERVAL_MS = 60_000;
@@ -39,6 +40,8 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [joining, setJoining] = useState(false);
   const { online, check: checkOnline } = useOnline();
+  // Dev: the faster the clock, the more often the private blob lives on.
+  const { speed } = useKnobs();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   // Redrawn in the language picked.
@@ -131,13 +134,13 @@ export default function App() {
     const id = setInterval(() => {
       setAppState((prev) => {
         if (!prev) return prev;
-        const next = { ...prev, life: advanceLife(prev.localSeed, prev.life, Date.now()).life, lastOpenedAt: Date.now() };
+        const next = { ...prev, life: advanceLife(prev.localSeed, prev.life, devNow()).life, lastOpenedAt: Date.now() };
         void saveState(next);
         return next;
       });
-    }, LIFE_TICK_MS);
+    }, Math.max(1000, LIFE_TICK_MS / Math.max(1, speed)));
     return () => clearInterval(id);
-  }, [appState?.localSeed]);
+  }, [appState?.localSeed, speed]);
 
   const fast = gardenClock.rate > 1;
   // Presence ping + garden refresh while the app is active — only once an
