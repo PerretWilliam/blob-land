@@ -666,7 +666,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const from = steerFrom();
     if (!from) return;
     following.current = false;
-    if (selectedRef.current) setSelected(null);
+    if (selectedRef.current) {
+      // At once, not at the next render: the frame loop would otherwise follow the blob again meanwhile.
+      selectedRef.current = null;
+      setSelected(null);
+    }
     view.current = clampView(change({ ...from }));
     if (reducedMotion) applyCamera(1);
   }
