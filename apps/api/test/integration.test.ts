@@ -371,6 +371,15 @@ describe("security", () => {
     expect((await call("/__dev/reset", { method: "POST", body: JSON.stringify({ count: -1 }) })).status).toBe(400);
   });
 
+  it("makes every region due when the garden's speed changes", async () => {
+    await db.update(regions).set({ nextStepAt: Date.now() + 600_000 });
+    const res = await call("/__dev/time-scale", { method: "POST", body: JSON.stringify({ scale: 100 }) });
+    expect(res.status).toBe(200);
+    const rows = await db.select({ at: regions.nextStepAt }).from(regions);
+    expect(rows.every((r) => r.at === 0)).toBe(true);
+    await call("/__dev/reset", { method: "POST", body: JSON.stringify({ count: 0 }) });
+  });
+
   it("refuses a nonsense garden speed", async () => {
     for (const scale of [0, -3, 5000, "fast"]) {
       const res = await call("/__dev/time-scale", { method: "POST", body: JSON.stringify({ scale }) });
