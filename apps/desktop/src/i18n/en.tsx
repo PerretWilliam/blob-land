@@ -1,4 +1,4 @@
-import { DISCOVERIES, type Activity, type Attraction, type InteractionKind, type Outcome, type RelationStatus, type Sex } from "@blob-land/sim";
+import { DISCOVERIES, type Activity, type Attraction, type InteractionKind, type Outcome, type Personality, type Pole, type RelationStatus, type Sex } from "@blob-land/sim";
 import type { ReactNode } from "react";
 
 type Said = (other: string) => string;
@@ -31,6 +31,40 @@ export const en = {
   identity: {
     is: "Your blob is",
     fallsFor: "It falls for",
+  },
+  personality: {
+    title: "Its character",
+    surprise: "Surprise me",
+    /** Each axis, as its two ends. */
+    axes: {
+      sociability: ["Loner", "Social"],
+      temper: ["Calm", "Fiery"],
+      playfulness: ["Serious", "Playful"],
+      romance: ["Down to earth", "Romantic"],
+      chronotype: ["Early bird", "Night owl"],
+      kindness: ["Blunt", "Tender"],
+      loyalty: ["Fickle", "Loyal"],
+      curiosity: ["Homebody", "Globetrotter"],
+    } satisfies Record<keyof Personality, [string, string]>,
+    /** What a character reads as, by its most marked poles. */
+    poles: {
+      "sociability+": "Social butterfly",
+      "sociability-": "Lone wolf",
+      "temper+": "Hothead",
+      "temper-": "Cool cucumber",
+      "playfulness+": "Joker",
+      "playfulness-": "Deadpan",
+      "romance+": "Hopeless romantic",
+      "romance-": "Free spirit",
+      "kindness+": "Heart of gold",
+      "kindness-": "Prickly cactus",
+      "loyalty+": "True blue",
+      "loyalty-": "Wild card",
+      "curiosity+": "Explorer",
+      "curiosity-": "Homebody",
+    } satisfies Record<Pole, string>,
+    balanced: "Balanced soul",
+    both: (main: string, second: string) => `${main} & ${second.toLowerCase()}`,
   },
   country: {
     label: "Country (optional)",
@@ -170,6 +204,7 @@ export const en = {
     country: "Country",
     sex: "Sex",
     fallsFor: "Falls for",
+    character: "Character",
     age: "Age",
     child: "Child",
     grownUp: "Grown-up",
@@ -301,7 +336,7 @@ export const en = {
     title: "Settings",
     close: "Close settings",
     tabs: { blob: "My blob", garden: "Garden", language: "Language" },
-    look: "Its look comes from its name, and never changes. Who it is and who it falls for are yours to choose.",
+    look: "Its look comes from its name, and never changes. Who it is, who it falls for and its character are yours to choose.",
     save: "Save",
     undo: "Undo",
     saved: "Saved!",

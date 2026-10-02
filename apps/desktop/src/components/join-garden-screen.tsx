@@ -1,4 +1,4 @@
-import { MAX_NAME_LENGTH, type Identity } from "@blob-land/sim";
+import { MAX_NAME_LENGTH, type Identity, type Personality } from "@blob-land/sim";
 import { useState } from "react";
 import { CountryField } from "@/components/country-field";
 import { normalizeSeed } from "blobatar";
@@ -15,11 +15,12 @@ export interface JoinGardenScreenProps {
   localPseudo: string;
   /** Carried over to the account's blob. */
   identity: Identity;
+  personality: Personality;
   onJoined: (pseudo: string, response: AuthResponse) => void;
   onCancel: () => void;
 }
 
-export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoined, onCancel }: JoinGardenScreenProps) {
+export function JoinGardenScreen({ online, onRetry, localPseudo, identity, personality, onJoined, onCancel }: JoinGardenScreenProps) {
   const [mode, setMode] = useState<"register" | "login">("register");
   const [pseudo, setPseudo] = useState(localPseudo);
   const [password, setPassword] = useState("");
@@ -36,7 +37,7 @@ export function JoinGardenScreen({ online, onRetry, localPseudo, identity, onJoi
     setSuggestions([]);
     setPending(true);
     try {
-      const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity, country, friend));
+      const response = await (mode === "login" ? login(pseudo, password) : register(pseudo, password, identity, country, friend, personality));
       onJoined(pseudo, response);
     } catch (err) {
       if (mode === "register" && err instanceof ApiError && err.code === "pseudo already taken") {

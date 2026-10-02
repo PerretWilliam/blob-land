@@ -48,6 +48,8 @@ export interface Newcomer {
   name: string;
   country: string | null;
   identity: Identity;
+  /** The player's choice; rolled when not given. */
+  personality?: Personality;
 }
 
 /** New blobs in `region`, grown up and ready to live from `now`. */
@@ -63,7 +65,7 @@ export async function join(db: Db, region: number, newcomers: Newcomer[], now: n
     adultAt: now,
     sex: b.identity.sex,
     attraction: b.identity.attraction,
-    personality: JSON.stringify(randomPersonality(rng)),
+    personality: JSON.stringify(b.personality ?? randomPersonality(rng)),
     energy: 0.9,
     mood: 0.15,
     last: JSON.stringify(firstSegment(now, rng)),
