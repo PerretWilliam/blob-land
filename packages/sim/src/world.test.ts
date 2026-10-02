@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compatible, PERSONALITY_AXES, randomPersonality, type Identity, type Personality } from "./identity";
 import { allowedFor, feeling, INTERACTIONS, MAX_STEP, moodShift, pickInteraction, type MeetingContext } from "./interactions";
 import { DURATION, firstSegment, NEXT, nextSolo, SLEEP_HOURS, sleepPressure, type Segment } from "./life";
-import { affinity, applyDelta, newRelationship, readyForUnion, readyToBreakUp, relationStatus, type Relationship } from "./relationship";
+import { affinity, applyDelta, newRelationship, readyForUnion, readyToBreakUp, relationStatus, type RelationStatus, type Relationship } from "./relationship";
 import { randomRng, seededRng, type Rng } from "./rng";
 import { GROUP_MAX, stepWorld, type World, type WorldBlob } from "./world";
 
@@ -198,6 +198,8 @@ describe("relationships", () => {
     romance: 1,
     kindness: 0.5,
     taken: null,
+    energy: 0.7,
+    found: false,
     ...over,
   });
 
@@ -228,8 +230,26 @@ describe("relationships", () => {
   it("keeps flirting and kissing off the table without mutual attraction", () => {
     const rng = seededRng(2);
     const rel = { ...newRelationship("a", "b", seededRng(0)), status: "crush" as const };
-    for (let i = 0; i < 500; i++) expect(["flirt", "kiss"]).not.toContain(pickInteraction(ctx(rel, { canRomance: false }), rng));
+    for (let i = 0; i < 500; i++) expect(["flirt", "kiss", "confess"]).not.toContain(pickInteraction(ctx(rel, { canRomance: false }), rng));
     expect(INTERACTIONS).toContain("kiss");
+  });
+
+  it("comforts the low, confesses a deep crush, shares a find and naps only when it fits", () => {
+    const rng = seededRng(3);
+    const kinds = (status: RelationStatus, over: Partial<MeetingContext> = {}, extra: Partial<Relationship> = {}) => {
+      const rel = { ...newRelationship("a", "b", seededRng(0)), status, ...extra };
+      return new Set(Array.from({ length: 800 }, () => pickInteraction(ctx(rel, over), rng)));
+    };
+    expect(kinds("friends")).not.toContain("comfort");
+    expect(kinds("friends", { moodA: -0.8, kindness: 1 })).toContain("comfort");
+    expect(kinds("crush", {}, { romance: 20 })).not.toContain("confess");
+    expect(kinds("crush", {}, { romance: 60 })).toContain("confess");
+    expect(kinds("friends")).not.toContain("share_find");
+    expect(kinds("friends", { found: true })).toContain("share_find");
+    expect(kinds("lovers")).not.toContain("nap_together");
+    expect(kinds("lovers", { energy: 0.1 })).toContain("nap_together");
+    expect(feeling("nap_together", "good", "lovers")).toBe("sleepy");
+    expect(moodShift("comfort", "good", "friends")).toBeGreaterThan(moodShift("chat", "good", "friends"));
   });
 
   it("doesn't flicker between statuses at a threshold", () => {
@@ -284,7 +304,7 @@ describe("character and relationships", () => {
   it("keeps a loyal blob that's spoken for from flirting", () => {
     const rel = { ...newRelationship("a", "b", seededRng(0)), status: "crush" as const, romance: 50 };
     const rng = seededRng(5);
-    const base: MeetingContext = { rel, canRomance: true, parentAndChild: false, moodA: 0.5, moodB: 0.5, temper: 0.5, playfulness: 0.5, romance: 1, kindness: 0.5, taken: 1 };
+    const base: MeetingContext = { rel, canRomance: true, parentAndChild: false, moodA: 0.5, moodB: 0.5, temper: 0.5, playfulness: 0.5, romance: 1, kindness: 0.5, taken: 1, energy: 0.7, found: false };
     for (let i = 0; i < 300; i++) expect(pickInteraction(base, rng)).not.toBe("flirt");
   });
 

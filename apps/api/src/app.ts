@@ -1,4 +1,4 @@
-import { gardenSize, isAttraction, isCountry, isSex, MAX_NAME_LENGTH, playerPseudo, randomRng, REGION_CAP } from "@blob-land/sim";
+import { gardenSize, isAttraction, isCountry, isPersonality, isSex, PERSONALITY_AXES, MAX_NAME_LENGTH, playerPseudo, randomRng, REGION_CAP } from "@blob-land/sim";
 import type { HttpBindings } from "@hono/node-server";
 import { normalizeSeed } from "blobatar";
 import { and, asc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
@@ -240,6 +240,13 @@ app.patch("/me/identity", requireAuth, async (c) => {
     await reconsider(tx, mine.seed, { sex, attraction }, now);
   });
   return c.json({ ok: true });
+});
+
+// The player's say in their blob's character: the axes, all of them, kept as given.
+app.patch("/me/personality", requireAuth, async (c) => {
+  const { personality } = await body<{ personality?: unknown }>(c);
+  if (!isPersonality(personality)) return c.json({ error: `personality needs ${PERSONALITY_AXES.join(", ")}, each a number from 0 to 1` }, 400);
+  return changeMine(c, { personality: JSON.stringify(Object.fromEntries(PERSONALITY_AXES.map((a) => [a, personality[a]]))) });
 });
 
 app.patch("/me/visibility", requireAuth, async (c) => {

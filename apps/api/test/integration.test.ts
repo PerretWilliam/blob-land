@@ -1,4 +1,4 @@
-import { firstSegment, randomPersonality, seededRng, type Rng } from "@blob-land/sim";
+import { firstSegment, PERSONALITY_AXES, randomPersonality, seededRng, type Personality, type Rng } from "@blob-land/sim";
 import { and, eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
@@ -51,7 +51,7 @@ interface GardenBody {
   home: number;
   size: number;
   regions: { region: number; blobs: number }[];
-  blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; partner: string | null; segments: { start: number; end: number }[] }[];
+  blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; personality: Personality; partner: string | null; segments: { start: number; end: number }[] }[];
 }
 
 async function garden(token: string, query = ""): Promise<GardenBody> {
@@ -187,6 +187,19 @@ describe("blob-land API", () => {
     expect((await patch({ sex: "male", attraction: "any" })).status).toBe(200);
     // The cached view knows the region changed.
     expect((await garden(token)).blobs.find((b) => b.pseudo === "roxanne")).toMatchObject({ sex: "male", attraction: "any" });
+  });
+
+  it("shows every blob's character, and lets the player shape their own", async () => {
+    const { token } = await register("quill");
+    const mine = async () => (await garden(token)).blobs.find((b) => b.pseudo === "quill")!.personality;
+    expect(Object.keys(await mine()).sort()).toEqual([...PERSONALITY_AXES].sort());
+
+    const patch = (personality: unknown) => call("/me/personality", { method: "PATCH", headers: as(token), body: JSON.stringify({ personality }) });
+    const chosen = Object.fromEntries(PERSONALITY_AXES.map((a, i) => [a, i / 10]));
+    expect((await patch({ ...chosen, kindness: 2 })).status).toBe(400);
+    expect((await patch({ sociability: 0.5 })).status).toBe(400);
+    expect((await patch({ ...chosen, extra: "ignored" })).status).toBe(200);
+    expect(await mine()).toEqual(chosen);
   });
 
   it("reports pseudo availability, and offers suggestions once taken", async () => {

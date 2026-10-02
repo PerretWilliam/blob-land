@@ -37,6 +37,11 @@ export const PERSONALITY_AXES = ["sociability", "temper", "playfulness", "romanc
 
 export const isSex = (v: unknown): v is Sex => SEXES.includes(v as Sex);
 export const isAttraction = (v: unknown): v is Attraction => ATTRACTIONS.includes(v as Attraction);
+/** Every axis there, each a number in [0, 1]. */
+export function isPersonality(v: unknown): v is Personality {
+  const p = v as Record<string, unknown> | null;
+  return typeof p === "object" && p !== null && PERSONALITY_AXES.every((a) => { const x = p[a]; return typeof x === "number" && x >= 0 && x <= 1; });
+}
 
 /** Whether `a` is drawn to `b`. A blob with no sex only draws those attracted to anyone. */
 export function drawnTo(a: Identity, b: Identity): boolean {

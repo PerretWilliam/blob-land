@@ -298,6 +298,8 @@ function pair(
     romance: (b.personality.romance + c.personality.romance) / 2,
     kindness: (b.personality.kindness + c.personality.kindness) / 2,
     taken: takenBy(world, b, c),
+    energy: (b.vitals.energy + c.vitals.energy) / 2,
+    found: b.last.activity === "discover" || c.last.activity === "discover",
   };
   const kind = together && allowedFor(rel.status).includes(together) ? together : pickInteraction(ctx, rng);
   const outcome = rollOutcome(ctx, rng);

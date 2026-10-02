@@ -161,8 +161,23 @@ const Mending = ({ works }: { works: boolean }) => (
   </g>
 );
 
-const SHARED = new Set<InteractionKind>(["play", "parent_play", "gift", "kiss", "make_up"]);
-const ROMANTIC = new Set<InteractionKind>(["hug", "kiss", "flirt"]);
+// A dozing blob's z's, drifting up one after the other.
+const Snore = () => (
+  <g fill="none" stroke={INK} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    {[
+      [12, 28, 1],
+      [20, 22, 1.3],
+      [29, 15, 1.6],
+    ].map(([x, y, s], i) => (
+      <g key={x} transform={`translate(${x} ${y}) scale(${s})`}>
+        <path d="M-2 -2 H2 L-2 2 H2" className="fx-float" style={{ animationDelay: `${i * 0.6}s` }} strokeWidth={1.5 / s!} />
+      </g>
+    ))}
+  </g>
+);
+
+const SHARED = new Set<InteractionKind>(["play", "parent_play", "gift", "kiss", "make_up", "confess", "comfort", "share_find"]);
+const ROMANTIC = new Set<InteractionKind>(["hug", "kiss", "flirt", "confess"]);
 
 function art(kind: InteractionKind, outcome: Outcome): ReactNode {
   const bad = outcome === "bad";
@@ -230,6 +245,51 @@ function art(kind: InteractionKind, outcome: Outcome): ReactNode {
       );
     case "make_up":
       return <Mending works={!bad} />;
+    case "confess":
+      if (bad) return <BrokenHeart />;
+      return outcome === "good" ? (
+        <>
+          <Heart x={20} y={24} s={1.9} cls="fx-pulse" />
+          <Sparkle x={7} y={9} delay={0} />
+          <Sparkle x={33} y={7} delay={0.6} fill="#ff8fc0" />
+        </>
+      ) : (
+        <Bubble>
+          <Heart x={20} y={17} s={0.75} fill="#ff8fc0" cls="fx-pulse" />
+        </Bubble>
+      );
+    case "comfort":
+      return bad ? (
+        <SweatDrop />
+      ) : (
+        <>
+          <Heart x={16} y={30} s={0.8} fill="#ffb3cf" />
+          <Heart x={26} y={30} s={0.65} delay={1} fill="#ffb3cf" />
+          {outcome === "good" ? <Sparkle x={32} y={10} delay={0.5} fill="#7ee0ff" /> : null}
+        </>
+      );
+    case "tease":
+      return (
+        <>
+          <Bubble stroke={bad ? "#d62828" : INK}>
+            {/* A grin with its tongue out. */}
+            <path d="M12 12 q8 7 16 0" fill="none" stroke={INK} strokeWidth="1.8" strokeLinecap="round" />
+            <path d="M18 15.5 q2 4 4 0" fill="#ff6b8b" stroke={INK} strokeWidth="1.2" />
+          </Bubble>
+          {bad ? <Vein /> : null}
+        </>
+      );
+    case "share_find":
+      return (
+        <>
+          <Sparkle x={20} y={20} delay={0} />
+          <Sparkle x={10} y={12} delay={0.4} fill="#7ee0ff" />
+          <Sparkle x={30} y={10} delay={0.8} fill="#ff8fc0" />
+          {bad ? <SweatDrop /> : null}
+        </>
+      );
+    case "nap_together":
+      return bad ? <SweatDrop /> : <Snore />;
     case "sulk":
       return <RainCloud />;
     case "ignore":

@@ -202,6 +202,11 @@ export const fr: Messages = {
       sulk: { good: (o) => `A boudé près de ${o}, puis a laissé couler.`, meh: (o) => `A boudé ${o}.`, bad: (o) => `A boudé ${o} pendant des heures.` },
       ignore: { good: (o) => `A salué ${o} d'un signe de tête, sans plus.`, meh: (o) => `A ignoré ${o}.`, bad: (o) => `A ostensiblement ignoré ${o}.` },
       parent_play: { good: (o) => `A joué avec ${o}, que de fous rires.`, meh: (o) => `A joué avec ${o}.`, bad: (o) => `A joué avec ${o}, qui a fait un caprice.` },
+      confess: { good: (o) => `A avoué ses sentiments à ${o}, et c'est réciproque.`, meh: (o) => `A failli avouer ses sentiments à ${o}.`, bad: (o) => `A avoué ses sentiments à ${o}. Ce n'est pas réciproque.` },
+      comfort: { good: (o) => `A remonté le moral de ${o}.`, meh: (o) => `A tenu compagnie à ${o} dans un moment de déprime.`, bad: (o) => `A voulu remonter le moral de ${o}, sans succès.` },
+      tease: { good: (o) => `A taquiné ${o}, qui a bien ri.`, meh: (o) => `A un peu taquiné ${o}.`, bad: (o) => `A taquiné ${o} un peu trop loin.` },
+      share_find: { good: (o) => `A montré une trouvaille à ${o}, qui a adoré.`, meh: (o) => `A montré une trouvaille à ${o}.`, bad: (o) => `A montré une trouvaille à ${o}, qui n'y a pas vu grand intérêt.` },
+      nap_together: { good: (o) => `A fait une sieste tout contre ${o}.`, meh: (o) => `A somnolé à côté de ${o}.`, bad: (o) => `A voulu faire la sieste à côté de ${o}, qui n'arrêtait pas de gigoter.` },
     },
   },
   discoveries: {

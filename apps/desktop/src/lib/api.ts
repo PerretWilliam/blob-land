@@ -1,4 +1,4 @@
-import type { Attraction, Identity, Kin, RelationStatus, Segment, Sex } from "@blob-land/sim";
+import type { Attraction, Identity, Kin, Personality, RelationStatus, Segment, Sex } from "@blob-land/sim";
 import { fetch } from "@tauri-apps/plugin-http";
 import { t } from "@/i18n";
 
@@ -18,6 +18,8 @@ export interface GardenBlob {
   country: string | null;
   sex: Sex;
   attraction: Attraction;
+  /** Its character: the player's choice for their blob, rolled at birth for a child. */
+  personality: Personality;
   bornAt: number;
   /** A child until then. */
   adultAt: number;
@@ -143,6 +145,10 @@ export function setCountry(token: string, country: string | null): Promise<{ ok:
 
 export function setIdentity(token: string, identity: Identity): Promise<{ ok: true }> {
   return request("/me/identity", { method: "PATCH", headers: authHeader(token), body: JSON.stringify(identity) });
+}
+
+export function setPersonality(token: string, personality: Personality): Promise<{ ok: true }> {
+  return request("/me/personality", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ personality }) });
 }
 
 export function login(pseudo: string, password: string): Promise<AuthResponse> {

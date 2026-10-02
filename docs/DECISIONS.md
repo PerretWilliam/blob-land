@@ -38,6 +38,8 @@ A personality is eight axes in [0, 1]: sociability, temper, playfulness, romance
 
 Character tilts the odds, never the rules: a pair's chemistry is still mostly luck, with their affinity (alike in play and company, not two hot tempers, kindness on either side) tipping it. Romantics fall a little sooner and loyal blobs want more friendship first; loyal couples weather more before breaking up. A blob spoken for flirts much less the more loyal it is, and when it does, word gets around: its sweetheart's tension rises, more for a loyal one. Each blob keeps one best friend (two if very sociable): a new one takes the place of the weakest only once it's the closer friendship. Any tuning is held to `balance.test.ts`, a month of three gardens that must stay believable.
 
+Some moments only happen when they fit, so they mean something when they do: a blob comforts a friend who's low (the kinder, the likelier), confesses only once a crush runs deep, shows off a find only right after finding it, and naps against a sweetheart, best friend or family only when both are flagging. Teasing goes both ways: banter between friends, a jab between rivals. Every blob's character is served with it, as it's shown in the app; the player sets their own whole (`PATCH /me/personality`), since a character half chosen is no one's.
+
 ## Couples form and break up; children grow up
 
 A union starts when a relationship is in love enough, and ends when the couple breaks up (they become exes), not at a birth. Children can be born while a couple is together, after a cooldown, less often as the garden fills up. Children grow up after 8–12 days and can then fall in love and have children of their own; unions are between blob seeds, not accounts, for that reason.

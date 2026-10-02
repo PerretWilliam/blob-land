@@ -205,6 +205,11 @@ export const en = {
       sulk: { good: (o) => `Sulked near ${o}, then let it go.`, meh: (o) => `Sulked at ${o}.`, bad: (o) => `Sulked at ${o} for ages.` },
       ignore: { good: (o) => `Nodded at ${o} and moved on.`, meh: (o) => `Ignored ${o}.`, bad: (o) => `Pointedly ignored ${o}.` },
       parent_play: { good: (o) => `Played with ${o}, all giggles.`, meh: (o) => `Played with ${o}.`, bad: (o) => `Played with ${o}, who got cranky.` },
+      confess: { good: (o) => `Told ${o} how they feel, and it's mutual.`, meh: (o) => `Almost told ${o} how they feel.`, bad: (o) => `Told ${o} how they feel. It isn't mutual.` },
+      comfort: { good: (o) => `Cheered ${o} up.`, meh: (o) => `Kept ${o} company through a low moment.`, bad: (o) => `Tried to cheer ${o} up, without luck.` },
+      tease: { good: (o) => `Teased ${o}, and they laughed.`, meh: (o) => `Teased ${o} a little.`, bad: (o) => `Teased ${o} a bit too far.` },
+      share_find: { good: (o) => `Showed ${o} a find, and they loved it.`, meh: (o) => `Showed ${o} a find.`, bad: (o) => `Showed ${o} a find; they weren't impressed.` },
+      nap_together: { good: (o) => `Napped snugly beside ${o}.`, meh: (o) => `Dozed beside ${o}.`, bad: (o) => `Tried to nap beside ${o}, who kept fidgeting.` },
     } satisfies Record<InteractionKind, Record<Outcome, Said>>,
   },
   /** What a blob finds exploring, as the sim stores it. */

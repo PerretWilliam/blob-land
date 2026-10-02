@@ -8,6 +8,7 @@ import {
   type Attraction,
   type Identity,
   type Kin,
+  type Personality,
   type RelationStatus,
   type Relationship,
   type Rng,
@@ -325,6 +326,7 @@ export interface GardenBlob {
   country: string | null;
   sex: Sex;
   attraction: Attraction;
+  personality: Personality;
   bornAt: number;
   adultAt: number;
   partner: string | null;
@@ -376,6 +378,7 @@ export async function gardenView(db: Db, region: number, now: number): Promise<V
         country: blobs.country,
         sex: blobs.sex,
         attraction: blobs.attraction,
+        personality: blobs.personality,
         bornAt: blobs.bornAt,
         adultAt: blobs.adultAt,
         owner: blobs.ownerUserId,
@@ -407,6 +410,7 @@ export async function gardenView(db: Db, region: number, now: number): Promise<V
     country: b.country,
     sex: b.sex as Sex,
     attraction: b.attraction as Attraction,
+    personality: personalityOf(JSON.parse(b.personality), b.seed),
     bornAt: b.bornAt,
     adultAt: b.adultAt,
     partner: partner.get(b.seed) ?? null,
