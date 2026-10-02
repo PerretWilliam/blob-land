@@ -56,6 +56,10 @@ export interface MeetingContext {
   temper: number;
   playfulness: number;
   romance: number;
+  kindness: number;
+  /** Either of them is with someone else: the loyalty of the more loyal one
+   * of those, which holds a flirt back. Null when both are free. */
+  taken: number | null;
 }
 
 export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind {
@@ -71,9 +75,12 @@ export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind 
   scale("play", 0.5 + ctx.playfulness);
   scale("dance", 0.5 + ctx.playfulness);
   // A spark feeds itself: the more romance there is, the more flirting.
-  scale("flirt", (0.3 + 1.4 * ctx.romance) * Math.max(0.1, 1 + 1.5 * chem) * (1 + ctx.rel.romance / 25));
-  // …and so does a grudge: every fight makes the next one likelier.
-  scale("argue", (0.5 + ctx.temper) * (1 - 0.6 * mood) * (1 - 0.5 * chem) * (1 + ctx.rel.tension / 20));
+  // Spoken for, a loyal blob mostly keeps it to itself.
+  scale("flirt", (0.3 + 1.4 * ctx.romance) * Math.max(0.1, 1 + 1.5 * chem) * (1 + ctx.rel.romance / 25) * (ctx.taken === null ? 1 : 0.5 * (1 - ctx.taken)));
+  // …and so does a grudge: every fight makes the next one likelier. Kindness
+  // picks fewer fights, and makes up sooner.
+  scale("argue", (0.5 + ctx.temper) * (1.3 - 0.6 * ctx.kindness) * (1 - 0.6 * mood) * (1 - 0.5 * chem) * (1 + ctx.rel.tension / 20));
+  scale("make_up", 0.5 + ctx.kindness);
   scale("ignore", 1 + ctx.rel.tension / 30);
   scale("sulk", 1 - 0.6 * mood);
   scale("hug", 1 + 0.5 * mood);
@@ -125,7 +132,7 @@ export function deltaFor(kind: InteractionKind, outcome: Outcome, ctx: MeetingCo
     friendship: cap(f * jitter() * (f > 0 ? 1 + chem : 1 - 0.5 * chem)),
     // Without mutual attraction romance can only fade, and without chemistry it barely grows.
     romance: cap(ctx.canRomance ? r * jitter() * (0.5 + ctx.romance) * (r > 0 ? 1 + chem : 1) : Math.min(0, r)),
-    tension: cap(t * jitter() * (0.6 + 0.8 * ctx.temper) * (t > 0 ? 1 - chem : 1 + 0.5 * chem)),
+    tension: cap(t * jitter() * (0.6 + 0.8 * ctx.temper) * (t > 0 ? (1 - chem) * (1.3 - 0.6 * ctx.kindness) : 1 + 0.5 * chem)),
   };
 }
 

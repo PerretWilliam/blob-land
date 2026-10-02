@@ -12,6 +12,7 @@ import {
 } from "./interactions";
 import { canSocialize, DURATION, firstSegment, liveThrough, nextSolo, type Segment, type Vitals } from "./life";
 import {
+  affinity,
   applyDelta,
   decay,
   newRelationship,
@@ -281,7 +282,8 @@ function pair(
   const key = pairKey(b.seed, c.seed);
   const union = activeUnion(world, b.seed);
   const couple = union !== undefined && (union.a === c.seed || union.b === c.seed);
-  let rel = decay(world.relationships.get(key) ?? newRelationship(b.seed, c.seed, rng), start, couple);
+  let rel = decay(world.relationships.get(key) ?? newRelationship(b.seed, c.seed, rng, null, affinity(b.personality, c.personality)), start, couple);
+  const before = rel.status;
 
   const young = (x: WorldBlob) => start < x.adultAt;
   const parentOf = (p: WorldBlob, kid: WorldBlob) => kid.parents?.includes(p.seed) ?? false;
@@ -294,6 +296,8 @@ function pair(
     temper: (b.personality.temper + c.personality.temper) / 2,
     playfulness: (b.personality.playfulness + c.personality.playfulness) / 2,
     romance: (b.personality.romance + c.personality.romance) / 2,
+    kindness: (b.personality.kindness + c.personality.kindness) / 2,
+    taken: takenBy(world, b, c),
   };
   const kind = together && allowedFor(rel.status).includes(together) ? together : pickInteraction(ctx, rng);
   const outcome = rollOutcome(ctx, rng);
@@ -301,13 +305,16 @@ function pair(
   if (together) delta = { friendship: delta.friendship * CROWD, romance: delta.romance * CROWD, tension: delta.tension * CROWD };
   rel = applyDelta(rel, delta, end, couple);
   out.meetings.push({ id: crypto.randomUUID(), a: rel.a, b: rel.b, kind, outcome, start, end, rng: randomSeed(rng), delta });
+  if (rel.status === "best_friends" && before !== "best_friends") rel = { ...rel, status: makeRoom(world, [b, c], rel, touched) };
+  if (kind === "flirt" && outcome === "good") for (const x of [b, c]) jealous(world, x, touched);
 
-  if (couple && readyToBreakUp(rel)) {
+  const loyalty = (b.personality.loyalty + c.personality.loyalty) / 2;
+  if (couple && readyToBreakUp(rel, loyalty)) {
     union.endedAt = end;
     out.unionsEnded.push(union);
     rel = { ...rel, ex: true, romance: Math.max(0, rel.romance - 20) };
     rel = { ...rel, status: relationStatus(rel, false) };
-  } else if (!couple && ctx.canRomance && readyForUnion(rel) && !union && !activeUnion(world, c.seed)) {
+  } else if (!couple && ctx.canRomance && readyForUnion(rel, ctx.romance, loyalty) && !union && !activeUnion(world, c.seed)) {
     const started: Union = { id: crypto.randomUUID(), a: rel.a, b: rel.b, startedAt: end, endedAt: null, lastBirthAt: null };
     world.unions.push(started);
     out.unionsStarted.push(started);
@@ -316,6 +323,58 @@ function pair(
   world.relationships.set(key, rel);
   touched.set(key, rel);
   return { kind, outcome, status: rel.status };
+}
+
+/** Whether either of them is with someone else, and if so how loyal the
+ * more loyal of those is. */
+function takenBy(world: World, b: WorldBlob, c: WorldBlob): number | null {
+  let taken: number | null = null;
+  for (const [x, other] of [[b, c], [c, b]] as const) {
+    const u = activeUnion(world, x.seed);
+    if (u && u.a !== other.seed && u.b !== other.seed) taken = Math.max(taken ?? 0, x.personality.loyalty);
+  }
+  return taken;
+}
+
+/** `x` flirted with someone other than its sweetheart, and word gets around
+ * a garden: the more loyal the sweetheart, the more it stings. */
+function jealous(world: World, x: WorldBlob, touched: Map<string, Relationship>) {
+  const union = activeUnion(world, x.seed);
+  if (!union) return;
+  const partner = world.blobs.get(union.a === x.seed ? union.b : union.a);
+  const key = pairKey(union.a, union.b);
+  const rel = world.relationships.get(key);
+  if (!partner || !rel) return;
+  const hurt = partner.personality.loyalty;
+  const next = { ...rel, tension: Math.min(100, rel.tension + 1 + 3 * hurt) };
+  world.relationships.set(key, next);
+  touched.set(key, next);
+}
+
+// How many best friends a blob keeps: one, or two for a very sociable one.
+const bestFriendsMax = (x: WorldBlob) => (x.personality.sociability > 0.7 ? 2 : 1);
+
+/**
+ * `rel` just grew into best friends. Each of the pair has only so much room:
+ * if one is full, the new friendship takes the place of its weakest best
+ * friendship (which goes back to friends) only if it's already the stronger
+ * one; otherwise it stays plain friends for now. Returns `rel`'s status.
+ */
+function makeRoom(world: World, pair: WorldBlob[], rel: Relationship, touched: Map<string, Relationship>): RelationStatus {
+  const out: Relationship[] = [];
+  for (const x of pair) {
+    const mine = [...world.relationships.values()].filter((r) => r.status === "best_friends" && (r.a === x.seed || r.b === x.seed) && !(r.a === rel.a && r.b === rel.b));
+    if (mine.length < bestFriendsMax(x)) continue;
+    const weakest = mine.reduce((w, r) => (r.friendship < w.friendship ? r : w));
+    if (weakest.friendship >= rel.friendship) return "friends";
+    out.push(weakest);
+  }
+  for (const r of out) {
+    const next = { ...r, status: "friends" as const };
+    world.relationships.set(pairKey(r.a, r.b), next);
+    touched.set(pairKey(r.a, r.b), next);
+  }
+  return "best_friends";
 }
 
 /** A couple alone together, having a lovely time, may have a child. */

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { compatible, randomPersonality, type Identity } from "./identity";
+import { compatible, PERSONALITY_AXES, randomPersonality, type Identity, type Personality } from "./identity";
 import { allowedFor, feeling, INTERACTIONS, MAX_STEP, moodShift, pickInteraction, type MeetingContext } from "./interactions";
 import { DURATION, firstSegment, NEXT, nextSolo, SLEEP_HOURS, sleepPressure, type Segment } from "./life";
-import { applyDelta, newRelationship, relationStatus, type Relationship } from "./relationship";
+import { affinity, applyDelta, newRelationship, readyForUnion, readyToBreakUp, relationStatus, type Relationship } from "./relationship";
 import { randomRng, seededRng, type Rng } from "./rng";
 import { GROUP_MAX, stepWorld, type World, type WorldBlob } from "./world";
 
@@ -196,6 +196,8 @@ describe("relationships", () => {
     temper: 0,
     playfulness: 1,
     romance: 1,
+    kindness: 0.5,
+    taken: null,
     ...over,
   });
 
@@ -253,5 +255,64 @@ describe("relationships", () => {
     expect(compatible({ sex: "female", attraction: "men" }, { sex: "male", attraction: "men" })).toBe(false);
     expect(compatible({ sex: "none", attraction: "any" }, { sex: "male", attraction: "women" })).toBe(false);
     expect(compatible({ sex: "none", attraction: "any" }, { sex: "male", attraction: "any" })).toBe(true);
+  });
+});
+
+const plain = (over: Partial<Personality> = {}): Personality => ({ ...Object.fromEntries(PERSONALITY_AXES.map((a) => [a, 0.5])), ...over }) as Personality;
+
+describe("character and relationships", () => {
+  it("fits average pairs at about zero, alike and kind ones better, hotheads worse", () => {
+    const rng = seededRng(4);
+    let sum = 0;
+    for (let i = 0; i < 4000; i++) sum += affinity(randomPersonality(rng), randomPersonality(rng));
+    expect(Math.abs(sum / 4000)).toBeLessThan(0.03);
+    const sweet = plain({ playfulness: 0.9, kindness: 0.9, temper: 0.1 });
+    const hot = plain({ temper: 1, kindness: 0.1 });
+    expect(affinity(sweet, sweet)).toBeGreaterThan(0.3);
+    expect(affinity(hot, hot)).toBeLessThan(-0.3);
+  });
+
+  it("lets romantics fall sooner, and loyal couples hold on longer", () => {
+    const rel = { ...newRelationship("a", "b", seededRng(0)), romance: 58, friendship: 40 };
+    expect(readyForUnion(rel, 0.9, 0.5)).toBe(true);
+    expect(readyForUnion(rel, 0.1, 0.5)).toBe(false);
+    const rocky = { ...rel, romance: 45, tension: 65 };
+    expect(readyToBreakUp(rocky, 0.1)).toBe(true);
+    expect(readyToBreakUp(rocky, 0.9)).toBe(false);
+  });
+
+  it("keeps a loyal blob that's spoken for from flirting", () => {
+    const rel = { ...newRelationship("a", "b", seededRng(0)), status: "crush" as const, romance: 50 };
+    const rng = seededRng(5);
+    const base: MeetingContext = { rel, canRomance: true, parentAndChild: false, moodA: 0.5, moodB: 0.5, temper: 0.5, playfulness: 0.5, romance: 1, kindness: 0.5, taken: 1 };
+    for (let i = 0; i < 300; i++) expect(pickInteraction(base, rng)).not.toBe("flirt");
+  });
+
+  // a and c are about to become best friends; a already has one, b (not in
+  // the world: it's elsewhere). a is middling sociable: room for one.
+  function bestFriends(abFriendship: number) {
+    const a = plain({ sociability: 1, kindness: 1, temper: 0 });
+    const blob = (seed: string, personality: Personality): WorldBlob => ({
+      seed, identity: { sex: "none", attraction: "women" }, personality, bornAt: T0, adultAt: T0, parents: null, traits: null, vitals: { energy: 0.9, mood: 0.8 }, last: firstSegment(T0, seededRng(1), { x: 0.5, y: 0.5 }),
+    });
+    const world: World = {
+      blobs: new Map([["a", blob("a", { ...a, sociability: 0.6 })], ["c", blob("c", a)]]),
+      relationships: new Map([
+        ["a|b", { ...newRelationship("a", "b", seededRng(0)), friendship: abFriendship, status: "best_friends", meetings: 9, lastMetAt: T0 }],
+        ["a|c", { ...newRelationship("a", "c", seededRng(0)), friendship: 95, chemistry: 1, status: "friends", meetings: 9, lastMetAt: T0 }],
+      ]),
+      unions: [],
+    };
+    const step = stepWorld(world, T0 + 2 * DAY, seededRng(6));
+    expect(step.meetings.length).toBeGreaterThan(0);
+    return [world.relationships.get("a|b")!.status, world.relationships.get("a|c")!.status];
+  }
+
+  it("makes room for a closer best friend, demoting the old one", () => {
+    expect(bestFriends(70)).toEqual(["friends", "best_friends"]);
+  });
+
+  it("keeps the old best friend when the new one isn't closer yet", () => {
+    expect(bestFriends(100)).toEqual(["best_friends", "friends"]);
   });
 });
