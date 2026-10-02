@@ -1,4 +1,4 @@
-import type { Attraction, Identity, Kin, Personality, RelationStatus, Segment, Sex } from "@blob-land/sim";
+import type { Attraction, Gait, Identity, Kin, Personality, RelationStatus, Segment, Sex } from "@blob-land/sim";
 import { fetch } from "@tauri-apps/plugin-http";
 import { t } from "@/i18n";
 
@@ -20,6 +20,8 @@ export interface GardenBlob {
   attraction: Attraction;
   /** Its character: the player's choice for their blob, rolled at birth for a child. */
   personality: Personality;
+  /** Picked by its player; null walks as its character does. */
+  gait: Gait | null;
   bornAt: number;
   /** A child until then. */
   adultAt: number;
@@ -135,8 +137,8 @@ export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
 }
 
 /** `friend`: an account's pseudo, to live on their island. */
-export function register(pseudo: string, password: string, identity: Identity, country: string | null = null, friend = "", personality?: Personality): Promise<AuthResponse> {
-  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country, friend, personality }) });
+export function register(pseudo: string, password: string, identity: Identity, country: string | null = null, friend = "", personality?: Personality, gait?: Gait): Promise<AuthResponse> {
+  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country, friend, personality, gait }) });
 }
 
 export function setCountry(token: string, country: string | null): Promise<{ ok: true }> {
@@ -149,6 +151,11 @@ export function setIdentity(token: string, identity: Identity): Promise<{ ok: tr
 
 export function setPersonality(token: string, personality: Personality): Promise<{ ok: true }> {
   return request("/me/personality", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ personality }) });
+}
+
+/** `null`: walk as its character does. */
+export function setGait(token: string, gait: Gait | null): Promise<{ ok: true }> {
+  return request("/me/gait", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ gait }) });
 }
 
 export function login(pseudo: string, password: string): Promise<AuthResponse> {

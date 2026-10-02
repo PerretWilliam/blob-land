@@ -1,4 +1,4 @@
-import { gardenSize, isAttraction, isCountry, isPersonality, isSex, PERSONALITY_AXES, MAX_NAME_LENGTH, playerPseudo, randomRng, REGION_CAP, type Personality } from "@blob-land/sim";
+import { GAITS, gardenSize, isAttraction, isCountry, isGait, isPersonality, isSex, PERSONALITY_AXES, MAX_NAME_LENGTH, playerPseudo, randomRng, REGION_CAP, type Personality } from "@blob-land/sim";
 import type { HttpBindings } from "@hono/node-server";
 import { normalizeSeed } from "blobatar";
 import { and, asc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
@@ -117,11 +117,12 @@ app.get("/pseudo/:p", rateLimitPseudo, async (c) => {
   return c.json({ seed, available: false, suggestions });
 });
 
+const gaitError = `gait must be ${GAITS.join(", ")}, or null`;
 const personalityError = `personality needs ${PERSONALITY_AXES.join(", ")}, each a number from 0 to 1`;
 // Only the axes: anything else sent along is dropped.
 const pick = (p: Personality) => Object.fromEntries(PERSONALITY_AXES.map((a) => [a, p[a]])) as Record<keyof Personality, number>;
 
-type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attraction?: unknown; country?: unknown; friend?: unknown; personality?: unknown };
+type RegisterBody = { pseudo?: string; password?: string; sex?: unknown; attraction?: unknown; country?: unknown; friend?: unknown; personality?: unknown; gait?: unknown };
 
 app.post("/auth/register", rateLimitAuth, async (c) => {
   const input = await body<RegisterBody>(c);
@@ -139,6 +140,8 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
   // Optional: the private blob's character, so the garden one is the same blob. Rolled otherwise.
   const { personality } = input;
   if (personality !== undefined && !isPersonality(personality)) return c.json({ error: personalityError }, 400);
+  const gait = input.gait ?? null;
+  if (gait !== null && !isGait(gait)) return c.json({ error: gaitError }, 400);
 
   const seed = normalizeSeed(pseudo);
   if (await nameTaken(db, pseudo)) return c.json({ error: "pseudo already taken" }, 409);
@@ -152,7 +155,7 @@ app.post("/auth/register", rateLimitAuth, async (c) => {
   const id = crypto.randomUUID();
   const now = Date.now();
   const bornAt = await gardenNow();
-  const newcomer: Newcomer = { seed, ownerUserId: id, name: pseudo, country, identity: { sex, attraction }, personality: personality && pick(personality) };
+  const newcomer: Newcomer = { seed, ownerUserId: id, name: pseudo, country, identity: { sex, attraction }, personality: personality && pick(personality), gait };
   let home: number;
   try {
     // The account and its blob, whole or not at all.
@@ -254,6 +257,13 @@ app.patch("/me/personality", requireAuth, async (c) => {
   const { personality } = await body<{ personality?: unknown }>(c);
   if (!isPersonality(personality)) return c.json({ error: personalityError }, 400);
   return changeMine(c, { personality: JSON.stringify(pick(personality)) });
+});
+
+// How the player's blob walks, or null to walk as its character does.
+app.patch("/me/gait", requireAuth, async (c) => {
+  const { gait } = await body<{ gait?: unknown }>(c);
+  if (gait !== null && !isGait(gait)) return c.json({ error: gaitError }, 400);
+  return changeMine(c, { gait });
 });
 
 app.patch("/me/visibility", requireAuth, async (c) => {

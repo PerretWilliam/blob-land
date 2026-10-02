@@ -61,6 +61,7 @@ export const blobs = pgTable(
     sex: text().notNull(), // female | male | none
     attraction: text().notNull(), // women | men | any
     personality: text().notNull(), // JSON
+    gait: text(), // picked by the player; null walks as its character does
     energy: doublePrecision().notNull(),
     mood: doublePrecision().notNull(),
     last: text().notNull(), // JSON: its latest segment, where the step picks up

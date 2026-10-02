@@ -50,6 +50,10 @@ A blob is female, male or neither, and is drawn to women, men or anyone. The pla
 
 A change the blob's couple can't survive (they're no longer drawn to each other) breaks it up at once, as exes, and any romance it can no longer feel fades; the settings say so before it's saved. Nothing else is taken back: friendships, family and history stay.
 
+## A blob walks as its character does, or as its player picks
+
+Five gaits: an easy stroll, little bounces, a proud strut, shy little steps and heavy stomps. A blob walks the way its most marked trait does (`gaitOf`: playful bounces, quick-tempered stomps, solitary steps shyly, a sociable blob with little kindness struts), and strolls when none stands out, as about a third do. The player can pick their own blob's instead (`PATCH /me/gait`, null to go back), stored with it and served to everyone, like its character. A gait never comes from a blob's sex: that would decide how it behaves, which sex never does. Gaits are the walk cycle's numbers only (`GAITS` in `scene.tsx`): how fast the steps, whether it hops, how high and how hard it lands, how much it waddles and leans. Where it walks and how fast it gets there are the stored segments', unchanged.
+
 ## Hidden means hidden everywhere
 
 An account can hide from the garden. Its seed is its normalized pseudo, so hiding its name alone would hide nothing: a hidden account is left out of everything anyone else is sent — the region's blobs, as someone's partner, from meetings' `with`, from the news, the family tree (its children show with one parent) and relationships. Its own player still sees it whole (`/tree` and `/blobs/:seed/relationships` take an optional token for that).

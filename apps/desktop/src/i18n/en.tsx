@@ -32,6 +32,12 @@ export const en = {
     is: "Your blob is",
     fallsFor: "It falls for",
   },
+  gait: {
+    title: "How it walks",
+    /** Walking as its character does, which right now is `gait`. */
+    auto: (gait: string) => `As its character does (${gait})`,
+    names: { stroll: "Easy stroll", bouncy: "Little bounces", proud: "Proud strut", shy: "Shy little steps", stomp: "Heavy stomps" },
+  },
   personality: {
     title: "Its character",
     surprise: "Surprise me",

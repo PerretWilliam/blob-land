@@ -27,6 +27,11 @@ export const fr: Messages = {
     is: "Ton blob est",
     fallsFor: "Il craque pour",
   },
+  gait: {
+    title: "Sa démarche",
+    auto: (gait) => `Selon son caractère (${gait})`,
+    names: { stroll: "Pas tranquille", bouncy: "Petits bonds", proud: "Allure fière", shy: "Petits pas timides", stomp: "Pas lourds" },
+  },
   personality: {
     title: "Son caractère",
     surprise: "Surprends-moi",

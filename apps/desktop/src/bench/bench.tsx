@@ -14,7 +14,7 @@
  * without playing the moves, to look around by hand (`?talk` with everyone
  * talking, `?night` by night, `?rate=20` with garden time 20 times faster).
  */
-import { INTERACTIONS, MAX_GARDEN, playerPseudo, REGION_CAP, seededRng, type Segment } from "@blob-land/sim";
+import { GAITS, INTERACTIONS, MAX_GARDEN, playerPseudo, REGION_CAP, seededRng, type Segment } from "@blob-land/sim";
 import { BaseDirectory, mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
 import { useEffect, useRef, useState } from "react";
 import { expressionNamed, Scene, type SceneBlob } from "@/components/scene";
@@ -87,6 +87,7 @@ function crowd(): SceneBlob[] {
       expression: expressionNamed(list[0]!.expression),
       activity: "explore",
       sex: (["female", "male", "none"] as const)[i % 3]!,
+      gait: GAITS[i % GAITS.length]!,
       attraction: "any",
       country: rng() < 0.4 ? (["FR", "JP", "BR", "US", "DE", "IN", "NG", "KR"] as const)[Math.floor(rng() * 8)]! : undefined,
     };

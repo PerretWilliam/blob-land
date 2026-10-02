@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { character, childPersonality, MAX_NAME_LENGTH, PERSONALITY_AXES, personalityOf, playerPseudo, randomPersonality, type Personality } from "./identity";
+import { character, childPersonality, gaitOf, MAX_NAME_LENGTH, PERSONALITY_AXES, personalityOf, playerPseudo, randomPersonality, type Personality } from "./identity";
 import { seededRng } from "./rng";
 
 describe("playerPseudo", () => {
@@ -43,5 +43,23 @@ describe("childPersonality", () => {
     const child = childPersonality(flat({ loyalty: 0 }), flat({ loyalty: 0 }), seededRng(2));
     expect(Object.keys(child).sort()).toEqual([...PERSONALITY_AXES].sort());
     expect(child.loyalty).toBeLessThanOrEqual(0.15);
+  });
+});
+
+describe("gaitOf", () => {
+  it("walks the way the strongest trait does, and strolls when none stands out", () => {
+    expect(gaitOf(flat())).toBe("stroll");
+    expect(gaitOf(flat({ playfulness: 0.9 }))).toBe("bouncy");
+    expect(gaitOf(flat({ temper: 0.9, playfulness: 0.8 }))).toBe("stomp");
+    expect(gaitOf(flat({ sociability: 0.1 }))).toBe("shy");
+    expect(gaitOf(flat({ sociability: 0.9, kindness: 0.2 }))).toBe("proud");
+  });
+
+  it("leaves plenty of blobs strolling", () => {
+    const rng = seededRng(3);
+    const gaits = Array.from({ length: 1000 }, () => gaitOf(randomPersonality(rng)));
+    const strolling = gaits.filter((g) => g === "stroll").length;
+    expect(strolling).toBeGreaterThan(200);
+    expect(new Set(gaits).size).toBe(5);
   });
 });

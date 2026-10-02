@@ -1,4 +1,4 @@
-import { firstSegment, personalityOf, randomPersonality, randomRng, stepWorld, type Identity, type Personality, type Segment, type Vitals } from "@blob-land/sim";
+import { firstSegment, personalityOf, randomPersonality, randomRng, stepWorld, type Gait, type Identity, type Personality, type Segment, type Vitals } from "@blob-land/sim";
 
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
@@ -14,6 +14,8 @@ const MAX_CATCH_UP = 7 * DAY;
 export interface LocalLife {
   identity: Identity;
   personality: Personality;
+  /** Picked by the player; unset, it walks as its character does. */
+  gait?: Gait;
   vitals: Vitals;
   /** Sorted by start, running a little ahead of now. */
   segments: Segment[];
