@@ -185,18 +185,24 @@ function moveAnimation(kind: InteractionKind, face: number, turn: number, count:
         [0.25, { tx: -0.03 }], [0.3, { tx: 0.03 }], [0.35, { tx: 0 }], [1, { tx: 0 }],
       ]);
     case "play":
-    case "parent_play": // fx-hop
+    case "parent_play":
+    case "tease": // fx-hop
       return loop(700, [[0, { ty: 0 }, EASE_OUT], [0.5, { ty: -0.12 }, EASE_IN], [1, { ty: 0 }]]);
     case "dance": // fx-sway
       return loop(900, [[0, { rot: -8, tx: -0.03, ty: 0 }], [1, { rot: 8, tx: 0.03, ty: -0.04 }]], EASE_IN_OUT, true);
     case "hug":
-    case "kiss": // fx-lean
+    case "kiss":
+    case "comfort": // fx-lean
       return once(600, { rot: face * 9, tx: face * 0.12 });
     case "gift":
-    case "make_up": // fx-offer
+    case "make_up":
+    case "share_find": // fx-offer
       return once(600, { rot: face * 5, tx: face * 0.05 });
-    case "flirt": // fx-wiggle
+    case "flirt":
+    case "confess": // fx-wiggle
       return loop(1200, [[0, { rot: -4 }], [1, { rot: 4 }]], EASE_IN_OUT, true);
+    case "nap_together": // fx-doze, against the other
+      return once(900, { rot: face * 7, tx: face * 0.05, ty: 0.03, sx: 1.04, sy: 0.94 });
     case "sulk": // fx-slump
       return once(800, { rot: face * -4, ty: 0.04, sx: 1.04, sy: 0.94 });
     case "ignore": // fx-turn-away

@@ -14,6 +14,11 @@ export const INTERACTIONS = [
   "sulk",
   "ignore",
   "parent_play",
+  "confess",
+  "comfort",
+  "tease",
+  "share_find",
+  "nap_together",
 ] as const;
 export type InteractionKind = (typeof INTERACTIONS)[number];
 export type Outcome = "good" | "meh" | "bad";
@@ -27,21 +32,21 @@ type Weights = Partial<Record<InteractionKind, number>>;
  */
 const BY_STATUS: Record<RelationStatus, Weights> = {
   strangers: { chat: 5, play: 2, ignore: 2, gift: 0.5, flirt: 1 },
-  acquaintances: { chat: 5, play: 3, ignore: 1, gift: 1, argue: 1, flirt: 2.5 },
-  friends: { chat: 4, play: 4, dance: 2, hug: 2, gift: 1, argue: 1.5, flirt: 3.5 },
-  best_friends: { chat: 4, play: 4, dance: 3, hug: 3, gift: 1.5, argue: 1.2, flirt: 3 },
-  crush: { chat: 2, flirt: 5, gift: 2, dance: 2, hug: 1, play: 1, argue: 0.8 },
-  lovers: { hug: 4, kiss: 4, dance: 3, gift: 2, chat: 2, play: 2, argue: 1.6, sulk: 0.4 },
+  acquaintances: { chat: 5, play: 3, ignore: 1, gift: 1, argue: 1, flirt: 2.5, tease: 1, comfort: 0.3, share_find: 2 },
+  friends: { chat: 4, play: 4, dance: 2, hug: 2, gift: 1, argue: 1.5, flirt: 3.5, tease: 2, comfort: 1, share_find: 3 },
+  best_friends: { chat: 4, play: 4, dance: 3, hug: 3, gift: 1.5, argue: 1.2, flirt: 3, tease: 2.5, comfort: 1.5, share_find: 3, nap_together: 1 },
+  crush: { chat: 2, flirt: 5, gift: 2, dance: 2, hug: 1, play: 1, argue: 0.8, confess: 1.5, comfort: 0.5, share_find: 2 },
+  lovers: { hug: 4, kiss: 4, dance: 3, gift: 2, chat: 2, play: 2, argue: 1.6, sulk: 0.4, tease: 1.5, comfort: 1.5, share_find: 2, nap_together: 2 },
   complicated: { chat: 2, argue: 3, make_up: 2, sulk: 2, ignore: 1 },
-  rivals: { argue: 4, sulk: 2, ignore: 3, make_up: 0.5 },
+  rivals: { argue: 4, sulk: 2, ignore: 3, make_up: 0.5, tease: 1.5 },
   ex: { ignore: 4, sulk: 2, argue: 2, chat: 1, make_up: 0.5 },
-  family: { parent_play: 4, hug: 3, chat: 3, play: 2, argue: 1 },
+  family: { parent_play: 4, hug: 3, chat: 3, play: 2, argue: 1, tease: 1, comfort: 1.5, share_find: 3, nap_together: 2 },
 };
 
 /** Every kind a status can ever produce — what tests hold pickInteraction to. */
 export const allowedFor = (status: RelationStatus) => Object.keys(BY_STATUS[status]) as InteractionKind[];
 
-const ROMANTIC: readonly InteractionKind[] = ["flirt", "kiss"];
+const ROMANTIC: readonly InteractionKind[] = ["flirt", "kiss", "confess"];
 
 export interface MeetingContext {
   rel: Relationship;
@@ -60,12 +65,17 @@ export interface MeetingContext {
   /** Either of them is with someone else: the loyalty of the more loyal one
    * of those, which holds a flirt back. Null when both are free. */
   taken: number | null;
+  /** Mean energy of both, in [0, 1]. */
+  energy: number;
+  /** One of them has just found something on a walk. */
+  found: boolean;
 }
 
 export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind {
   const w: Weights = { ...BY_STATUS[ctx.rel.status] };
   if (!ctx.canRomance) for (const kind of ROMANTIC) delete w[kind];
   if (!ctx.parentAndChild) delete w.parent_play;
+  if (!ctx.found) delete w.share_find;
   // Personality and mood tilt the table, never add to it.
   const mood = (ctx.moodA + ctx.moodB) / 2;
   const chem = ctx.rel.chemistry;
@@ -85,6 +95,13 @@ export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind 
   scale("sulk", 1 - 0.6 * mood);
   scale("hug", 1 + 0.5 * mood);
   scale("make_up", 1 + 0.5 * mood);
+  // Only once a crush runs deep, and a romantic blob says so sooner.
+  scale("confess", (0.3 + 1.4 * ctx.romance) * Math.max(0, ctx.rel.romance - 30) / 20);
+  // Someone's low: the kinder they are, the likelier a shoulder. Nobody low, no comfort.
+  scale("comfort", (0.3 + 1.4 * ctx.kindness) * 6 * Math.max(0, -Math.min(ctx.moodA, ctx.moodB) - 0.1));
+  scale("tease", (0.3 + ctx.playfulness) * (0.6 + 0.8 * ctx.temper));
+  // Only when both are flagging (below a quarter, they're off to bed instead).
+  scale("nap_together", 10 * Math.max(0, 0.55 - ctx.energy));
   // Everything else was ruled out (a family with no small child left to play with, say).
   if (Object.keys(w).length === 0) return "chat";
   return weighted(rng, w);
@@ -117,6 +134,11 @@ const DELTAS: Record<InteractionKind, readonly [Triple, Triple, Triple]> = {
   sulk: [[0, 0, -1], [-1, 0, 2], [-2, -1, 3]],
   ignore: [[0, 0, -1], [-1, 0, 0], [-1, 0, 2]],
   parent_play: [[4, 0, -2], [2, 0, 0], [0, 0, 2]],
+  confess: [[2, 8, -2], [0, 3, 0], [-1, -5, 3]],
+  comfort: [[4, 1, -3], [2, 0, -1], [0, 0, 1]],
+  tease: [[3, 1, -1], [1, 0, 1], [-2, 0, 5]],
+  share_find: [[4, 1, -2], [2, 0, 0], [0, 0, 2]],
+  nap_together: [[2, 1, -3], [1, 0, -1], [0, 0, 1]],
 };
 
 /** The most any axis moves in one meeting: no one goes from stranger to best friend in a day. */
@@ -145,7 +167,8 @@ export function moodShift(kind: InteractionKind, outcome: Outcome, status: Relat
   if (kind === "argue" || kind === "sulk" || kind === "ignore") return outcome === "good" ? 0 : -0.15;
   if (status === "rivals" || status === "ex") return outcome === "good" ? 0 : -0.1;
   const close = status === "lovers" || status === "crush" || status === "best_friends" ? 1.5 : 1;
-  return (outcome === "good" ? 0.2 : 0.05) * close;
+  // A shoulder to lean on lifts more than a good time.
+  return (outcome === "good" ? (kind === "comfort" ? 0.35 : 0.2) : 0.05) * close;
 }
 
 /** The face one of them wears: the moment, coloured by who it's with. A blob
@@ -153,6 +176,7 @@ export function moodShift(kind: InteractionKind, outcome: Outcome, status: Relat
  * even a pleasant moment with a rival or an ex stays awkward. */
 export function feeling(kind: InteractionKind, outcome: Outcome, status: RelationStatus): string {
   if (kind === "argue" || outcome === "bad") return interactionExpression(kind, outcome);
+  if (kind === "nap_together") return "sleepy";
   if (status === "lovers") return "love";
   if (status === "crush") return outcome === "good" ? "love" : "shy";
   if (status === "rivals" || status === "ex") return kind === "ignore" ? "smug" : "unsure";
@@ -161,13 +185,19 @@ export function feeling(kind: InteractionKind, outcome: Outcome, status: Relatio
 
 /** The blobatar expression both wear while it happens. */
 export function interactionExpression(kind: InteractionKind, outcome: Outcome): string {
-  if (outcome === "bad") return kind === "argue" ? "mad" : kind === "flirt" || kind === "kiss" ? "sad" : "unsure";
+  if (outcome === "bad") return kind === "argue" ? "mad" : kind === "flirt" || kind === "kiss" || kind === "confess" ? "sad" : "unsure";
   switch (kind) {
     case "hug":
     case "kiss":
       return "love";
     case "flirt":
       return "shy";
+    case "confess":
+      return outcome === "good" ? "love" : "shy";
+    case "tease":
+      return outcome === "good" ? "happy" : "smug";
+    case "nap_together":
+      return "sleepy";
     case "gift":
       return outcome === "good" ? "love" : "happy";
     case "argue":

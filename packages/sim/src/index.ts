@@ -4,6 +4,7 @@ export {
   compatible,
   drawnTo,
   isAttraction,
+  isPersonality,
   isSex,
   randomIdentity,
   MAX_NAME_LENGTH,
