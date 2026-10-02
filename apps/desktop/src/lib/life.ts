@@ -1,4 +1,4 @@
-import { firstSegment, randomPersonality, randomRng, stepWorld, type Identity, type Personality, type Segment, type Vitals } from "@blob-land/sim";
+import { firstSegment, personalityOf, randomPersonality, randomRng, stepWorld, type Identity, type Personality, type Segment, type Vitals } from "@blob-land/sim";
 
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
@@ -32,7 +32,8 @@ export function advanceLife(seed: string, life: LocalLife, now: number): { life:
   const blob = {
     seed,
     identity: life.identity,
-    personality: life.personality,
+    // Stored before some axes existed, maybe: fill them in.
+    personality: personalityOf(life.personality, seed),
     bornAt: 0,
     adultAt: 0,
     parents: null,
@@ -43,5 +44,5 @@ export function advanceLife(seed: string, life: LocalLife, now: number): { life:
   const step = stepWorld({ blobs: new Map([[seed, blob]]), relationships: new Map(), unions: [] }, now + LOOKAHEAD, randomRng, MAX_CATCH_UP);
   const lived = step.segments.map(({ seed: _, ...segment }) => segment);
   const segments = [...life.segments, ...lived].filter((s) => s.end > now - KEEP);
-  return { life: { ...life, vitals: blob.vitals, segments }, lived };
+  return { life: { ...life, personality: blob.personality, vitals: blob.vitals, segments }, lived };
 }

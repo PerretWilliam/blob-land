@@ -1,13 +1,13 @@
 import {
   compatible,
   firstSegment,
+  personalityOf,
   randomPersonality,
   relationStatus,
   stepWorld,
   type Attraction,
   type Identity,
   type Kin,
-  type Personality,
   type RelationStatus,
   type Relationship,
   type Rng,
@@ -100,7 +100,7 @@ async function loadWorld(db: Db, region: number): Promise<World> {
     const blob: WorldBlob = {
       seed: r.seed,
       identity: { sex: r.sex as Sex, attraction: r.attraction as Attraction },
-      personality: JSON.parse(r.personality) as Personality,
+      personality: personalityOf(JSON.parse(r.personality), r.seed),
       bornAt: r.bornAt,
       adultAt: r.adultAt,
       parents: r.parentA && r.parentB ? [r.parentA, r.parentB] : null,

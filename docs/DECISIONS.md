@@ -32,6 +32,12 @@ Each pair has friendship, romance and tension, plus a chemistry rolled once when
 
 Meetings can grow into gatherings of up to five: company is picked by how well a blob gets on with everyone already there and by how close they stand, so blobs gather with their neighbours. A group does one thing together (chat, play, dance) and every pair in it still has its own moment — pairs whose status rules that out (rivals, exes) bicker or snub each other instead. Bonds move slower in a crowd, and children only come from a couple alone together.
 
+## Character colours relationships, without deciding them
+
+A personality is eight axes in [0, 1]: sociability, temper, playfulness, romance, chronotype, kindness, loyalty and curiosity. The app describes a blob by its two most marked axes (`character`), so every combination reads as its own character rather than one of a few fixed types; chronotype is a habit, not character, and stays out of it. Axes added later are rolled from the blob's seed when a stored personality lacks them (`personalityOf`), so old blobs get a stable, varied value with no migration.
+
+Character tilts the odds, never the rules: a pair's chemistry is still mostly luck, with their affinity (alike in play and company, not two hot tempers, kindness on either side) tipping it. Romantics fall a little sooner and loyal blobs want more friendship first; loyal couples weather more before breaking up. A blob spoken for flirts much less the more loyal it is, and when it does, word gets around: its sweetheart's tension rises, more for a loyal one. Each blob keeps one best friend (two if very sociable): a new one takes the place of the weakest only once it's the closer friendship. Any tuning is held to `balance.test.ts`, a month of three gardens that must stay believable.
+
 ## Couples form and break up; children grow up
 
 A union starts when a relationship is in love enough, and ends when the couple breaks up (they become exes), not at a birth. Children can be born while a couple is together, after a cooldown, less often as the garden fills up. Children grow up after 8–12 days and can then fall in love and have children of their own; unions are between blob seeds, not accounts, for that reason.

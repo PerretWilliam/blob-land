@@ -1,3 +1,4 @@
+import type { Personality } from "./identity";
 import type { Rng } from "./rng";
 
 /**
@@ -42,12 +43,29 @@ export interface Relationship {
 
 export const pairKey = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
 
-export function newRelationship(x: string, y: string, rng: Rng, kin: Kin | null = null): Relationship {
+/**
+ * How well two characters fit, in about [-1, 1]: blobs who like the same
+ * games get on, two hot tempers clash, and kindness on either side smooths
+ * things over. Zero for an average pair.
+ */
+export function affinity(x: Personality, y: Personality): number {
+  const alike = (u: number, v: number) => 1 - 2 * Math.abs(u - v);
+  const score =
+    0.35 * alike(x.playfulness, y.playfulness) +
+    0.2 * alike(x.sociability, y.sociability) +
+    1.2 * (0.25 - x.temper * y.temper) +
+    0.6 * ((x.kindness + y.kindness) / 2 - 0.5);
+  // The two "alike" terms average 1/3 for a random pair, not 0: centre them.
+  return Math.min(1, Math.max(-1, score - 0.55 / 3));
+}
+
+export function newRelationship(x: string, y: string, rng: Rng, kin: Kin | null = null, fit = 0): Relationship {
   const [a, b] = x < y ? [x, y] : [y, x];
   // Family starts out fond of each other; everyone else starts from nothing.
   const friendship = kin ? 55 : 0;
-  // Bell-shaped: most pairs are lukewarm, a few click or grate hard.
-  const chemistry = (rng() + rng() + rng()) / 1.5 - 1;
+  // Bell-shaped: most pairs are lukewarm, a few click or grate hard. Their
+  // characters tip it: luck still has the bigger say.
+  const chemistry = Math.min(1, Math.max(-1, 0.7 * ((rng() + rng() + rng()) / 1.5 - 1) + 0.5 * fit));
   return { a, b, friendship, romance: 0, tension: 0, chemistry, status: kin ? "family" : "strangers", kin, ex: false, meetings: 0, lastMetAt: null };
 }
 
@@ -123,8 +141,12 @@ export function applyDelta(rel: Relationship, d: Delta, at: number, together: bo
   return { ...next, status: relationStatus(next, together) };
 }
 
-/** Ready to become a couple: in love, not fighting, and actually friends. */
-export const readyForUnion = (rel: Relationship) => rel.romance >= 60 && rel.tension < 40 && rel.friendship >= 30;
+/** Ready to become a couple: in love, not fighting, and actually friends.
+ * `romance` and `loyalty` are the pair's means: romantics fall sooner, loyal
+ * blobs want to be real friends first. */
+export const readyForUnion = (rel: Relationship, romance = 0.5, loyalty = 0.5) =>
+  rel.romance >= 65 - 10 * romance && rel.tension < 40 && rel.friendship >= 25 + 10 * loyalty;
 
-/** A couple that can't go on: too much fighting, or the spark is gone. */
-export const readyToBreakUp = (rel: Relationship) => rel.tension >= 70 || rel.romance < 40;
+/** A couple that can't go on: too much fighting, or the spark is gone. Loyal
+ * blobs put up with more, and keep going on less. */
+export const readyToBreakUp = (rel: Relationship, loyalty = 0.5) => rel.tension >= 60 + 20 * loyalty || rel.romance < 50 - 20 * loyalty;

@@ -1,4 +1,4 @@
-import { between, pick, weighted, type Rng } from "./rng";
+import { between, pick, seededRng, weighted, type Rng } from "./rng";
 
 export const SEXES = ["female", "male", "none"] as const;
 export type Sex = (typeof SEXES)[number];
@@ -25,7 +25,15 @@ export interface Personality {
   /** Early bird (0) to night owl (1): shifts its bedtime and waking by up to
    * 4 hours either way, so the garden is never all asleep at once. */
   chronotype: number;
+  /** How gently it treats others: soothes quarrels, forgives sooner. */
+  kindness: number;
+  /** How much it holds on: slow to fall, slow to leave, and jealous. */
+  loyalty: number;
+  /** Wandering and finding things over sitting still. */
+  curiosity: number;
 }
+
+export const PERSONALITY_AXES = ["sociability", "temper", "playfulness", "romance", "chronotype", "kindness", "loyalty", "curiosity"] as const satisfies readonly (keyof Personality)[];
 
 export const isSex = (v: unknown): v is Sex => SEXES.includes(v as Sex);
 export const isAttraction = (v: unknown): v is Attraction => ATTRACTIONS.includes(v as Attraction);
@@ -72,7 +80,46 @@ export function playerPseudo(rng: Rng): string {
 }
 
 export function randomPersonality(rng: Rng): Personality {
-  return { sociability: rng(), temper: rng(), playfulness: rng(), romance: rng(), chronotype: rng() };
+  return { sociability: rng(), temper: rng(), playfulness: rng(), romance: rng(), chronotype: rng(), kindness: rng(), loyalty: rng(), curiosity: rng() };
+}
+
+/**
+ * A full personality from whatever was stored or sent: each axis kept if it's
+ * a number in [0, 1]. A missing one (a blob from before that axis existed) is
+ * rolled from its seed, so it's the same every time it's read.
+ */
+export function personalityOf(raw: unknown, seed: string): Personality {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  const rng = seededRng(h);
+  const given = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  const out = {} as Personality;
+  for (const axis of PERSONALITY_AXES) {
+    const v = given[axis];
+    const rolled = rng();
+    out[axis] = typeof v === "number" && v >= 0 && v <= 1 ? v : rolled;
+  }
+  return out;
+}
+
+/** One end of an axis, the way a character is described: `kindness+` is kind, `temper-` is easygoing. */
+export type Pole = `${Exclude<keyof Personality, "chronotype">}${"+" | "-"}`;
+
+// How far from the middle an axis must be to say something about a blob.
+const MARKED = 0.15;
+
+/**
+ * What a personality reads as: its most marked axis, and the next one if it's
+ * marked too. Every pair of poles is its own character (the app words them).
+ * `main` is null for a blob with nothing marked: a balanced one. Chronotype
+ * isn't character, it's a habit, and stays out of it.
+ */
+export function character(p: Personality): { main: Pole | null; second: Pole | null } {
+  const poles = PERSONALITY_AXES.filter((a) => a !== "chronotype")
+    .map((axis) => ({ pole: `${axis}${p[axis] >= 0.5 ? "+" : "-"}` as Pole, by: Math.abs(p[axis] - 0.5) }))
+    .filter((x) => x.by >= MARKED)
+    .sort((x, y) => y.by - x.by);
+  return { main: poles[0]?.pole ?? null, second: poles[1]?.pole ?? null };
 }
 
 /** A child's identity: rolled, not inherited. */
@@ -93,5 +140,8 @@ export function childPersonality(a: Personality, b: Personality, rng: Rng): Pers
     playfulness: mix(a.playfulness, b.playfulness),
     romance: mix(a.romance, b.romance),
     chronotype: mix(a.chronotype, b.chronotype),
+    kindness: mix(a.kindness, b.kindness),
+    loyalty: mix(a.loyalty, b.loyalty),
+    curiosity: mix(a.curiosity, b.curiosity),
   };
 }
