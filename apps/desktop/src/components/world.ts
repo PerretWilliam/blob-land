@@ -797,7 +797,7 @@ export class BlobView {
 
     // The body: the meeting's move (translate, rotate, scale), then the walk cycle, about the feet.
     const m = this.moment;
-    const move = m && this.stillSince !== null && !reduced ? moveAt(m.kind, m.face, m.turn, m.count, now, now - this.stillSince) : null;
+    const move = m && this.stillSince !== null && !reduced ? moveAt(m.kind, m.face, m.turn, m.count, now, now - this.stillSince, m.leaving) : null;
     aff.reset();
     if (move) aff.translate(move.tx * this.size, move.ty * this.size).rotate(move.rot).scale(move.sx, move.sy);
     const { lift, rotate, squash } = this.stride;

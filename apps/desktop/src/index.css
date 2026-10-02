@@ -228,6 +228,19 @@
 .fx-drip {
   animation: fx-drip 1.4s ease-in infinite;
 }
+.fx-fall {
+  animation: fx-fall 1.5s ease-in infinite both;
+}
+/* The three beats: hello plays once on arrival, then the moment fades in; goodbye loops till they part. */
+[data-still="1"] .fx-hello {
+  animation: fx-hello 1.2s ease-out both;
+}
+[data-still="1"] .fx-act {
+  animation: fx-act 0.35s 0.9s ease-out both;
+}
+.fx-bye {
+  animation: fx-bye 0.64s ease-in-out infinite alternate;
+}
 
 @keyframes fx-turn {
   0% { opacity: 0; scale: 0.6; }
@@ -294,6 +307,24 @@
   0% { opacity: 0; translate: 0 0; }
   30% { opacity: 1; }
   100% { opacity: 0; translate: 6px -4px; }
+}
+@keyframes fx-fall {
+  0% { opacity: 0; translate: 0 -4px; rotate: 0deg; }
+  20% { opacity: 1; }
+  100% { opacity: 0; translate: 0 18px; rotate: 200deg; }
+}
+@keyframes fx-hello {
+  0% { opacity: 0; scale: 0.5; }
+  20%, 75% { opacity: 1; scale: 1; }
+  100% { opacity: 0; scale: 0.85; }
+}
+@keyframes fx-act {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fx-bye {
+  from { rotate: -8deg; }
+  to { rotate: 8deg; }
 }
 @keyframes fx-drip {
   0% { opacity: 1; translate: 0 0; }

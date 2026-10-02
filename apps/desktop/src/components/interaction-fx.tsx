@@ -1,5 +1,6 @@
 import { segmentAt, type InteractionKind, type Outcome, type Segment } from "@blob-land/sim";
 import type { CSSProperties, ReactNode } from "react";
+import { greets } from "@/lib/blob-motion";
 
 /** What a blob is doing with others right now, as the scene animates it. */
 export interface Moment {
@@ -12,7 +13,12 @@ export interface Moment {
   face: 1 | -1;
   /** Changes with every new meeting: the scene restarts the effects' clock on it. */
   key: string;
+  /** About to end: time to say goodbye. */
+  leaving: boolean;
 }
+
+// How long before a meeting ends its blobs say goodbye, in its own (garden) time.
+const LEAVING_MS = 15_000;
 
 /**
  * Reads the meeting a blob is in at `t` off its timeline. `others` gives the
@@ -30,7 +36,7 @@ export function momentAt(seed: string, segments: readonly Segment[], t: number, 
   });
   // On screen, ground x runs right and ground y runs left.
   const dx = spots.length ? spots.reduce((a, b) => a + b, 0) / spots.length - (seg.x - seg.y) : 1;
-  return { kind, outcome, turn: everyone.indexOf(seed), count: everyone.length, face: dx < 0 ? -1 : 1, key: `${seg.start}` };
+  return { kind, outcome, turn: everyone.indexOf(seed), count: everyone.length, face: dx < 0 ? -1 : 1, key: `${seg.start}`, leaving: seg.end - t < LEAVING_MS };
 }
 
 const HEART = "M0 3 C -6 -2 -6 -8 -2.5 -8 C -1 -8 0 -7 0 -6 C 0 -7 1 -8 2.5 -8 C 6 -8 6 -2 0 3 Z";
@@ -50,8 +56,8 @@ const BrokenHeart = () => (
   </g>
 );
 
-const Bubble = ({ children, stroke = INK, fill = "#fff" }: { children: ReactNode; stroke?: string; fill?: string }) => (
-  <g className="fx-turn">
+const Bubble = ({ children, stroke = INK, fill = "#fff", cls = "fx-turn" }: { children: ReactNode; stroke?: string; fill?: string; cls?: string }) => (
+  <g className={cls}>
     <path
       d="M6 4 H34 a4 4 0 0 1 4 4 V21 a4 4 0 0 1 -4 4 H16 l-8 7 l1.5 -7 H6 a4 4 0 0 1 -4 -4 V8 a4 4 0 0 1 4 -4 Z"
       fill={fill}
@@ -78,6 +84,20 @@ const Grawlix = () => (
     <path d={STAR} transform="translate(20 14.5) scale(0.9)" fill="#d62828" stroke="none" />
     <path d="M29 9 l-3 6 h4 l-3 6" />
   </g>
+);
+
+// The three beats' bookends: a "!" on arrival, a wave of arcs on leaving.
+const Hello = () => (
+  <Bubble cls="fx-hello">
+    <path d="M20 8.5 V15.5" stroke={INK} strokeWidth="2.6" strokeLinecap="round" />
+    <circle cx="20" cy="20" r="1.5" fill={INK} />
+  </Bubble>
+);
+
+const Bye = () => (
+  <Bubble cls="fx-bye">
+    <path d="M14 10 q3 4.5 0 9 M19.5 8.5 q4 6 0 12 M25 7 q5 7.5 0 15" fill="none" stroke={INK} strokeWidth="1.6" strokeLinecap="round" />
+  </Bubble>
 );
 
 // The cross-shaped vein that pops on an angry head.
@@ -176,7 +196,51 @@ const Snore = () => (
   </g>
 );
 
-const SHARED = new Set<InteractionKind>(["play", "parent_play", "gift", "kiss", "make_up", "confess", "comfort", "share_find"]);
+// Speed lines behind a blob on the run.
+const Dash = () => (
+  <g fill="none" stroke={INK} strokeWidth="1.6" strokeLinecap="round" className="fx-puff">
+    <path d="M4 18 h9 M2 24 h12 M6 30 h7" />
+  </g>
+);
+
+const Moon = () => (
+  <g className="fx-bob">
+    <path d="M24 6 a9 9 0 1 0 9 12 a7 7 0 1 1 -9 -12 Z" fill="#ffe68a" stroke={INK} strokeWidth="1.4" strokeLinejoin="round" />
+  </g>
+);
+
+// An open book, for a story told.
+const Book = () => (
+  <g stroke={INK} strokeWidth="1.3" strokeLinejoin="round">
+    <path d="M20 10 Q14 7 9 9 V21 Q14 19 20 22 Z" fill="#fff6d6" />
+    <path d="M20 10 Q26 7 31 9 V21 Q26 19 20 22 Z" fill="#fff6d6" />
+    <path d="M12 12.5 h5 M12 15.5 h5 M23 12.5 h5 M23 15.5 h5" strokeWidth="0.9" />
+  </g>
+);
+
+// A clap of hands that aren't there: a burst where they meet.
+const Clap = () => (
+  <g transform="translate(20 18)" className="fx-pulse">
+    <path d={STAR} transform="scale(2.2)" fill="#ffd23f" stroke={INK} strokeWidth="0.6" />
+    <path d="M-10 -8 l-3 -3 M10 -8 l3 -3 M0 -12 v-4 M-12 2 h-4 M12 2 h4" stroke={INK} strokeWidth="1.5" strokeLinecap="round" />
+  </g>
+);
+
+// Confetti, for a find worth cheering.
+const Confetti = () => (
+  <g stroke={INK} strokeWidth="0.8">
+    {[
+      [8, "#ff5fa2", 0],
+      [16, "#ffd23f", 0.3],
+      [24, "#7ee0ff", 0.6],
+      [32, "#8be28b", 0.9],
+    ].map(([x, fill, delay]) => (
+      <rect key={x as number} x={x as number} y="8" width="3" height="5" rx="0.8" fill={fill as string} className="fx-fall" style={{ animationDelay: `${delay}s` }} />
+    ))}
+  </g>
+);
+
+const SHARED = new Set<InteractionKind>(["play", "parent_play", "gift", "kiss", "make_up", "confess", "comfort", "share_find", "high_five", "stargaze", "piggyback", "group_hug"]);
 const ROMANTIC = new Set<InteractionKind>(["hug", "kiss", "flirt", "confess"]);
 
 function art(kind: InteractionKind, outcome: Outcome): ReactNode {
@@ -290,6 +354,85 @@ function art(kind: InteractionKind, outcome: Outcome): ReactNode {
       );
     case "nap_together":
       return bad ? <SweatDrop /> : <Snore />;
+    case "high_five":
+      return bad ? <SweatDrop /> : <Clap />;
+    case "chase":
+    case "tag":
+      return (
+        <>
+          <Dash />
+          {bad ? <SweatDrop /> : kind === "tag" ? <Sparkle x={30} y={10} delay={0.3} fill="#7ee0ff" /> : null}
+        </>
+      );
+    case "whisper":
+      return (
+        <>
+          <Bubble fill="#f1ebff" stroke={bad ? "#d62828" : INK}>
+            <g fill={INK}>
+              {[16, 20, 24].map((x, i) => (
+                <circle key={x} cx={x} cy="14.5" r="1.3" className="fx-dot" style={{ animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </g>
+          </Bubble>
+          {outcome === "good" ? <Heart x={33} y={6} s={0.55} fill="#ff8fc0" /> : bad ? <SweatDrop /> : null}
+        </>
+      );
+    case "stargaze":
+      return (
+        <>
+          <Moon />
+          <Sparkle x={8} y={6} delay={0} fill="#fff4b0" />
+          <Sparkle x={36} y={24} delay={0.5} fill="#fff4b0" />
+          {outcome === "good" ? <Sparkle x={14} y={22} delay={1} fill="#fff4b0" /> : null}
+        </>
+      );
+    case "piggyback":
+      return bad ? (
+        <SweatDrop />
+      ) : (
+        <>
+          <Sparkle x={10} y={12} delay={0} />
+          <Heart x={28} y={16} s={0.7} delay={0.3} fill="#ffb3cf" />
+        </>
+      );
+    case "ring_dance":
+      return (
+        <>
+          <Note x={14} delay={0} double />
+          <Note x={28} delay={0.9} />
+          {bad ? <SweatDrop /> : <Sparkle x={34} y={8} delay={0.4} fill="#ff8fc0" />}
+        </>
+      );
+    case "story":
+      return (
+        <>
+          <Bubble>
+            <Book />
+          </Bubble>
+          {bad ? <SweatDrop /> : null}
+        </>
+      );
+    case "sing":
+      return (
+        <>
+          <Note x={10} delay={0} double />
+          <Note x={22} delay={0.45} />
+          <Note x={32} delay={0.9} double />
+          {bad ? <Vein /> : null}
+        </>
+      );
+    case "group_hug":
+      return bad ? (
+        <SweatDrop />
+      ) : (
+        <>
+          <Heart x={20} y={22} s={1.8} cls="fx-pulse" />
+          <Heart x={8} y={30} s={0.6} delay={0.4} fill="#ff8fc0" />
+          <Heart x={32} y={30} s={0.6} delay={1.1} fill="#ff8fc0" />
+        </>
+      );
+    case "cheer":
+      return bad ? <SweatDrop /> : <Confetti />;
     case "sulk":
       return <RainCloud />;
     case "ignore":
@@ -316,11 +459,22 @@ export function InteractionFx({ moment, size }: { moment: Moment; size: number }
     bottom: size * 0.45,
     left: moment.face * size * 0.6,
   } as CSSProperties;
+  const polite = greets(moment.kind);
   return (
     <div aria-hidden="true" data-fx={moment.kind} className="fx pointer-events-none absolute -translate-x-1/2" style={style}>
       <svg viewBox="0 0 40 36" className="block w-full overflow-visible">
         {/* Everything is drawn for a blob facing right; mirrored for the left. */}
-        <g transform={moment.face === 1 ? undefined : "translate(40 0) scale(-1 1)"}>{art(moment.kind, moment.outcome)}</g>
+        <g transform={moment.face === 1 ? undefined : "translate(40 0) scale(-1 1)"}>
+          {polite && moment.leaving ? (
+            <Bye />
+          ) : (
+            <>
+              {/* Hello first, then the moment itself. */}
+              {polite ? <Hello /> : null}
+              <g className={polite ? "fx-act" : undefined}>{art(moment.kind, moment.outcome)}</g>
+            </>
+          )}
+        </g>
       </svg>
     </div>
   );

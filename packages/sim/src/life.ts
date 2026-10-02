@@ -80,6 +80,12 @@ const hourOf = (t: number) => {
   return d.getUTCHours() + d.getUTCMinutes() / 60;
 };
 
+/** Whether night has fallen at `t` (UTC), for everyone alike. */
+export const isNight = (t: number) => {
+  const h = hourOf(t);
+  return h >= 20 || h < 5;
+};
+
 // How far a chronotype shifts a blob's night, at most, either way.
 const CHRONO_SHIFT = 4 * HOUR;
 const chronoShift = (chronotype: number) => (chronotype - 0.5) * 2 * CHRONO_SHIFT;
