@@ -1,4 +1,4 @@
-import { notable, type Identity, type Segment } from "@blob-land/sim";
+import { notable, type Identity, type Personality, type Segment } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,6 +17,7 @@ import {
   ping,
   setCountry,
   setIdentity,
+  setPersonality,
   setVisibility,
   type AuthResponse,
   type GardenBlob,
@@ -239,6 +240,18 @@ export default function App() {
     void saveState(next);
   }
 
+  async function handlePersonalityChange(personality: Personality) {
+    if (!appState) return;
+    const { account } = appState;
+    if (account) {
+      await setPersonality(account.token, personality);
+      setBlobs((list) => list.map((b) => (b.seed === account.seed ? { ...b, personality } : b)));
+    }
+    const next = { ...appState, life: { ...appState.life, personality } };
+    setAppState(next);
+    void saveState(next);
+  }
+
   async function handleVisibleChange(visible: boolean) {
     if (!appState?.account) return;
     await setVisibility(appState.account.token, visible);
@@ -278,6 +291,7 @@ export default function App() {
         onRetry={checkOnline}
         localPseudo={appState.localPseudo}
         identity={appState.life.identity}
+        personality={appState.life.personality}
         onJoined={handleJoined}
         onCancel={() => setJoining(false)}
       />
@@ -294,6 +308,8 @@ export default function App() {
       name={appState.localPseudo}
       identity={appState.life.identity}
       onIdentityChange={handleIdentityChange}
+      personality={appState.life.personality}
+      onPersonalityChange={handlePersonalityChange}
       partner={partner ? { name: partner.pseudo ?? "", identity: partner } : null}
       account={appState.account}
       onJoin={() => {

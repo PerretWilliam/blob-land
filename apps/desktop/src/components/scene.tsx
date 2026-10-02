@@ -1,4 +1,4 @@
-import { alongPath, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Route, type Segment, type Sex } from "@blob-land/sim";
+import { alongPath, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Personality, type Route, type Segment, type Sex } from "@blob-land/sim";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
@@ -9,7 +9,7 @@ import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, HALF_W, islandGeometry, LEVEL, WA
 import { canWalkStraight, cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
 import { skyAt } from "@/lib/dev";
 import { useInView } from "@/lib/motion";
-import { countryName, useT } from "@/i18n";
+import { characterName, countryName, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
 
 export { BRIDGE_THUMB, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB } from "@/components/world";
@@ -24,6 +24,8 @@ export interface SceneBlob {
   activity?: Activity;
   sex: Sex;
   attraction: Attraction;
+  /** Its character, for the ID card. */
+  personality?: Personality;
   /** Who it's meeting right now, by name, while its activity is "meet". */
   meetingWith?: string;
   /** Its other half, if it's in a couple: they wander together when both are free. */
@@ -1053,6 +1055,14 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
                 <dt className="text-muted-foreground">{t.card.fallsFor}</dt>
                 <dd>{t.attraction[blob.attraction]}</dd>
               </div>
+              {blob.personality ? (
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-muted-foreground">{t.card.character}</dt>
+                  <dd className="text-right">
+                    {characterName(blob.personality)}
+                  </dd>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-muted-foreground">{t.card.age}</dt>
                 <dd>{blob.young ? t.card.child : t.card.grownUp}</dd>
