@@ -8,6 +8,7 @@ import {
   type Attraction,
   type Identity,
   type Kin,
+  type Gait,
   type Personality,
   type RelationStatus,
   type Relationship,
@@ -50,6 +51,7 @@ export interface Newcomer {
   identity: Identity;
   /** The player's choice; rolled when not given. */
   personality?: Personality;
+  gait?: Gait | null;
 }
 
 /** New blobs in `region`, grown up and ready to live from `now`. */
@@ -66,6 +68,7 @@ export async function join(db: Db, region: number, newcomers: Newcomer[], now: n
     sex: b.identity.sex,
     attraction: b.identity.attraction,
     personality: JSON.stringify(b.personality ?? randomPersonality(rng)),
+    gait: b.gait ?? null,
     energy: 0.9,
     mood: 0.15,
     last: JSON.stringify(firstSegment(now, rng)),
@@ -329,6 +332,8 @@ export interface GardenBlob {
   sex: Sex;
   attraction: Attraction;
   personality: Personality;
+  /** Picked by its player; null walks as its character does. */
+  gait: Gait | null;
   bornAt: number;
   adultAt: number;
   partner: string | null;
@@ -381,6 +386,7 @@ export async function gardenView(db: Db, region: number, now: number): Promise<V
         sex: blobs.sex,
         attraction: blobs.attraction,
         personality: blobs.personality,
+        gait: blobs.gait,
         bornAt: blobs.bornAt,
         adultAt: blobs.adultAt,
         owner: blobs.ownerUserId,
@@ -413,6 +419,7 @@ export async function gardenView(db: Db, region: number, now: number): Promise<V
     sex: b.sex as Sex,
     attraction: b.attraction as Attraction,
     personality: personalityOf(JSON.parse(b.personality), b.seed),
+    gait: b.gait as Gait | null,
     bornAt: b.bornAt,
     adultAt: b.adultAt,
     partner: partner.get(b.seed) ?? null,

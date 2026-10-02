@@ -1,4 +1,4 @@
-import { activityLog, gardenSize, segmentAt } from "@blob-land/sim";
+import { activityLog, gaitOf, gardenSize, segmentAt } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
@@ -132,6 +132,7 @@ export function GardenScreen({
       sex: blob.sex,
       attraction: blob.attraction,
       personality: blob.personality,
+      gait: blob.gait ?? gaitOf(blob.personality),
       partner: blob.partner,
       meetingWith: activity === "meet" && withSeed?.length ? listNames(withSeed.map(nameOf)) : undefined,
       partnerLabel: blob.partner ? nameOf(blob.partner) : undefined,
@@ -170,6 +171,7 @@ export function GardenScreen({
       ...blobStateAt(life.segments, now),
       ...life.identity,
       personality: life.personality,
+      gait: life.gait ?? gaitOf(life.personality),
     },
   ];
   // The sprout lives in the garden; it shows up here once the garden has loaded.

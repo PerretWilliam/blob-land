@@ -22,7 +22,7 @@ async function jsonAs<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string; friend?: string; personality?: unknown } = {}) {
+async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string; friend?: string; personality?: unknown; gait?: string } = {}) {
   const res = await call("/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -51,7 +51,7 @@ interface GardenBody {
   home: number;
   size: number;
   regions: { region: number; blobs: number }[];
-  blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; personality: Personality; partner: string | null; segments: { start: number; end: number }[] }[];
+  blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; personality: Personality; gait: string | null; partner: string | null; segments: { start: number; end: number }[] }[];
 }
 
 async function garden(token: string, query = ""): Promise<GardenBody> {
@@ -205,6 +205,20 @@ describe("blob-land API", () => {
     const brought = Object.fromEntries(PERSONALITY_AXES.map((a, i) => [a, 1 - i / 10]));
     const other = await register("ink", { personality: brought });
     expect((await garden(other.token)).blobs.find((b) => b.pseudo === "ink")!.personality).toEqual(brought);
+  });
+
+  it("walks as its character does until the player picks a gait", async () => {
+    const { token } = await register("strut", { gait: "proud" });
+    const gait = async () => (await garden(token)).blobs.find((b) => b.pseudo === "strut")!.gait;
+    expect(await gait()).toBe("proud");
+    const patch = (gait: unknown) => call("/me/gait", { method: "PATCH", headers: as(token), body: JSON.stringify({ gait }) });
+    expect((await patch("moonwalk")).status).toBe(400);
+    expect((await patch("shy")).status).toBe(200);
+    expect(await gait()).toBe("shy");
+    expect((await patch(null)).status).toBe(200);
+    expect(await gait()).toBeNull();
+    const bad = await call("/auth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pseudo: "plod", password: PASSWORD, gait: "crawl" }) });
+    expect(bad.status).toBe(400);
   });
 
   it("reports pseudo availability, and offers suggestions once taken", async () => {

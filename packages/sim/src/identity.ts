@@ -49,6 +49,23 @@ export function drawnTo(a: Identity, b: Identity): boolean {
   return (a.attraction === "women" && b.sex === "female") || (a.attraction === "men" && b.sex === "male");
 }
 
+/** How a blob walks: the way its character does, unless its player picks one. Never from its sex. */
+export const GAITS = ["stroll", "bouncy", "proud", "shy", "stomp"] as const;
+export type Gait = (typeof GAITS)[number];
+export const isGait = (v: unknown): v is Gait => GAITS.includes(v as Gait);
+
+/** The way its character walks: whichever trait stands out most, or an easy stroll if none does. */
+export function gaitOf(p: Personality): Gait {
+  const marked: [Gait, number][] = [
+    ["bouncy", p.playfulness],
+    ["stomp", p.temper],
+    ["shy", 1 - p.sociability],
+    ["proud", (p.sociability + 1 - p.kindness) / 2],
+  ];
+  const [gait, score] = marked.reduce((a, b) => (b[1] > a[1] ? b : a));
+  return score >= 0.75 ? gait : "stroll";
+}
+
 /** Romance needs both ways; otherwise the best it gets is best friends. */
 export const compatible = (a: Identity, b: Identity) => drawnTo(a, b) && drawnTo(b, a);
 

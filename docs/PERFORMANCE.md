@@ -188,3 +188,22 @@ the blobs (under 3 ms a frame to move and draw at the widest). So from
 2 500 cells on, blobs go on without them, and the map comes at 8 000 cells,
 half the island, with a 6 144 px picture that's about 1:1 there. Every
 scenario holds 60 fps, jank ≤ 3 %, CPU ≤ 61 %, RAM steady at ~800 MB.
+
+## Gaits — 2026-10-02
+
+Five walk cycles instead of one (`GAITS` in `scene.tsx`), each blob's picked
+from its character or by its player; the bench now gives its crowd all five
+in turn, so a fifth of it hops on every step. The cycle is the same handful of
+sines per blob in view, only with per-gait numbers, so nothing measurable
+moved. Release build, M4 Pro, against `main` the same evening:
+
+| Scenario | fps (main → gaits) | jank % | CPU % | RAM MB |
+|---|---|---|---|---|
+| walking: close up | 60 → 60 | 0.4 → 0.4 | 32 → 30 | 962 → 991 |
+| walking: widest, pan | 57 → 57 | 2.2 → 2.2 | 57 → 57 | 1008 → 1031 |
+| talking: widest before map | 60 → 60 | 0 → 0 | 66 → 68 | 1160 → 1177 |
+| night: widest, pan | 59.7 → 60 | 2.1 → 2.1 | 61 → 64 | 1300 → 1342 |
+
+Every scenario holds 60 fps (57 on the fast pan at the widest, as before), jank
+≤ 2.2 %. Three earlier runs of the same code timed out with no report, the
+bench window half hidden behind others in use: keep it in front while it runs.

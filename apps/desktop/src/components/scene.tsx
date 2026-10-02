@@ -1,4 +1,4 @@
-import { alongPath, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type GroundPoint, type Personality, type Route, type Segment, type Sex } from "@blob-land/sim";
+import { alongPath, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type Gait, type GroundPoint, type Personality, type Route, type Segment, type Sex } from "@blob-land/sim";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
@@ -26,6 +26,8 @@ export interface SceneBlob {
   attraction: Attraction;
   /** Its character, for the ID card. */
   personality?: Personality;
+  /** How it walks: its player's pick, or its character's way. An easy stroll if unset. */
+  gait?: Gait;
   /** Who it's meeting right now, by name, while its activity is "meet". */
   meetingWith?: string;
   /** Its other half, if it's in a couple: they wander together when both are free. */
@@ -89,15 +91,27 @@ const EASE_S = 0.6;
 // Faster than this (ground units per garden ms, several times any walk), the
 // computed position jumped rather than walked.
 const JUMP_SPEED = 0.3 / 1000;
-// Walk cycle: hops per second while moving, and how fast the gait fades in/out.
-const HOP_HZ = 2.4;
+// How fast the gait fades in/out.
 const GAIT_EASE_S = 0.25;
 // Below this speed (units/s, on a small island's scale) a blob counts as standing still: it's
 // where the position easing's long tail ends, not a real step.
 const WALK_SPEED = 0.006;
-// Above this speed a blob hops; below it waddles. 99% of a stroll stays under
-// 0.036, so only long, quick crossings (and catch-ups like a new pairing) hop.
-const HOP_SPEED = 0.045;
+/**
+ * Each gait's walk cycle: steps per second, the pace above which it hops
+ * rather than waddles (0: always, Infinity: never), how high it hops, how
+ * much it flattens landing, and its side-to-side waddle and lean in degrees.
+ */
+const GAITS: Record<Gait, { hz: number; hopAt: number; lift: number; squash: number; waddle: number; lean: number }> = {
+  // 99% of a stroll stays under 0.036, so only long, quick crossings (and catch-ups like a new pairing) hop.
+  stroll: { hz: 2.4, hopAt: 0.045, lift: 1, squash: 0.09, waddle: 4, lean: 5 },
+  bouncy: { hz: 3, hopAt: 0, lift: 0.75, squash: 0.12, waddle: 2, lean: 5 },
+  // Slow and swaying, chin up.
+  proud: { hz: 1.7, hopAt: Infinity, lift: 0, squash: 0, waddle: 8, lean: 1 },
+  // Quick little steps, leaning in.
+  shy: { hz: 3.6, hopAt: Infinity, lift: 0, squash: 0, waddle: 2, lean: 9 },
+  // Low, heavy hops that flatten it on every landing.
+  stomp: { hz: 1.9, hopAt: 0, lift: 0.3, squash: 0.2, waddle: 3, lean: 4 },
+};
 // Camera: how far it zooms onto a selected blob, and how softly it moves.
 const FOCUS_ZOOM = 2;
 // On a big map, following a blob shows about this many tiles across.
@@ -357,8 +371,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   // `phase` drives the gait; `walk` in [0, 1] is how much the blob is walking,
   // eased so a stop settles instead of freezing mid-air; `hop` in [0, 1] is how
   // much of that walk is hopping rather than waddling; `lean` tilts it.
-  type Gait = { phase: number; walk: number; hop: number; lean: number };
-  const gait = useRef(new Map<string, Gait>());
+  type Stride = { phase: number; walk: number; hop: number; lean: number; style: (typeof GAITS)[Gait] };
+  const gait = useRef(new Map<string, Stride>());
   // `lift`: how high the feet are (see liftAt), eased like x/y so stepping
   // into water or up a cliff is a quick slide rather than a jump.
   const shown = useRef(new Map<string, GroundPoint & { lift: number }>());
@@ -408,11 +422,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   }
 
   /** Hop (or waddle), squash and lean the body; the world shrinks the shadow while airborne. */
-  function applyGait(seed: string, g: Gait) {
+  function applyGait(seed: string, g: Stride) {
     const hop = g.walk * g.hop;
-    const lift = Math.abs(Math.sin(g.phase)) * hop; // 0 on the ground, 1 at the top of a hop
-    const squash = 0.09 * hop * (1 - Math.abs(Math.sin(g.phase))) ** 2; // flattens on landing
-    const waddle = Math.sin(g.phase) * 4 * g.walk * (1 - g.hop); // side to side, feet on the ground
+    const lift = Math.abs(Math.sin(g.phase)) * hop * g.style.lift; // 0 on the ground, 1 at the top of a hop
+    const squash = g.style.squash * hop * (1 - Math.abs(Math.sin(g.phase))) ** 2; // flattens on landing
+    const waddle = Math.sin(g.phase) * g.style.waddle * g.walk * (1 - g.hop); // side to side, feet on the ground
     worldRef.current?.blobs.get(seed)?.walk({ lift, rotate: g.lean + waddle, squash });
   }
 
@@ -828,13 +842,15 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           // Per tile, like the walks themselves (see walkZoom): a stroll across a big island is as slow as one across a small one.
           const pace = (dist / dt) * walkZoom(layoutRef.current.size);
           const walking = pace > WALK_SPEED;
-          const g = gait.current.get(b.seed) ?? { phase: 0, walk: 0, hop: 0, lean: 0 };
+          const style = GAITS[b.gait ?? "stroll"];
+          const g = gait.current.get(b.seed) ?? { phase: 0, walk: 0, hop: 0, lean: 0, style };
+          g.style = style;
           g.walk += ((walking ? 1 : 0) - g.walk) * kGait;
           // Only change gait while moving, so a stop ends the way it started.
-          if (walking) g.hop += ((pace > HOP_SPEED ? 1 : 0) - g.hop) * kGait;
-          g.lean += ((walking ? ((dx - dy) / dist) * 5 : 0) - g.lean) * kGait;
+          if (walking) g.hop += ((pace > style.hopAt ? 1 : 0) - g.hop) * kGait;
+          g.lean += ((walking ? ((dx - dy) / dist) * style.lean : 0) - g.lean) * kGait;
           // Keep the gait going while fading out, so the last hop lands instead of freezing.
-          if (g.walk > 0.01) g.phase += dt * Math.PI * HOP_HZ;
+          if (g.walk > 0.01) g.phase += dt * Math.PI * style.hz;
           gait.current.set(b.seed, g);
           applyGait(b.seed, g);
           arrived(b.seed, g.walk < 0.15 && !ps[i]!.comingToMeet, now);

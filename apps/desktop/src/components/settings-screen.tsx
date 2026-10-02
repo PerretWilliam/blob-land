@@ -1,4 +1,4 @@
-import { compatible, PERSONALITY_AXES, randomPersonality, randomRng, type Identity, type Personality } from "@blob-land/sim";
+import { compatible, gaitOf, GAITS, PERSONALITY_AXES, randomPersonality, randomRng, type Gait, type Identity, type Personality } from "@blob-land/sim";
 import { Dices, Eye, EyeOff, Globe, HeartCrack, Settings, Trash2, TreePine, X } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { DressedBlob, IdentityFields } from "@/components/blob-gender";
@@ -15,6 +15,9 @@ export interface SettingsScreenProps {
   onIdentityChange: (identity: Identity) => Promise<void>;
   personality: Personality;
   onPersonalityChange: (personality: Personality) => Promise<void>;
+  /** Picked by the player; null walks as its character does. */
+  gait: Gait | null;
+  onGaitChange: (gait: Gait | null) => Promise<void>;
   /** Its other half in the garden, if any: told of before a change parts them. */
   partner: { name: string; identity: Identity } | null;
   account: { pseudo: string } | null;
@@ -88,15 +91,16 @@ export function SettingsScreen(props: SettingsScreenProps) {
   );
 }
 
-function BlobTab({ seed, name, identity, onIdentityChange, personality, onPersonalityChange, partner, account }: SettingsScreenProps) {
+function BlobTab({ seed, name, identity, onIdentityChange, personality, onPersonalityChange, gait, onGaitChange, partner, account }: SettingsScreenProps) {
   const t = useT();
   const [draft, setDraft] = useState(identity);
   const [traits, setTraits] = useState(personality);
+  const [walk, setWalk] = useState(gait);
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
   const identityChanged = draft.sex !== identity.sex || draft.attraction !== identity.attraction;
   const traitsChanged = PERSONALITY_AXES.some((a) => traits[a] !== personality[a]);
-  const changed = identityChanged || traitsChanged;
+  const changed = identityChanged || traitsChanged || walk !== gait;
   // Together now, and not drawn to each other any more once saved: the server parts them.
   const parts = partner !== null && compatible(identity, partner.identity) && !compatible(draft, partner.identity);
 
@@ -106,6 +110,7 @@ function BlobTab({ seed, name, identity, onIdentityChange, personality, onPerson
     try {
       if (identityChanged) await onIdentityChange(draft);
       if (traitsChanged) await onPersonalityChange(traits);
+      if (walk !== gait) await onGaitChange(walk);
       setState("saved");
     } catch (e) {
       setError(why(e));
@@ -138,6 +143,24 @@ function BlobTab({ seed, name, identity, onIdentityChange, personality, onPerson
           setState("idle");
         }}
       />
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm text-muted-foreground">{t.gait.title}</span>
+        <select
+          value={walk ?? ""}
+          onChange={(e) => {
+            setWalk((e.target.value || null) as Gait | null);
+            setState("idle");
+          }}
+          className="toon-input"
+        >
+          <option value="">{t.gait.auto(t.gait.names[gaitOf(traits)])}</option>
+          {GAITS.map((g) => (
+            <option key={g} value={g}>
+              {t.gait.names[g]}
+            </option>
+          ))}
+        </select>
+      </label>
       {identityChanged && parts ? (
         <p role="alert" className="flex items-start gap-2 rounded-xl border-2 border-ink bg-berry/25 px-3 py-2 text-sm font-medium">
           <HeartCrack className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -157,6 +180,7 @@ function BlobTab({ seed, name, identity, onIdentityChange, personality, onPerson
           onClick={() => {
             setDraft(identity);
             setTraits(personality);
+            setWalk(gait);
           }}
         >
           {t.settings.undo}
