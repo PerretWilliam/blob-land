@@ -1,5 +1,24 @@
 # @blob-land/desktop
 
+## 0.5.0
+
+### Minor Changes
+
+- 111d03b: Blobs have more character. Three new traits, kindness, loyalty and curiosity, join the five they had: curious blobs wander and find more, kind ones pick fewer fights and make up sooner, and loyal ones take their time falling in love but stay together through more. Personalities now shape who gets on: playful blobs click, two hotheads clash. A blob in a couple flirts less, and if it does, its sweetheart may not like it. And a best friend is special now: one each, two for the most sociable, and a closer friendship can take that place.
+- b45ec82: Blobs share new moments. A kind blob cheers up a friend who's feeling low, a blob with a deep crush finally confesses (and it may or may not be mutual), friends tease each other and rivals take jabs, a blob shows off what it just found, and a tired couple or pair of best friends naps side by side. Each has its own little show and journal line. The garden now knows every blob's character, ready for the player to shape their own.
+- c325b1e: Shape your blob's character. Settings now has a slider for each of its eight traits (or a "Surprise me" roll), and shows what it reads as, from "Heart of gold & joker" to "Lone wolf & hothead". Every blob's ID card says its character too, and joining the garden brings your blob's character along.
+- 0a55a14: The islands use every piece of their sprite pack. Lakes and coasts get rounded shores, wide rivers flow as one sheet of water, rivers freeze where they meet ice, run under roads, and fall as a waterfall on their own wherever they meet more river a block up. Hills get smooth corners and roads bend rounded or square. The garden is redrawn by biome: a mountain at the back with a road up its terraces, a desert, a meadow with a pond and a forest with a lake, split by the roads from the village and growing with the island. A river comes down from a frozen tarn in waterfalls to a wide mouth. Lakes now show whole. Nests are now cosy woven nests lined with straw. A new Bridge tool in the island editor lays a bridge across a river, and all eight of the pack's clouds drift by, grey over a snowy island.
+- 1eb13b7: Blobs walk the way their character does: playful ones bounce along, quick-tempered ones stomp, solitary ones take shy little steps, and a few strut proudly. Pick your own blob's walk in Settings, or leave it to its character.
+- d3828dc: Meetings feel alive. Blobs now greet each other with a little hop when they arrive and waddle goodbye before they part. Pairs high-five, chase each other, whisper secrets, give piggyback rides and watch the stars at night, and groups tell stories, sing, play tag, dance in a ring, cheer a friend's find, or share a big group hug when they're all close. Each has its own little show and journal line.
+
+### Patch Changes
+
+- Updated dependencies [111d03b]
+- Updated dependencies [b45ec82]
+- Updated dependencies [1eb13b7]
+- Updated dependencies [d3828dc]
+  - @blob-land/sim@0.4.0
+
 ## 0.4.0
 
 ### Minor Changes
