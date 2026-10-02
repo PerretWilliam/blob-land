@@ -125,7 +125,7 @@ function lingering(last: Segment, rng: Rng): string | null {
 
 const span = (rng: Rng, activity: keyof typeof DURATION) => between(rng, DURATION[activity][0], DURATION[activity][1]);
 
-function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng, chronotype: number): Exclude<Activity, "meet"> {
+function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng, chronotype: number, curiosity: number): Exclude<Activity, "meet"> {
   if (prev === "sleep") return "wake";
   if (prev === "wake") return weighted(rng, { explore: 7, rest: 3 });
   const pressure = sleepPressure(vitals, t, chronotype);
@@ -133,17 +133,18 @@ function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng, chron
   if (pressure > 1) return "sleep";
   return weighted(rng, {
     // In high spirits a blob goes off exploring; feeling low, it sits a while.
-    explore: 5 + 2 * Math.max(0, vitals.mood),
-    rest: prev === "rest" ? 0 : 1 + 3 * (1 - vitals.energy) + 2 * Math.max(0, -vitals.mood),
-    discover: prev === "discover" ? 0 : 1.2,
+    // A curious one wanders and pokes at things more; an incurious one sits.
+    explore: 4 + 2 * curiosity + 2 * Math.max(0, vitals.mood),
+    rest: prev === "rest" ? 0 : 1.5 - curiosity + 3 * (1 - vitals.energy) + 2 * Math.max(0, -vitals.mood),
+    discover: prev === "discover" ? 0 : 0.6 + 1.2 * curiosity,
     sleep: pressure > 0.8 ? 60 * (pressure - 0.8) : 0,
   });
 }
 
 /** The blob's next solo segment, starting where and when `last` ended. */
-export function nextSolo(last: Segment, vitals: Vitals, rng: Rng, chronotype = 0.5): Segment {
+export function nextSolo(last: Segment, vitals: Vitals, rng: Rng, chronotype = 0.5, curiosity = 0.5): Segment {
   const t = last.end;
-  const activity = nextActivity(last.activity, vitals, t, rng, chronotype);
+  const activity = nextActivity(last.activity, vitals, t, rng, chronotype, curiosity);
   const base = { start: t, activity, rng: randomSeed(rng), with: null, detail: null };
   switch (activity) {
     case "sleep": {

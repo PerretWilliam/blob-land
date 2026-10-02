@@ -9,10 +9,14 @@ export {
   MAX_NAME_LENGTH,
   playerPseudo,
   randomPersonality,
+  character,
+  personalityOf,
+  PERSONALITY_AXES,
   SEXES,
   type Attraction,
   type Identity,
   type Personality,
+  type Pole,
   type Sex,
 } from "./identity";
 export { DISCOVERIES, firstSegment, liveThrough, NEXT, nextSolo, sleepPressure, type Activity, type Segment, type Vitals } from "./life";

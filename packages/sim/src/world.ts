@@ -163,7 +163,7 @@ export function stepWorld(world: World, until: number, rng: Rng, maxCatchUp = 2 
         continue;
       }
     }
-    push(b, nextSolo(b.last, b.vitals, rng, b.personality.chronotype));
+    push(b, nextSolo(b.last, b.vitals, rng, b.personality.chronotype, b.personality.curiosity));
   }
 
   out.relationships = [...touched.values()];
