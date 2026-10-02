@@ -1,4 +1,4 @@
-import type { InteractionKind, Outcome, Segment } from "@blob-land/sim";
+import { character, type InteractionKind, type Outcome, type Personality, type Segment } from "@blob-land/sim";
 import { useSyncExternalStore } from "react";
 import { en, type Messages } from "./en";
 import { fr } from "./fr";
@@ -80,4 +80,12 @@ export function journalLine(seg: Segment, nameOf: (seed: string) => string = (s)
       return journal.meet[kind][outcome](seg.with?.length ? listNames(seg.with.map(nameOf)) : journal.someone);
     }
   }
+}
+
+/** What a personality reads as, in words: "Heart of gold & joker". */
+export function characterName(p: Personality): string {
+  const { personality } = t();
+  const { main, second } = character(p);
+  if (!main) return personality.balanced;
+  return second ? personality.both(personality.poles[main], personality.poles[second]) : personality.poles[main];
 }

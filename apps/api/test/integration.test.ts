@@ -22,7 +22,7 @@ async function jsonAs<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string; friend?: string } = {}) {
+async function register(pseudo: string, identity: { sex?: string; attraction?: string; country?: string; friend?: string; personality?: unknown } = {}) {
   const res = await call("/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -200,6 +200,11 @@ describe("blob-land API", () => {
     expect((await patch({ sociability: 0.5 })).status).toBe(400);
     expect((await patch({ ...chosen, extra: "ignored" })).status).toBe(200);
     expect(await mine()).toEqual(chosen);
+
+    // Joining with the private blob's character keeps it.
+    const brought = Object.fromEntries(PERSONALITY_AXES.map((a, i) => [a, 1 - i / 10]));
+    const other = await register("ink", { personality: brought });
+    expect((await garden(other.token)).blobs.find((b) => b.pseudo === "ink")!.personality).toEqual(brought);
   });
 
   it("reports pseudo availability, and offers suggestions once taken", async () => {

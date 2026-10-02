@@ -135,8 +135,8 @@ export function checkPseudo(pseudo: string): Promise<PseudoAvailability> {
 }
 
 /** `friend`: an account's pseudo, to live on their island. */
-export function register(pseudo: string, password: string, identity: Identity, country: string | null = null, friend = ""): Promise<AuthResponse> {
-  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country, friend }) });
+export function register(pseudo: string, password: string, identity: Identity, country: string | null = null, friend = "", personality?: Personality): Promise<AuthResponse> {
+  return request("/auth/register", { method: "POST", body: JSON.stringify({ pseudo, password, ...identity, country, friend, personality }) });
 }
 
 export function setCountry(token: string, country: string | null): Promise<{ ok: true }> {

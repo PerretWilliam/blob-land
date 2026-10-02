@@ -131,6 +131,7 @@ export function GardenScreen({
       activity,
       sex: blob.sex,
       attraction: blob.attraction,
+      personality: blob.personality,
       partner: blob.partner,
       meetingWith: activity === "meet" && withSeed?.length ? listNames(withSeed.map(nameOf)) : undefined,
       partnerLabel: blob.partner ? nameOf(blob.partner) : undefined,
@@ -168,6 +169,7 @@ export function GardenScreen({
       segments: life.segments,
       ...blobStateAt(life.segments, now),
       ...life.identity,
+      personality: life.personality,
     },
   ];
   // The sprout lives in the garden; it shows up here once the garden has loaded.

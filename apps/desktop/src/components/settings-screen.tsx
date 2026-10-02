@@ -1,11 +1,11 @@
-import { compatible, type Identity } from "@blob-land/sim";
-import { Eye, EyeOff, Globe, HeartCrack, Settings, Trash2, TreePine, X } from "lucide-react";
+import { compatible, PERSONALITY_AXES, randomPersonality, randomRng, type Identity, type Personality } from "@blob-land/sim";
+import { Dices, Eye, EyeOff, Globe, HeartCrack, Settings, Trash2, TreePine, X } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { DressedBlob, IdentityFields } from "@/components/blob-gender";
 import { CountryField } from "@/components/country-field";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
-import { LANGUAGES, useT, type Language } from "@/i18n";
+import { characterName, LANGUAGES, useT, type Language } from "@/i18n";
 
 export interface SettingsScreenProps {
   /** The player's blob: its seed draws it, `name` is what it goes by. */
@@ -13,6 +13,8 @@ export interface SettingsScreenProps {
   name: string;
   identity: Identity;
   onIdentityChange: (identity: Identity) => Promise<void>;
+  personality: Personality;
+  onPersonalityChange: (personality: Personality) => Promise<void>;
   /** Its other half in the garden, if any: told of before a change parts them. */
   partner: { name: string; identity: Identity } | null;
   account: { pseudo: string } | null;
@@ -86,12 +88,15 @@ export function SettingsScreen(props: SettingsScreenProps) {
   );
 }
 
-function BlobTab({ seed, name, identity, onIdentityChange, partner, account }: SettingsScreenProps) {
+function BlobTab({ seed, name, identity, onIdentityChange, personality, onPersonalityChange, partner, account }: SettingsScreenProps) {
   const t = useT();
   const [draft, setDraft] = useState(identity);
+  const [traits, setTraits] = useState(personality);
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
-  const changed = draft.sex !== identity.sex || draft.attraction !== identity.attraction;
+  const identityChanged = draft.sex !== identity.sex || draft.attraction !== identity.attraction;
+  const traitsChanged = PERSONALITY_AXES.some((a) => traits[a] !== personality[a]);
+  const changed = identityChanged || traitsChanged;
   // Together now, and not drawn to each other any more once saved: the server parts them.
   const parts = partner !== null && compatible(identity, partner.identity) && !compatible(draft, partner.identity);
 
@@ -99,7 +104,8 @@ function BlobTab({ seed, name, identity, onIdentityChange, partner, account }: S
     setState("saving");
     setError(null);
     try {
-      await onIdentityChange(draft);
+      if (identityChanged) await onIdentityChange(draft);
+      if (traitsChanged) await onPersonalityChange(traits);
       setState("saved");
     } catch (e) {
       setError(why(e));
@@ -113,6 +119,7 @@ function BlobTab({ seed, name, identity, onIdentityChange, partner, account }: S
         <DressedBlob seed={seed} sex={draft.sex} className="toon-outline size-24" />
         <div className="min-w-0">
           <p className="truncate text-xl font-bold">{name}</p>
+          <p className="my-1 inline-block rounded-full border-2 border-ink bg-berry/30 px-2 text-sm font-semibold">{characterName(traits)}</p>
           <p className="text-sm text-muted-foreground">{t.settings.look}</p>
         </div>
       </div>
@@ -124,7 +131,14 @@ function BlobTab({ seed, name, identity, onIdentityChange, partner, account }: S
           setState("idle");
         }}
       />
-      {changed && parts ? (
+      <PersonalityFields
+        value={traits}
+        onChange={(next) => {
+          setTraits(next);
+          setState("idle");
+        }}
+      />
+      {identityChanged && parts ? (
         <p role="alert" className="flex items-start gap-2 rounded-xl border-2 border-ink bg-berry/25 px-3 py-2 text-sm font-medium">
           <HeartCrack className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           {t.settings.breakup(partner.name)}
@@ -137,7 +151,14 @@ function BlobTab({ seed, name, identity, onIdentityChange, partner, account }: S
         </p>
       ) : null}
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" disabled={!changed || state === "saving"} onClick={() => setDraft(identity)}>
+        <Button
+          variant="ghost"
+          disabled={!changed || state === "saving"}
+          onClick={() => {
+            setDraft(identity);
+            setTraits(personality);
+          }}
+        >
           {t.settings.undo}
         </Button>
         <Button disabled={!changed || state === "saving"} onClick={save}>
@@ -145,6 +166,40 @@ function BlobTab({ seed, name, identity, onIdentityChange, partner, account }: S
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Its character, axis by axis: a slider between the two ends of each. */
+function PersonalityFields({ value, onChange }: { value: Personality; onChange: (personality: Personality) => void }) {
+  const t = useT();
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <div className="mb-0.5 flex items-center justify-between gap-2">
+        <legend className="text-sm text-muted-foreground">{t.personality.title}</legend>
+        <Button variant="outline" size="sm" onClick={() => onChange(randomPersonality(randomRng))}>
+          <Dices /> {t.personality.surprise}
+        </Button>
+      </div>
+      {PERSONALITY_AXES.map((axis) => {
+        const [low, high] = t.personality.axes[axis];
+        return (
+          <label key={axis} className="grid grid-cols-[6.5rem_1fr_6.5rem] items-center gap-2 text-xs font-semibold">
+            <span className="text-right">{low}</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={value[axis]}
+              aria-label={`${low} – ${high}`}
+              onChange={(e) => onChange({ ...value, [axis]: Number(e.target.value) })}
+              className="w-full accent-berry"
+            />
+            <span>{high}</span>
+          </label>
+        );
+      })}
+    </fieldset>
   );
 }
 

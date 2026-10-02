@@ -1,6 +1,6 @@
 import { activityLog, type Segment } from "@blob-land/sim";
 import { afterEach, describe, expect, it } from "vitest";
-import { isLanguage, journalLine, setLanguage, t } from "@/i18n";
+import { characterName, isLanguage, journalLine, setLanguage, t } from "@/i18n";
 
 const seg = (start: number, activity: Segment["activity"], extra: Partial<Segment> = {}): Segment => ({
   start,
@@ -45,6 +45,14 @@ describe("i18n", () => {
       "A eu une super discussion avec ANN, BOB et CY.",
     ]);
     expect(t().errors["wrong password"]).toMatch(/mot de passe/);
+  });
+
+  it("names a character by its two most marked poles, in either language", () => {
+    const p = { sociability: 0.5, temper: 0.5, playfulness: 0.95, romance: 0.5, chronotype: 0, kindness: 0.8, loyalty: 0.5, curiosity: 0.5 };
+    expect(characterName(p)).toBe("Joker & heart of gold");
+    setLanguage("fr");
+    expect(characterName(p)).toBe("Boute-en-train et cœur d'or");
+    expect(characterName({ ...p, playfulness: 0.5, kindness: 0.5 })).toBe("Âme équilibrée");
   });
 
   it("only takes the languages it speaks", () => {
