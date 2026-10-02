@@ -19,6 +19,18 @@ export const INTERACTIONS = [
   "tease",
   "share_find",
   "nap_together",
+  "high_five",
+  "chase",
+  "whisper",
+  "stargaze",
+  "piggyback",
+  // A whole gathering's, never one pair's on its own.
+  "ring_dance",
+  "story",
+  "sing",
+  "group_hug",
+  "tag",
+  "cheer",
 ] as const;
 export type InteractionKind = (typeof INTERACTIONS)[number];
 export type Outcome = "good" | "meh" | "bad";
@@ -32,21 +44,56 @@ type Weights = Partial<Record<InteractionKind, number>>;
  */
 const BY_STATUS: Record<RelationStatus, Weights> = {
   strangers: { chat: 5, play: 2, ignore: 2, gift: 0.5, flirt: 1 },
-  acquaintances: { chat: 5, play: 3, ignore: 1, gift: 1, argue: 1, flirt: 2.5, tease: 1, comfort: 0.3, share_find: 2 },
-  friends: { chat: 4, play: 4, dance: 2, hug: 2, gift: 1, argue: 1.5, flirt: 3.5, tease: 2, comfort: 1, share_find: 3 },
-  best_friends: { chat: 4, play: 4, dance: 3, hug: 3, gift: 1.5, argue: 1.2, flirt: 3, tease: 2.5, comfort: 1.5, share_find: 3, nap_together: 1 },
-  crush: { chat: 2, flirt: 5, gift: 2, dance: 2, hug: 1, play: 1, argue: 0.8, confess: 1.5, comfort: 0.5, share_find: 2 },
-  lovers: { hug: 4, kiss: 4, dance: 3, gift: 2, chat: 2, play: 2, argue: 1.6, sulk: 0.4, tease: 1.5, comfort: 1.5, share_find: 2, nap_together: 2 },
+  acquaintances: { chat: 5, play: 3, ignore: 1, gift: 1, argue: 1, flirt: 2.5, tease: 1, comfort: 0.3, share_find: 2, high_five: 0.7, chase: 0.3 },
+  friends: { chat: 4, play: 4, dance: 2, hug: 2, gift: 1, argue: 1.5, flirt: 3.5, tease: 2, comfort: 1, share_find: 3, high_five: 1.2, chase: 1, whisper: 0.5 },
+  best_friends: { chat: 4, play: 4, dance: 3, hug: 3, gift: 1.5, argue: 1.2, flirt: 3, tease: 2.5, comfort: 1.5, share_find: 3, nap_together: 1, high_five: 1.5, chase: 1.5, whisper: 1.5, stargaze: 1 },
+  crush: { chat: 2, flirt: 5, gift: 2, dance: 2, hug: 1, play: 1, argue: 0.8, confess: 1.5, comfort: 0.5, share_find: 2, whisper: 1, stargaze: 1, chase: 0.5 },
+  lovers: { hug: 4, kiss: 4, dance: 3, gift: 2, chat: 2, play: 2, argue: 1.6, sulk: 0.4, tease: 1.5, comfort: 1.5, share_find: 2, nap_together: 2, whisper: 1.5, stargaze: 2, chase: 1, piggyback: 0.7 },
   complicated: { chat: 2, argue: 3, make_up: 2, sulk: 2, ignore: 1 },
   rivals: { argue: 4, sulk: 2, ignore: 3, make_up: 0.5, tease: 1.5 },
   ex: { ignore: 4, sulk: 2, argue: 2, chat: 1, make_up: 0.5 },
-  family: { parent_play: 4, hug: 3, chat: 3, play: 2, argue: 1, tease: 1, comfort: 1.5, share_find: 3, nap_together: 2 },
+  family: { parent_play: 4, hug: 3, chat: 3, play: 2, argue: 1, tease: 1, comfort: 1.5, share_find: 3, nap_together: 2, high_five: 1, chase: 1.5, piggyback: 2, whisper: 0.5 },
 };
 
 /** Every kind a status can ever produce — what tests hold pickInteraction to. */
 export const allowedFor = (status: RelationStatus) => Object.keys(BY_STATUS[status]) as InteractionKind[];
 
 const ROMANTIC: readonly InteractionKind[] = ["flirt", "kiss", "confess"];
+
+const FRIENDLY: readonly RelationStatus[] = ["acquaintances", "friends", "best_friends", "crush", "lovers", "family"];
+const CLOSE: readonly RelationStatus[] = ["friends", "best_friends", "crush", "lovers", "family"];
+// What a whole gathering does as one, and which pairs join in: the rest do
+// their own thing on the side. A group hug needs everyone close.
+const TOGETHER: Partial<Record<InteractionKind, readonly RelationStatus[]>> = {
+  story: [...FRIENDLY, "strangers", "complicated", "ex"],
+  sing: [...FRIENDLY, "strangers"],
+  tag: [...FRIENDLY, "strangers"],
+  cheer: [...FRIENDLY, "strangers"],
+  ring_dance: FRIENDLY,
+  group_hug: CLOSE,
+};
+
+/** Whether a pair joins in what its gathering does together. */
+export const joinsIn = (kind: InteractionKind, status: RelationStatus) => TOGETHER[kind]?.includes(status) ?? allowedFor(status).includes(kind);
+
+/** What a gathering does together, by the mean of its playfulness. `close`: every pair among them is. */
+export function pickTogether(rng: Rng, playful: number, close: boolean, found: boolean): InteractionKind {
+  return weighted(rng, {
+    chat: 4,
+    story: 2,
+    sing: 1.5,
+    play: 3 * playful,
+    tag: 2 * playful,
+    dance: 1.5 * playful,
+    ring_dance: 1.5 * playful,
+    group_hug: close ? 2 : 0,
+    // Someone has just found something: everyone wants to see.
+    cheer: found ? 2 : 0,
+  });
+}
+
+/** Every pair among `statuses` is close enough for a group hug. */
+export const allClose = (statuses: readonly RelationStatus[]) => statuses.every((s) => CLOSE.includes(s));
 
 export interface MeetingContext {
   rel: Relationship;
@@ -69,6 +116,8 @@ export interface MeetingContext {
   energy: number;
   /** One of them has just found something on a walk. */
   found: boolean;
+  /** Night has fallen: stars to look at. */
+  night: boolean;
 }
 
 export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind {
@@ -76,6 +125,7 @@ export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind 
   if (!ctx.canRomance) for (const kind of ROMANTIC) delete w[kind];
   if (!ctx.parentAndChild) delete w.parent_play;
   if (!ctx.found) delete w.share_find;
+  if (!ctx.night) delete w.stargaze;
   // Personality and mood tilt the table, never add to it.
   const mood = (ctx.moodA + ctx.moodB) / 2;
   const chem = ctx.rel.chemistry;
@@ -102,6 +152,9 @@ export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind 
   scale("tease", (0.3 + ctx.playfulness) * (0.6 + 0.8 * ctx.temper));
   // Only when both are flagging (below a quarter, they're off to bed instead).
   scale("nap_together", 10 * Math.max(0, 0.55 - ctx.energy));
+  scale("high_five", (0.5 + ctx.playfulness) * (1 + 0.5 * mood));
+  scale("chase", 0.3 + 1.4 * ctx.playfulness);
+  scale("stargaze", 0.5 + ctx.romance);
   // Everything else was ruled out (a family with no small child left to play with, say).
   if (Object.keys(w).length === 0) return "chat";
   return weighted(rng, w);
@@ -139,6 +192,18 @@ const DELTAS: Record<InteractionKind, readonly [Triple, Triple, Triple]> = {
   tease: [[3, 1, -1], [1, 0, 1], [-2, 0, 5]],
   share_find: [[4, 1, -2], [2, 0, 0], [0, 0, 2]],
   nap_together: [[2, 1, -3], [1, 0, -1], [0, 0, 1]],
+  high_five: [[3, 0, -2], [1, 0, 0], [-1, 0, 2]],
+  chase: [[4, 1, -2], [1, 0, 0], [-2, 0, 4]],
+  // A secret kept brings them closer; one spilled stings.
+  whisper: [[4, 1, -2], [1, 0, 0], [-2, 0, 4]],
+  stargaze: [[2, 4, -2], [1, 1, 0], [0, -1, 1]],
+  piggyback: [[4, 1, -2], [2, 0, 0], [-1, 0, 2]],
+  ring_dance: [[3, 1, -2], [1, 0, 0], [0, 0, 2]],
+  story: [[3, 0, -1], [1, 0, 0], [-1, 0, 2]],
+  sing: [[3, 1, -1], [1, 0, 0], [-1, 0, 2]],
+  group_hug: [[4, 1, -4], [1, 0, -1], [0, 0, 2]],
+  tag: [[4, 0, -2], [1, 0, 0], [-2, 0, 4]],
+  cheer: [[3, 0, -2], [1, 0, 0], [0, 0, 1]],
 };
 
 /** The most any axis moves in one meeting: no one goes from stranger to best friend in a day. */
@@ -189,7 +254,14 @@ export function interactionExpression(kind: InteractionKind, outcome: Outcome): 
   switch (kind) {
     case "hug":
     case "kiss":
+    case "group_hug":
       return "love";
+    case "whisper":
+      return outcome === "good" ? "wink" : "shy";
+    case "stargaze":
+      return outcome === "good" ? "happy" : "thinking";
+    case "story":
+      return outcome === "good" ? "surprised" : "idle";
     case "flirt":
       return "shy";
     case "confess":

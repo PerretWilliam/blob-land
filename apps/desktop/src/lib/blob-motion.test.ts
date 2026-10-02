@@ -2,7 +2,7 @@ import { happy, mad, thinking } from "blobatar/expression";
 import { idleAt, idleSeeds, idleTransforms } from "blobatar/idle";
 import { _posed, lerpPose } from "blobatar/internal";
 import { describe, expect, it } from "vitest";
-import { Affine, breatheTransform, eyeTransform, glanceTransform, moveAt } from "./blob-motion";
+import { Affine, breatheTransform, eyeTransform, glanceTransform, HELLO_MS, moveAt } from "./blob-motion";
 
 /** An SVG transform list, as blobatar writes them, read back into an Affine. */
 function parse(list: string): Affine {
@@ -46,14 +46,24 @@ describe("blob motion", () => {
 
   it("plays meeting moves like the stylesheet", () => {
     // fx-hop: up 12% halfway through its 700ms, down again at the end.
-    expect(moveAt("play", 1, 0, 2, 350, 0)!.ty).toBeCloseTo(-0.12);
-    expect(moveAt("play", 1, 0, 2, 700, 0)!.ty).toBeCloseTo(0);
+    expect(moveAt("play", 1, 0, 2, 350, 5000)!.ty).toBeCloseTo(-0.12);
+    expect(moveAt("play", 1, 0, 2, 700, 5000)!.ty).toBeCloseTo(0);
     // fx-nod waits for its turn: the second speaker holds still for the first 1.8s.
-    expect(moveAt("chat", 1, 1, 2, 900, 0)!.rot).toBe(0);
+    expect(moveAt("chat", 1, 1, 2, 900, 5000)!.rot).toBe(0);
     // fx-sway alternates: back where it started after two swings.
-    expect(moveAt("dance", 1, 0, 2, 1800, 0)!.rot).toBeCloseTo(-8);
-    // fx-lean plays once from arrival, towards the others, and stays there.
+    expect(moveAt("dance", 1, 0, 2, 1800, 5000)!.rot).toBeCloseTo(-8);
+    // fx-lean plays once, after hello, towards the others, and stays there.
     expect(moveAt("hug", -1, 0, 2, 0, 5000)).toMatchObject({ rot: -9, tx: -0.12 });
-    expect(moveAt("hug", 1, 0, 2, 0, 0)!.rot).toBe(0);
+    expect(moveAt("hug", 1, 0, 2, 0, HELLO_MS)!.rot).toBe(0);
+  });
+
+  it("says hello on arrival and goodbye on leaving, unless it's a snub", () => {
+    // Hello: a hop towards the others, at its highest just under half way through.
+    expect(moveAt("chat", -1, 0, 2, 0, HELLO_MS * 0.45)).toMatchObject({ ty: -0.14, rot: -6 });
+    expect(moveAt("ignore", -1, 0, 2, 0, HELLO_MS * 0.45)!.ty).toBe(0);
+    // Goodbye: a waddle from side to side, whatever the moment was.
+    expect(moveAt("hug", 1, 0, 2, 0, 5000, true)!.rot).toBeCloseTo(-7);
+    expect(moveAt("hug", 1, 0, 2, 320, 5000, true)!.rot).toBeCloseTo(7);
+    expect(moveAt("sulk", 1, 0, 2, 320, 5000, true)!.rot).toBeCloseTo(-4);
   });
 });

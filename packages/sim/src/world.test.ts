@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compatible, PERSONALITY_AXES, randomPersonality, type Identity, type Personality } from "./identity";
-import { allowedFor, feeling, INTERACTIONS, MAX_STEP, moodShift, pickInteraction, type MeetingContext } from "./interactions";
+import { allowedFor, feeling, INTERACTIONS, joinsIn, MAX_STEP, moodShift, pickInteraction, type MeetingContext } from "./interactions";
 import { DURATION, firstSegment, NEXT, nextSolo, SLEEP_HOURS, sleepPressure, type Segment } from "./life";
 import { affinity, applyDelta, newRelationship, readyForUnion, readyToBreakUp, relationStatus, type RelationStatus, type Relationship } from "./relationship";
 import { randomRng, seededRng, type Rng } from "./rng";
@@ -200,6 +200,7 @@ describe("relationships", () => {
     taken: null,
     energy: 0.7,
     found: false,
+    night: false,
     ...over,
   });
 
@@ -250,6 +251,22 @@ describe("relationships", () => {
     expect(kinds("lovers", { energy: 0.1 })).toContain("nap_together");
     expect(feeling("nap_together", "good", "lovers")).toBe("sleepy");
     expect(moodShift("comfort", "good", "friends")).toBeGreaterThan(moodShift("chat", "good", "friends"));
+    expect(kinds("lovers")).not.toContain("stargaze");
+    expect(kinds("lovers", { night: true })).toContain("stargaze");
+  });
+
+  it("keeps group moments to groups, and lets only those who get on join in", () => {
+    const rng = seededRng(4);
+    const groupOnly = ["ring_dance", "story", "sing", "group_hug", "tag", "cheer"] as const;
+    for (const status of ["friends", "lovers", "family", "strangers"] as const) {
+      const rel = { ...newRelationship("a", "b", seededRng(0)), status };
+      for (let i = 0; i < 500; i++) expect(groupOnly).not.toContain(pickInteraction(ctx(rel, { found: true, night: true }), rng));
+    }
+    expect(joinsIn("group_hug", "best_friends")).toBe(true);
+    expect(joinsIn("group_hug", "strangers")).toBe(false);
+    expect(joinsIn("ring_dance", "rivals")).toBe(false);
+    expect(joinsIn("story", "ex")).toBe(true);
+    expect(joinsIn("chat", "rivals")).toBe(false);
   });
 
   it("doesn't flicker between statuses at a threshold", () => {
@@ -304,7 +321,7 @@ describe("character and relationships", () => {
   it("keeps a loyal blob that's spoken for from flirting", () => {
     const rel = { ...newRelationship("a", "b", seededRng(0)), status: "crush" as const, romance: 50 };
     const rng = seededRng(5);
-    const base: MeetingContext = { rel, canRomance: true, parentAndChild: false, moodA: 0.5, moodB: 0.5, temper: 0.5, playfulness: 0.5, romance: 1, kindness: 0.5, taken: 1, energy: 0.7, found: false };
+    const base: MeetingContext = { rel, canRomance: true, parentAndChild: false, moodA: 0.5, moodB: 0.5, temper: 0.5, playfulness: 0.5, romance: 1, kindness: 0.5, taken: 1, energy: 0.7, found: false, night: false };
     for (let i = 0; i < 300; i++) expect(pickInteraction(base, rng)).not.toBe("flirt");
   });
 

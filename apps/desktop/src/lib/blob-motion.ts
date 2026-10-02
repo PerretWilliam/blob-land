@@ -171,7 +171,8 @@ function moveAnimation(kind: InteractionKind, face: number, turn: number, count:
   const loop = (ms: number, frames: Keyframe[], ease = EASE, alternate = false, delayMs = 0): MoveAnimation => ({ ms, delayMs, once: false, alternate, ease, frames });
   const once = (ms: number, to: Partial<BodyMove>): MoveAnimation => ({ ms, delayMs: 0, once: true, alternate: false, ease: EASE_OUT, frames: [[0, {}], [1, to]] });
   switch (kind) {
-    case "chat": // fx-nod, in turns
+    case "chat":
+    case "story": // fx-nod, in turns
       return loop(
         count * 1800,
         [[0, { rot: 0 }], [0.1, { rot: 3 }], [0.18, { rot: -2 }], [0.26, { rot: 3 }], [0.34, { rot: -2 }], [0.44, { rot: 0 }], [1, { rot: 0 }]],
@@ -188,11 +189,28 @@ function moveAnimation(kind: InteractionKind, face: number, turn: number, count:
     case "parent_play":
     case "tease": // fx-hop
       return loop(700, [[0, { ty: 0 }, EASE_OUT], [0.5, { ty: -0.12 }, EASE_IN], [1, { ty: 0 }]]);
-    case "dance": // fx-sway
+    case "cheer": // a quicker, higher hop
+      return loop(480, [[0, { ty: 0, sy: 1 }, EASE_OUT], [0.5, { ty: -0.14, sy: 1.05 }, EASE_IN], [1, { ty: 0, sy: 1 }]]);
+    case "chase":
+    case "tag": // round and round, each a beat behind the last
+      return loop(
+        900,
+        [[0, { tx: 0, ty: 0 }], [0.25, { tx: 0.09, ty: -0.05 }], [0.5, { tx: 0, ty: -0.02 }], [0.75, { tx: -0.09, ty: -0.05 }], [1, { tx: 0, ty: 0 }]],
+        EASE_IN_OUT,
+        false,
+        turn * 300,
+      );
+    case "high_five": // a hop and a slap towards the other, now and then
+      return loop(1600, [[0, {}], [0.2, { rot: face * 12, tx: face * 0.1, ty: -0.1 }, EASE_IN], [0.3, { rot: face * 4, tx: face * 0.04 }], [0.5, {}], [1, {}]]);
+    case "sing": // a slow sway, swelling on the long notes
+      return loop(1600, [[0, { rot: -5, sy: 1 }], [1, { rot: 5, sy: 1.04 }]], EASE_IN_OUT, true);
+    case "dance":
+    case "ring_dance": // fx-sway
       return loop(900, [[0, { rot: -8, tx: -0.03, ty: 0 }], [1, { rot: 8, tx: 0.03, ty: -0.04 }]], EASE_IN_OUT, true);
     case "hug":
     case "kiss":
-    case "comfort": // fx-lean
+    case "comfort":
+    case "group_hug": // fx-lean
       return once(600, { rot: face * 9, tx: face * 0.12 });
     case "gift":
     case "make_up":
@@ -201,6 +219,12 @@ function moveAnimation(kind: InteractionKind, face: number, turn: number, count:
     case "flirt":
     case "confess": // fx-wiggle
       return loop(1200, [[0, { rot: -4 }], [1, { rot: 4 }]], EASE_IN_OUT, true);
+    case "whisper": // leans right in, to the other's ear
+      return once(600, { rot: face * 12, tx: face * 0.1, sy: 0.96 });
+    case "stargaze": // leans back, looking up
+      return once(900, { rot: face * -7, ty: 0.01 });
+    case "piggyback": // the first climbs onto the other's back; the other takes the weight
+      return turn === 0 ? once(700, { tx: face * 0.32, ty: -0.32, rot: face * -6 }) : once(700, { sx: 1.06, sy: 0.92 });
     case "nap_together": // fx-doze, against the other
       return once(900, { rot: face * 7, tx: face * 0.05, ty: 0.03, sx: 1.04, sy: 0.94 });
     case "sulk": // fx-slump
@@ -228,15 +252,34 @@ function framesAt(anim: MoveAnimation, u: number): BodyMove {
   return out;
 }
 
+// A meeting has three beats: hello on arrival, the moment itself, goodbye as it ends.
+// A sulk, a snub or a quarrel skips the niceties.
+export const HELLO_MS = 700;
+export const greets = (kind: InteractionKind) => kind !== "argue" && kind !== "sulk" && kind !== "ignore";
+// Hello: a little hop towards the others.
+const hello = (face: number): MoveAnimation => ({ ms: HELLO_MS, delayMs: 0, once: true, alternate: false, ease: EASE_OUT, frames: [[0, {}], [0.45, { ty: -0.14, rot: face * 6 }, EASE_IN], [1, {}]] });
+// Goodbye: a side-to-side waddle, the closest a blob has to a wave.
+const BYE: MoveAnimation = { ms: 320, delayMs: 0, once: false, alternate: true, ease: EASE_IN_OUT, frames: [[0, { rot: -7 }], [1, { rot: 7 }]] };
+
 /**
  * A meeting move at page time `pageMs` (the loops all start at the page's
  * time origin, so everyone at a meeting is in step), `sinceMs` after the
- * blob arrived (when the one-shot moves play). Null when it has none.
+ * blob arrived (when hello plays, then the one-shot moves). `leaving`: the
+ * meeting is about to end, time to say goodbye. Null when it has none.
  */
-export function moveAt(kind: InteractionKind, face: number, turn: number, count: number, pageMs: number, sinceMs: number): BodyMove | null {
+export function moveAt(kind: InteractionKind, face: number, turn: number, count: number, pageMs: number, sinceMs: number, leaving = false): BodyMove | null {
+  if (greets(kind)) {
+    if (sinceMs < HELLO_MS) return framesAt(hello(face), sinceMs / HELLO_MS);
+    if (leaving) return loopAt(BYE, pageMs);
+    sinceMs -= HELLO_MS;
+  }
   const anim = moveAnimation(kind, face, turn, count);
   if (!anim) return null;
   if (anim.once) return framesAt(anim, Math.min(1, sinceMs / anim.ms));
+  return loopAt(anim, pageMs);
+}
+
+function loopAt(anim: MoveAnimation, pageMs: number): BodyMove {
   const local = pageMs - anim.delayMs;
   // Before its delay, the first keyframe holds (`both`).
   if (local < 0) return framesAt(anim, 0);

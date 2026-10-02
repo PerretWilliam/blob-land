@@ -453,7 +453,14 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   // writes: getAnimations forces a style recalc, one per label if interleaved.
   const toSync = useRef<HTMLElement[]>([]);
   function syncMeetings() {
-    for (const el of toSync.current) for (const a of el.getAnimations({ subtree: true })) if ((a as CSSAnimation).animationName?.startsWith("fx-")) a.startTime = 0;
+    // Hello and the moment's fade-in play from arrival, not in step with the rest.
+    const once = (name: string | undefined) => name === "fx-hello" || name === "fx-act";
+    for (const el of toSync.current) {
+      for (const a of el.getAnimations({ subtree: true })) {
+        const name = (a as CSSAnimation).animationName;
+        if (name?.startsWith("fx-") && !once(name)) a.startTime = 0;
+      }
+    }
     toSync.current = [];
   }
 

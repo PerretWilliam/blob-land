@@ -1,16 +1,18 @@
 import { childPersonality, compatible, randomIdentity, type Identity, type Personality } from "./identity";
 import {
-  allowedFor,
+  allClose,
   deltaFor,
   feeling,
+  joinsIn,
   moodShift,
   pickInteraction,
+  pickTogether,
   rollOutcome,
   type InteractionKind,
   type MeetingContext,
   type Outcome,
 } from "./interactions";
-import { canSocialize, DURATION, firstSegment, liveThrough, nextSolo, type Segment, type Vitals } from "./life";
+import { canSocialize, DURATION, firstSegment, isNight, liveThrough, nextSolo, type Segment, type Vitals } from "./life";
 import {
   affinity,
   applyDelta,
@@ -100,7 +102,7 @@ const RING = (n: number) => 0.057 + 0.012 * (n - 2);
 const GROWS = (host: WorldBlob) => 0.12 + 0.3 * host.personality.sociability;
 export const GROUP_MAX = 5;
 // In a crowd, bonds move slower than one to one.
-const CROWD = 0.6;
+const CROWD = 0.7;
 // Births slow down as the garden fills, and stop here.
 // ponytail: one soft cap for the whole garden; per-couple limits if it ever feels samey.
 export const POPULATION_CAP = 150;
@@ -201,7 +203,8 @@ const SALIENCE: RelationStatus[] = ["lovers", "crush", "rivals", "ex", "complica
 /**
  * Two or more blobs get together: they walk to a spot between them and stand
  * in a ring, and every pair among them has its own moment. Two blobs pick
- * what they do; a group does one thing together (chat, play, dance) — except
+ * what they do; a group does one thing together (a story, a song, a game of
+ * tag, a ring dance, a group hug if they're all close…) — except
  * for pairs whose relationship won't have it, who bicker or snub each other
  * on the side, as rivals would.
  */
@@ -218,7 +221,9 @@ function gather(
   const start = Math.max(...members.map((m) => m.last.end));
   const end = start + between(rng, DURATION.meet[0], DURATION.meet[1]) * (crowd ? 1.5 : 1);
   const playful = mean(members.map((m) => m.personality.playfulness));
-  const together: InteractionKind | null = crowd ? weighted(rng, { chat: 5, play: 4 * playful, dance: 2 * playful }) : null;
+  const statuses = members.flatMap((m, i) => members.slice(i + 1).map((o) => world.relationships.get(pairKey(m.seed, o.seed))?.status ?? "strangers"));
+  const found = members.some((m) => m.last.activity === "discover");
+  const together: InteractionKind | null = crowd ? pickTogether(rng, playful, allClose(statuses), found) : null;
 
   // Meet in the middle, a little off to the side.
   const clamp = (v: number) => Math.min(0.85, Math.max(0.15, v));
@@ -300,8 +305,9 @@ function pair(
     taken: takenBy(world, b, c),
     energy: (b.vitals.energy + c.vitals.energy) / 2,
     found: b.last.activity === "discover" || c.last.activity === "discover",
+    night: isNight(start),
   };
-  const kind = together && allowedFor(rel.status).includes(together) ? together : pickInteraction(ctx, rng);
+  const kind = together && joinsIn(together, rel.status) ? together : pickInteraction(ctx, rng);
   const outcome = rollOutcome(ctx, rng);
   let delta = deltaFor(kind, outcome, ctx, rng);
   if (together) delta = { friendship: delta.friendship * CROWD, romance: delta.romance * CROWD, tension: delta.tension * CROWD };
