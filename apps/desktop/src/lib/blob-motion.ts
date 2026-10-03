@@ -187,9 +187,11 @@ function moveAnimation(kind: InteractionKind, face: number, turn: number, count:
       ]);
     case "play":
     case "parent_play":
+    case "splash":
     case "tease": // fx-hop
       return loop(700, [[0, { ty: 0 }, EASE_OUT], [0.5, { ty: -0.12 }, EASE_IN], [1, { ty: 0 }]]);
-    case "cheer": // a quicker, higher hop
+    case "cheer":
+    case "leaf_pile": // a quicker, higher hop
       return loop(480, [[0, { ty: 0, sy: 1 }, EASE_OUT], [0.5, { ty: -0.14, sy: 1.05 }, EASE_IN], [1, { ty: 0, sy: 1 }]]);
     case "chase":
     case "tag": // round and round, each a beat behind the last
@@ -200,6 +202,8 @@ function moveAnimation(kind: InteractionKind, face: number, turn: number, count:
         false,
         turn * 300,
       );
+    case "snowball": // wind up, and throw, each in turn
+      return loop(1400, [[0, {}], [0.25, { rot: face * -10, tx: face * -0.04 }, EASE_IN], [0.35, { rot: face * 10, tx: face * 0.06 }], [0.6, {}], [1, {}]], EASE_OUT, false, turn * 700);
     case "high_five": // a hop and a slap towards the other, now and then
       return loop(1600, [[0, {}], [0.2, { rot: face * 12, tx: face * 0.1, ty: -0.1 }, EASE_IN], [0.3, { rot: face * 4, tx: face * 0.04 }], [0.5, {}], [1, {}]]);
     case "sing": // a slow sway, swelling on the long notes
@@ -214,6 +218,8 @@ function moveAnimation(kind: InteractionKind, face: number, turn: number, count:
       return once(600, { rot: face * 9, tx: face * 0.12 });
     case "gift":
     case "make_up":
+    case "snowman":
+    case "flowers":
     case "share_find": // fx-offer
       return once(600, { rot: face * 5, tx: face * 0.05 });
     case "flirt":
@@ -221,10 +227,13 @@ function moveAnimation(kind: InteractionKind, face: number, turn: number, count:
       return loop(1200, [[0, { rot: -4 }], [1, { rot: 4 }]], EASE_IN_OUT, true);
     case "whisper": // leans right in, to the other's ear
       return once(600, { rot: face * 12, tx: face * 0.1, sy: 0.96 });
-    case "stargaze": // leans back, looking up
+    case "stargaze":
+    case "fireflies": // leans back, looking up
       return once(900, { rot: face * -7, ty: 0.01 });
     case "piggyback": // the first climbs onto the other's back; the other takes the weight
       return turn === 0 ? once(700, { tx: face * 0.32, ty: -0.32, rot: face * -6 }) : once(700, { sx: 1.06, sy: 0.92 });
+    case "shelter": // huddled up to the other, out of the rain
+      return once(700, { rot: face * 6, tx: face * 0.08, sy: 0.97 });
     case "nap_together": // fx-doze, against the other
       return once(900, { rot: face * 7, tx: face * 0.05, ty: 0.03, sx: 1.04, sy: 0.94 });
     case "sulk": // fx-slump

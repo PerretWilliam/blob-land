@@ -201,6 +201,8 @@ describe("relationships", () => {
     energy: 0.7,
     found: false,
     night: false,
+    weather: "clear",
+    season: "blossom",
     ...over,
   });
 
@@ -253,6 +255,28 @@ describe("relationships", () => {
     expect(moodShift("comfort", "good", "friends")).toBeGreaterThan(moodShift("chat", "good", "friends"));
     expect(kinds("lovers")).not.toContain("stargaze");
     expect(kinds("lovers", { night: true })).toContain("stargaze");
+  });
+
+  it("has weather moments only under their sky", () => {
+    const rng = seededRng(5);
+    const kinds = (status: RelationStatus, over: Partial<MeetingContext>) => {
+      const rel = { ...newRelationship("a", "b", seededRng(0)), status };
+      return new Set(Array.from({ length: 800 }, () => pickInteraction(ctx(rel, over), rng)));
+    };
+    const sunny = kinds("friends", { weather: "clear", season: "summer" });
+    for (const k of ["shelter", "splash", "snowball", "snowman", "flowers", "leaf_pile", "fireflies"]) expect(sunny).not.toContain(k);
+    expect(kinds("friends", { weather: "rain" })).toContain("shelter");
+    expect(kinds("friends", { weather: "rain" })).toContain("splash");
+    expect(kinds("friends", { weather: "snow", season: "snowfall" })).toContain("snowball");
+    expect(kinds("family", { weather: "snow", season: "snowfall" })).toContain("snowman");
+    expect(kinds("lovers", { weather: "clear", season: "blossom" })).toContain("flowers");
+    expect(kinds("friends", { weather: "clear", season: "falling_leaves" })).toContain("leaf_pile");
+    expect(kinds("lovers", { weather: "clear", season: "fireflies", night: true })).toContain("fireflies");
+    expect(kinds("lovers", { weather: "clear", season: "fireflies", night: false })).not.toContain("fireflies");
+    // No stars to look at through clouds; snowballs only once it's snowing.
+    expect(kinds("lovers", { weather: "cloudy", night: true })).not.toContain("stargaze");
+    expect(kinds("rivals", { weather: "snow", season: "snowfall" })).toContain("snowball");
+    expect(kinds("rivals", { weather: "clear", season: "snowfall" })).not.toContain("snowball");
   });
 
   it("keeps group moments to groups, and lets only those who get on join in", () => {
@@ -321,7 +345,7 @@ describe("character and relationships", () => {
   it("keeps a loyal blob that's spoken for from flirting", () => {
     const rel = { ...newRelationship("a", "b", seededRng(0)), status: "crush" as const, romance: 50 };
     const rng = seededRng(5);
-    const base: MeetingContext = { rel, canRomance: true, parentAndChild: false, moodA: 0.5, moodB: 0.5, temper: 0.5, playfulness: 0.5, romance: 1, kindness: 0.5, taken: 1, energy: 0.7, found: false, night: false };
+    const base: MeetingContext = { rel, canRomance: true, parentAndChild: false, moodA: 0.5, moodB: 0.5, temper: 0.5, playfulness: 0.5, romance: 1, kindness: 0.5, taken: 1, energy: 0.7, found: false, night: false, weather: "clear", season: "blossom" };
     for (let i = 0; i < 300; i++) expect(pickInteraction(base, rng)).not.toBe("flirt");
   });
 
