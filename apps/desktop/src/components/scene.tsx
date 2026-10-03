@@ -1,4 +1,4 @@
-import { alongPath, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type Gait, type GroundPoint, type Personality, type Route, type Segment, type Sex } from "@blob-land/sim";
+import { alongPath, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type Gait, type GroundPoint, type Personality, type Route, type Segment, type Sex, type Spell } from "@blob-land/sim";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { AuraFx, InteractionFx, momentAt, type Aura } from "@/components/interaction-fx";
 import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
 import { canWalkStraight, cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
-import { skyAt } from "@/lib/dev";
+import { GLOOM } from "@/components/sky";
+import { seasonNow, skyAt, weatherNow } from "@/lib/dev";
 import { useInView } from "@/lib/motion";
 import { characterName, countryName, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
@@ -72,6 +73,8 @@ export interface SceneProps {
   cardHidden?: boolean;
   /** On a map too big to show whole, the blob the camera starts on. */
   startAt?: string;
+  /** The island's sky, spell by spell: clear when unset. */
+  weather?: Spell[];
 }
 
 // Half the distance two partners keep between them, per ground axis.
@@ -129,11 +132,17 @@ const hex = (h: string): Rgb => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2),
 const mix = (a: string, b: string, p: number) =>
   `rgb(${hex(a).map((v, i) => Math.round(v + (hex(b)[i]! - v) * p)).join(" ")})`;
 
-const SKY = { night: ["#0b1026", "#27305a"], dusk: ["#3b3f78", "#f2a07b"], day: ["#4fb8f0", "#d8f1ff"] };
+const SKY = { night: ["#0b1026", "#27305a"], dusk: ["#3b3f78", "#f2a07b"], day: ["#4fb8f0", "#d8f1ff"], grey: ["#7f8ea3", "#c7d0db"] };
 
-function skyGradient(d: number): string {
+/** Daylight `d` in [0, 1], greyed by `gloom` (a cloudy or rainy sky's) by day. */
+function skyGradient(d: number, gloom: number): string {
   const [from, to, p] = d < 0.5 ? [SKY.night, SKY.dusk, d * 2] : [SKY.dusk, SKY.day, (d - 0.5) * 2];
-  return `linear-gradient(to bottom, ${mix(from[0]!, to[0]!, p)}, ${mix(from[1]!, to[1]!, p)})`;
+  const grey = d < 0.5 ? 0 : (d - 0.5) * 2 * gloom * 0.8;
+  const stop = (k: number) => {
+    const [r, g, b] = hex(from[k]!).map((v, i) => v + (hex(to[k]!)[i]! - v) * p);
+    return mix(`#${[r, g, b].map((v) => Math.round(v!).toString(16).padStart(2, "0")).join("")}`, SKY.grey[k]!, grey);
+  };
+  return `linear-gradient(to bottom, ${stop(0)}, ${stop(1)})`;
 }
 
 // Fixed decor — ambience only, no behaviour.
@@ -235,7 +244,7 @@ function meetingSpot(seg: Segment, segmentsOf: Map<string, Segment[]>, snap: (p:
   return { x: moved.x + (seg.x - mid.x) / zoom, y: moved.y + (seg.y - mid.y) / zoom };
 }
 
-export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations, cardHidden, startAt }: SceneProps) {
+export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0.6, clock = Date.now, onShowRelations, cardHidden, startAt, weather }: SceneProps) {
   const t = useT();
   const tiles = layout.size;
   // Fitting the whole map is zoom 1; how far in the camera starts, and follows a blob.
@@ -249,6 +258,9 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   // Read on each render: the screen re-renders on its own tick.
   const now = clock();
   const light = skyAt(now);
+  const gloom = GLOOM[weatherNow(weather ?? [], now)];
+  const weatherRef = useRef(weather);
+  weatherRef.current = weather;
 
   const island = useMemo(() => islandGeometry(tiles, Math.max(0, ...layout.cells.map((c) => (c.height ?? 0) + (c.ramp ? 1 : 0)))), [layout, tiles]);
   const islandRef = useRef<IslandGeometry>(island);
@@ -788,6 +800,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     // Reduced motion: no gliding, just re-place the blobs now and then.
     let nextMove = 0;
     let lastLight = -1;
+    let lastGloom = -1;
     // The bench reads how long each frame's work takes here (see src/bench).
     const profile = (window as { sceneProfile?: { tickMs: number; renderMs: number; ticks: number; renders: number } }).sceneProfile;
     const tick = () => {
@@ -860,16 +873,21 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       applyCamera(kCamera);
       syncMeetings();
       hover(now);
-      const light = skyAt(clockRef.current());
-      if (Math.abs(light - lastLight) > 0.002) {
-        lastLight = light;
-        world.setLight(light);
+      const at = clockRef.current();
+      const light = skyAt(at);
+      const weather = weatherNow(weatherRef.current ?? [], at);
+      const gloom = GLOOM[weather];
+      if (Math.abs(light - lastLight) > 0.002 || gloom !== lastGloom) {
+        [lastLight, lastGloom] = [light, gloom];
+        world.setLight(light, gloom);
         dirty.current = true;
       }
-      // Blobs breathe and clouds drift: close up, every frame is a new one.
-      const animated = !reduced && !resting && (world.blobs.size > 0 || map);
+      world.sky.set(weather, seasonNow(at));
+      // Blobs breathe, clouds drift and rain falls: close up, every frame is a new one.
+      const animated = !reduced && !resting && (world.blobs.size > 0 || map || world.sky.active(light));
       if (!dirty.current && !animated) return;
       world.setClouds(size.current.camW, size.current.camH, camera.current?.x ?? 0, camera.current?.y ?? 0, camera.current?.z ?? 1, now, reduced);
+      world.sky.frame(size.current.camW, size.current.camH, now, light, reduced || map);
       for (const view of world.blobs.values()) {
         const outlined = view.seed === selectedRef.current || view.seed === hovered.current || view.seed === focused.current;
         view.frame(now, reduced, outlined ? OUTLINE_PX : 0, world.scale);
@@ -914,7 +932,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       }}
       className="absolute inset-0 select-none overflow-hidden"
       data-view={inView.map ? "map" : inView.far ? "far" : "near"}
-      style={{ background: skyGradient(light), transition: "background 2s" }}
+      style={{ background: skyGradient(light, gloom), transition: "background 2s" }}
       onClickCapture={(e) => {
         if (!dragged.current) return;
         dragged.current = false;
@@ -938,7 +956,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           key={`${x}-${y}`}
           aria-hidden="true"
           className="absolute size-[3px] rounded-full bg-white"
-          style={{ left: `${x}%`, top: `${y}%`, opacity: (1 - light) * 0.85 }}
+          style={{ left: `${x}%`, top: `${y}%`, opacity: (1 - light) * 0.85 * (1 - gloom) }}
         />
       ))}
 

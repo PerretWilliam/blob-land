@@ -38,6 +38,22 @@ export const en = {
     auto: (gait: string) => `As its character does (${gait})`,
     names: { stroll: "Easy stroll", bouncy: "Little bounces", proud: "Proud strut", shy: "Shy little steps", stomp: "Heavy stomps" },
   },
+  sky: {
+    /** The badge's label for screen readers: season, then weather. */
+    label: (season: string, weather: string) => `${season}, ${weather}`,
+    weather: { clear: "Clear", cloudy: "Cloudy", rain: "Rain", storm: "Storm", snow: "Snow", fog: "Fog" },
+    seasons: {
+      snowfall: "Snowfall",
+      thaw: "The thaw",
+      blossom: "Blossom time",
+      bloom: "In bloom",
+      fireflies: "Firefly nights",
+      summer: "High summer",
+      shooting_stars: "Shooting stars",
+      falling_leaves: "Falling leaves",
+      mist: "Misty days",
+    },
+  },
   personality: {
     title: "Its character",
     surprise: "Surprise me",
@@ -375,6 +391,8 @@ export const en = {
     reset: "reset",
     blobSize: (x: string) => `Blob size ${x}x`,
     reducedMotion: "Reduced motion",
+    weather: "Weather",
+    season: "Season",
     resetKnobs: "Reset knobs",
     resetEverything: "Reset everything",
     confirmReset: "Wipe the garden's database and this device's blob and island, then seed a new garden?",

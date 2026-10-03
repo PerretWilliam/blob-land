@@ -1,4 +1,4 @@
-import { notable, type Gait, type Identity, type Personality, type Segment } from "@blob-land/sim";
+import { notable, type Gait, type Identity, type Personality, type Segment, type Spell } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -59,7 +59,7 @@ export default function App() {
   const [gardenClock, setGardenClock] = useState<GardenClock>(() => ({ at: Date.now(), readAt: Date.now(), rate: 1 }));
   // Which region's island is on screen (null: the player's own), and what the server says about the regions.
   const [visiting, setVisiting] = useState<number | null>(null);
-  const [regions, setRegions] = useState<{ region: number; home: number; list: GardenRegion[]; size: number } | null>(null);
+  const [regions, setRegions] = useState<{ region: number; home: number; list: GardenRegion[]; size: number; weather: Spell[] } | null>(null);
   const [island, setIsland] = useState<IslandLayout>(() => defaultIsland(ISLAND_SIZE));
   const saveIslandTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   // The player's country, as the garden last said: kept while visiting other islands.
@@ -91,7 +91,7 @@ export default function App() {
   const refreshGarden = useCallback(async (token: string): Promise<void> => {
     const asked = visitingRef.current ?? undefined;
     const last = known.current?.asked === asked ? known.current : null;
-    const { blobs: sent, now, rate, region, home, regions: list, size, step, delta } = await getGarden(token, asked, last?.step);
+    const { blobs: sent, now, rate, region, home, regions: list, size, step, delta, weather } = await getGarden(token, asked, last?.step);
     // The player moved on to another island while this one was loading.
     if ((visitingRef.current ?? undefined) !== asked) return;
     let blobs = sent;
@@ -111,7 +111,7 @@ export default function App() {
     }
     known.current = { asked, step, segments: new Map(blobs.map((b) => [b.seed, b.segments])) };
     setBlobs(blobs);
-    setRegions({ region, home, list, size });
+    setRegions({ region, home, list, size, weather });
     // Kept running as is unless it drifted: re-anchoring on every answer would
     // move the whole garden by the request's latency (times the rate, in dev).
     const fresh = { at: now, readAt: Date.now(), rate: rate ?? 1 };

@@ -1,4 +1,4 @@
-import type { Attraction, Gait, Identity, Kin, Personality, RelationStatus, Segment, Sex } from "@blob-land/sim";
+import type { Attraction, Gait, Identity, Kin, Personality, RelationStatus, Segment, Sex, Spell } from "@blob-land/sim";
 import { fetch } from "@tauri-apps/plugin-http";
 import { t } from "@/i18n";
 
@@ -50,6 +50,8 @@ export interface GardenResponse {
   step: number;
   /** An answer to `since`: every blob, but only the timeline written since then. */
   delta: boolean;
+  /** The region's sky: the spell on now and those to come (always in full). */
+  weather: Spell[];
   blobs: GardenBlob[];
 }
 

@@ -1,5 +1,6 @@
 import { NEST } from "./position";
 import { between, pick, randomSeed, weighted, type Rng } from "./rng";
+import { seasonAt, wet, type Weather } from "./weather";
 
 export type Activity = "sleep" | "wake" | "rest" | "explore" | "discover" | "meet";
 
@@ -131,26 +132,31 @@ function lingering(last: Segment, rng: Rng): string | null {
 
 const span = (rng: Rng, activity: keyof typeof DURATION) => between(rng, DURATION[activity][0], DURATION[activity][1]);
 
-function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng, chronotype: number, curiosity: number): Exclude<Activity, "meet"> {
+function nextActivity(prev: Activity, vitals: Vitals, t: number, rng: Rng, chronotype: number, curiosity: number, weather: Weather): Exclude<Activity, "meet"> {
   if (prev === "sleep") return "wake";
   if (prev === "wake") return weighted(rng, { explore: 7, rest: 3 });
   const pressure = sleepPressure(vitals, t, chronotype);
   // Past 1, bedtime isn't a maybe; from 0.8 up it's a growing one.
   if (pressure > 1) return "sleep";
+  // Rain keeps blobs in, snow tempts them out, fog hides things worth finding,
+  // and a summer afternoon's heat calls for a sit in the shade.
+  const h = new Date(t).getUTCHours();
+  const hot = weather === "clear" && seasonAt(t) === "summer" && h >= 12 && h < 17;
+  const out = wet(weather) ? 0.5 : weather === "snow" ? 1.2 : 1;
   return weighted(rng, {
     // In high spirits a blob goes off exploring; feeling low, it sits a while.
     // A curious one wanders and pokes at things more; an incurious one sits.
-    explore: 4 + 2 * curiosity + 2 * Math.max(0, vitals.mood),
-    rest: prev === "rest" ? 0 : 1.5 - curiosity + 3 * (1 - vitals.energy) + 2 * Math.max(0, -vitals.mood),
-    discover: prev === "discover" ? 0 : 0.6 + 1.2 * curiosity,
+    explore: (4 + 2 * curiosity + 2 * Math.max(0, vitals.mood)) * out,
+    rest: prev === "rest" ? 0 : 1.5 - curiosity + 3 * (1 - vitals.energy) + 2 * Math.max(0, -vitals.mood) + (wet(weather) ? 2 : 0) + (hot ? 1.5 : 0),
+    discover: prev === "discover" ? 0 : (0.6 + 1.2 * curiosity) * out * (weather === "fog" ? 1.5 : 1),
     sleep: pressure > 0.8 ? 60 * (pressure - 0.8) : 0,
   });
 }
 
 /** The blob's next solo segment, starting where and when `last` ended. */
-export function nextSolo(last: Segment, vitals: Vitals, rng: Rng, chronotype = 0.5, curiosity = 0.5): Segment {
+export function nextSolo(last: Segment, vitals: Vitals, rng: Rng, chronotype = 0.5, curiosity = 0.5, weather: Weather = "clear"): Segment {
   const t = last.end;
-  const activity = nextActivity(last.activity, vitals, t, rng, chronotype, curiosity);
+  const activity = nextActivity(last.activity, vitals, t, rng, chronotype, curiosity, weather);
   const base = { start: t, activity, rng: randomSeed(rng), with: null, detail: null };
   switch (activity) {
     case "sleep": {

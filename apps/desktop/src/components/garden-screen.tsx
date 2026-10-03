@@ -1,4 +1,4 @@
-import { activityLog, gaitOf, gardenSize, segmentAt } from "@blob-land/sim";
+import { activityLog, gaitOf, gardenSize, segmentAt, type Spell } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
@@ -23,6 +23,13 @@ import {
   X,
   ArrowDownToLine,
   ArrowUpFromLine,
+  Cloud,
+  CloudFog,
+  CloudLightning,
+  CloudRain,
+  Moon,
+  Snowflake,
+  Sun,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { EmptyState, RetryButton } from "@/components/empty-state";
@@ -35,7 +42,7 @@ import { ActivityIcon, blobStateAt, MoodIcon, moodOf, BRIDGE_THUMB, DECOR_SPRITE
 import { journalLine, language, listNames, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
 import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
-import { DEV, devNow, useKnobs } from "@/lib/dev";
+import { DEV, devNow, seasonNow, skyAt, useKnobs, weatherNow } from "@/lib/dev";
 import type { LocalLife } from "@/lib/life";
 import { canQuit, quit } from "@/lib/quit";
 import { useGardenIsland } from "@/lib/use-garden-island";
@@ -57,7 +64,7 @@ export interface GardenScreenProps {
   account: { pseudo: string; seed: string; token: string } | null;
   blobs: GardenBlob[];
   /** The region on screen, the player's own, every region, and the island's side, once loaded. */
-  regions: { region: number; home: number; list: GardenRegion[]; size: number } | null;
+  regions: { region: number; home: number; list: GardenRegion[]; size: number; weather: Spell[] } | null;
   /** Go and see another region's island. */
   onVisit: (region: number) => void;
   /** The garden's time, which may run faster than the private blob's (dev). */
@@ -190,6 +197,7 @@ export function GardenScreen({
         gardenLayout && <Scene key={`garden-${regions?.region ?? "home"}`} blobs={gardenBlobs} reducedMotion={reducedMotion} layout={gardenLayout} blobScale={0.55 * dev.blobSize} startAt={atHome ? account.seed : undefined}
           cardHidden={panel === "relations"}
           clock={gardenClockNow}
+          weather={regions?.weather}
           onShowRelations={(seed, name) => {
             setRelationsOf({ seed, name });
             setPanel("relations");
@@ -203,6 +211,7 @@ export function GardenScreen({
           layout={island}
           blobScale={0.6 * dev.blobSize}
           clock={devNow}
+          weather={life.weather}
           cardHidden={panel === "relations"}
           onCellPaint={editing ? (n) => onIslandChange(paintCell(island, n, tool)) : undefined}
         />
@@ -341,7 +350,7 @@ export function GardenScreen({
         </div>
       ) : null}
 
-      {inGarden ? <WorldClock at={gardenNow} /> : null}
+      <WorldClock at={inGarden ? gardenNow : now} clock={inGarden} weather={inGarden ? regions?.weather : life.weather} />
 
       {inGarden && regions && regions.list.length > 1 ? <RegionSwitcher regions={regions} onVisit={onVisit} /> : null}
 
@@ -427,13 +436,26 @@ function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["s
 }
 
 /** The garden's time, UTC, the same for everyone: top centre, with the island switcher just under it. */
-function WorldClock({ at }: { at: number }) {
+const WEATHER_ICONS = { clear: Sun, cloudy: Cloud, rain: CloudRain, storm: CloudLightning, snow: Snowflake, fog: CloudFog };
+
+/** The season and the sky at `at`, and (`clock`: in the garden) the world's time. */
+function WorldClock({ at, clock, weather }: { at: number; clock: boolean; weather?: Spell[] }) {
   const t = useT();
   const time = new Intl.DateTimeFormat(language(), { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }).format(at);
+  const [sky, season] = [weatherNow(weather ?? [], at), seasonNow(at)];
+  const Icon = sky === "clear" && skyAt(at) < 0.5 ? Moon : WEATHER_ICONS[sky];
+  const label = t.sky.label(t.sky.seasons[season], t.sky.weather[sky]);
   return (
-    <p aria-label={t.game.worldClock(time)} title={t.game.worldClock(time)} className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 toon px-3 py-1.5 text-sm font-medium tabular-nums">
-      <Clock className="size-4" /> {time} <span className="text-muted-foreground">UTC</span>
-    </p>
+    <div className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3 toon px-3 py-1.5 text-sm font-medium">
+      {clock ? (
+        <p aria-label={t.game.worldClock(time)} title={t.game.worldClock(time)} className="flex items-center gap-1.5 tabular-nums">
+          <Clock className="size-4" /> {time} <span className="text-muted-foreground">UTC</span>
+        </p>
+      ) : null}
+      <p aria-label={label} title={label} className="flex items-center gap-1.5">
+        <Icon className="size-4" /> {t.sky.seasons[season]}
+      </p>
+    </div>
   );
 }
 

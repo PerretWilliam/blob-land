@@ -25,7 +25,8 @@ The bench (`apps/desktop/src/bench`) opens the app on a blank page first
 blobs on 128×128, with players' kinds of pseudos. It starts on the small
 island the app shows before the server says the garden's size, and grows it.
 Then the same round three times, with everyone walking, everyone in the middle
-of a conversation (the effects over their heads), and by night: close up, the
+of a conversation (the effects over their heads), and by night in a storm (the
+sky's busiest: 200 raindrops, lightning, the grey gloom's filter): close up, the
 widest view still drawn blob by blob, panning there, the map, a slow zoom
 sweep across the switch to the map, and (by day) a zoom jump, following a
 blob, letting go and a fast pan. The page times every frame and the scene's
@@ -207,3 +208,25 @@ moved. Release build, M4 Pro, against `main` the same evening:
 Every scenario holds 60 fps (57 on the fast pan at the widest, as before), jank
 ≤ 2.2 %. Three earlier runs of the same code timed out with no report, the
 bench window half hidden behind others in use: keep it in front while it runs.
+
+## Weather — 2026-10-03
+
+Seasons and weather drawn over the world (`sky.ts`): up to 200 raindrops (a
+storm), or a few dozen petals, leaves, fluff or fireflies, placed each frame
+by a formula of the time, plus fog and lightning as two full-screen sprites; a
+grey sky also dims the world through the night filter, so a cloudy day costs
+that pass too. The bench's night round is now a storm, the worst of it. Release
+build, M4 Pro, against the gaits run (main, clear night):
+
+| Scenario | fps (gaits → weather) | jank % | CPU % | RAM MB |
+|---|---|---|---|---|
+| walking: close up | 60 → 60 | 0.4 → 0 | 30 → 28 | 991 → 1041 |
+| walking: widest, pan | 57 → 57.8 | 2.2 → 3.5 | 57 → 57 | 1031 → 1175 |
+| talking: widest before map | 60 → 60 | 0 → 0 | 68 → 72 | 1177 → 1302 |
+| night (storm): widest, pan | 60 → 60 | 2.1 → 1.7 | 64 → 58 | 1342 → 1509 |
+
+60 fps throughout (57.8 on the fast pan at the widest, as before). RAM is up
+on every row, the walking ones included, which draw no weather (a January noon,
+clear): the run-to-run spread, mostly, and the leak the performance phase is
+for. Two runs timed out first, with the Browser pane open over the bench
+window; closing it, the third finished.

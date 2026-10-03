@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, FlaskConical } from "lucide-react";
+import { SEASONS, WEATHERS, type Season, type Weather } from "@blob-land/sim";
 import { useEffect, useState } from "react";
 import type { GardenBlob } from "@/lib/api";
 import { useT } from "@/i18n";
@@ -59,6 +60,28 @@ export function DevPanel({ time, garden, onReset }: { time: () => number; garden
               {t.dev.sky} <button type="button" className="underline" onClick={() => setKnobs({ sky: null })}>{knobs.sky === null ? t.dev.auto : t.dev.reset}</button>
             </span>
             <input type="range" min={0} max={1} step={0.05} value={knobs.sky ?? 1} onChange={(e) => setKnobs({ sky: Number(e.target.value) })} />
+          </label>
+          <label className="flex items-center justify-between gap-2">
+            {t.dev.weather}
+            <select className="toon-input px-1" value={knobs.weather ?? ""} onChange={(e) => setKnobs({ weather: (e.target.value || null) as Weather | null })}>
+              <option value="">{t.dev.auto}</option>
+              {WEATHERS.map((w) => (
+                <option key={w} value={w}>
+                  {t.sky.weather[w]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center justify-between gap-2">
+            {t.dev.season}
+            <select className="toon-input px-1" value={knobs.season ?? ""} onChange={(e) => setKnobs({ season: (e.target.value || null) as Season | null })}>
+              <option value="">{t.dev.auto}</option>
+              {SEASONS.map((s) => (
+                <option key={s} value={s}>
+                  {t.sky.seasons[s]}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="flex flex-col">
             {t.dev.blobSize(knobs.blobSize.toFixed(2))}
