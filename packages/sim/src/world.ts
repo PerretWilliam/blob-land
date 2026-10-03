@@ -64,6 +64,12 @@ export interface World {
   unions: Union[];
   /** Its sky, rolled on by each step with everything else. Clear when unset. */
   weather?: Spell[];
+  /**
+   * A visit to a private island. It's to see each other: they look for
+   * company more, and wait longer for the other to come free. Couples neither
+   * form nor split up, and no child is born: that's the garden's to decide.
+   */
+  visit?: boolean;
 }
 
 export interface Meeting {
@@ -104,6 +110,18 @@ export interface Milestone {
 const FIRSTS: readonly InteractionKind[] = ["kiss", "stargaze", "shelter", "splash", "snowball", "snowman", "flowers", "leaf_pile", "fireflies"];
 const WARM: readonly RelationStatus[] = ["acquaintances", "friends", "best_friends", "crush", "lovers"];
 
+/** How many may stay on an island at once, besides its own blob. */
+export const MAX_GUESTS = 5;
+
+/**
+ * How long a visit lasts, rolled on arrival: a few hours between strangers,
+ * up to two days between those who are close.
+ */
+export function stayFor(rel: Pick<Relationship, "friendship" | "romance"> | null, rng: Rng): number {
+  const close = Math.max(rel?.friendship ?? 0, rel?.romance ?? 0) / 100;
+  return between(rng, 3, 12) * HOUR + close * between(rng, 0, 36) * HOUR;
+}
+
 /** What one step produced, for the caller to store. */
 export interface WorldStep {
   segments: (Segment & { seed: string })[];
@@ -118,9 +136,12 @@ export interface WorldStep {
 }
 
 const MIN = 60 * 1000;
-const DAY = 24 * 60 * MIN;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
 // How long a blob that wants company waits for someone to come free.
 const SOCIAL_WAIT = 5 * MIN;
+// On a visit, for the one they came to see.
+const VISIT_WAIT = 15 * MIN;
 // How far from the middle of a gathering each blob stands: two face each
 // other, a bigger group makes a wider ring.
 const RING = (n: number) => 0.057 + 0.012 * (n - 2);
@@ -182,7 +203,7 @@ export function stepWorld(world: World, until: number, rng: Rng, maxCatchUp = 2 
 
     const t = b.last.end;
     // A cheerful blob goes looking for company; a low one keeps to itself.
-    const wantsCompany = 0.05 + 0.3 * b.personality.sociability + 0.2 * b.vitals.mood;
+    const wantsCompany = 0.05 + 0.3 * b.personality.sociability + 0.2 * b.vitals.mood + (world.visit ? 0.15 : 0);
     if (canSocialize(b.last, b.vitals, t, b.personality.chronotype) && rng() < wantsCompany) {
       const group = [b];
       for (let c = pickCompany(world, group, t, rng); c; c = group.length < GROUP_MAX && rng() < GROWS(b) ? pickCompany(world, group, t, rng) : undefined) {
@@ -209,7 +230,7 @@ function pickCompany(world: World, group: WorldBlob[], t: number, rng: Rng): Wor
   const [cx, cy] = [mean(group.map((m) => m.last.x)), mean(group.map((m) => m.last.y))];
   const weights: Record<string, number> = {};
   for (const c of world.blobs.values()) {
-    if (group.includes(c) || c.last.end < t || c.last.end > t + SOCIAL_WAIT) continue;
+    if (group.includes(c) || c.last.end < t || c.last.end > t + (world.visit ? VISIT_WAIT : SOCIAL_WAIT)) continue;
     if (!canSocialize(c.last, c.vitals, c.last.end, c.personality.chronotype)) continue;
     // Geometric mean: one rival already there is enough to put a blob off joining.
     const liking = Math.exp(mean(group.map((m) => Math.log(MEET_WEIGHT[world.relationships.get(pairKey(m.seed, c.seed))?.status ?? "strangers"]))));
@@ -350,7 +371,9 @@ function pair(
   if (kind === "flirt" && outcome === "good") for (const x of [b, c]) jealous(world, x, touched);
 
   const loyalty = (b.personality.loyalty + c.personality.loyalty) / 2;
-  if (couple && readyToBreakUp(rel, loyalty)) {
+  if (world.visit) {
+    // Nothing changes between them for good while away from the garden.
+  } else if (couple && readyToBreakUp(rel, loyalty)) {
     union.endedAt = end;
     out.unionsEnded.push(union);
     rel = { ...rel, ex: true, romance: Math.max(0, rel.romance - 20) };
@@ -439,6 +462,7 @@ function maybeBorn(
   touched: Map<string, Relationship>,
 ) {
   const union = activeUnion(world, b.seed);
+  if (world.visit) return;
   // Not in the very meeting they got together in.
   if (!union || (union.a !== c.seed && union.b !== c.seed) || union.startedAt >= at) return;
   if (outcome !== "good" || (kind !== "hug" && kind !== "kiss" && kind !== "dance")) return;

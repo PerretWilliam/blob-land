@@ -276,3 +276,19 @@ export interface Milestone {
 export function getAlbum(token: string): Promise<{ milestones: Milestone[] }> {
   return request("/me/album", { headers: authHeader(token) });
 }
+
+/** The player's home island, while their blob is home on it: its timeline, as a region's, and when each visitor goes home. */
+export type IslandResponse = { open: false } | (Omit<GardenResponse, "region" | "home" | "regions" | "size"> & { open: true; stays: { seed: string; until: number }[] });
+
+/** The player's blob comes home to its island: it leaves the garden until the island is closed. */
+export const openIsland = (token: string) => request<{ ok: true }>("/me/island", { method: "POST", headers: authHeader(token) });
+/** Everyone on the island goes back to the garden. */
+export const closeIsland = (token: string) => request<{ ok: true }>("/me/island", { method: "DELETE", headers: authHeader(token) });
+export const getIsland = (token: string) => request<IslandResponse>("/me/island", { headers: authHeader(token) });
+/** `name`: the pseudo of a player in the garden, whose blob comes over for a while. No one is told. */
+export const inviteGuest = (token: string, name: string) =>
+  request<{ ok: true }>("/me/island/guests", { method: "POST", headers: authHeader(token), body: JSON.stringify({ name: name.trim() }) });
+export const sendGuestHome = (token: string, seed: string) => request<{ ok: true }>(`/me/island/guests/${encodeURIComponent(seed)}`, { method: "DELETE", headers: authHeader(token) });
+
+/** The player's blob's own timeline, the last few days, wherever it was; with the names of whoever it met. */
+export const getJournal = (token: string) => request<{ segments: Segment[]; names: Record<string, string> }>("/me/journal", { headers: authHeader(token) });

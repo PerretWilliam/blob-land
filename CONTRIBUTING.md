@@ -34,7 +34,7 @@ What happens in the garden comes from the simulation: rolled with real randomnes
 
 ### 7. Your island is yours, offline
 
-The private island works with no account and no connection, and always will. The garden is an invitation, not a gate. Anything online must fail kindly: tell the player what's wrong and what to do, in plain words.
+The private island works with no account and no connection, and always will. The garden is an invitation, not a gate. Once a blob lives in the garden, it's in one place at a time: home on the island while its player is there online (with any visitors, who leave the garden for their stay), in the garden otherwise; offline, the island stays the player's to edit and says where the blob is. Anything online must fail kindly: tell the player what's wrong and what to do, in plain words.
 
 ### 8. Everyone's welcome
 

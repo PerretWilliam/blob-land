@@ -31,6 +31,7 @@ import {
   Snowflake,
   Sun,
   Images,
+  UserPlus,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { EmptyState, RetryButton } from "@/components/empty-state";
@@ -39,13 +40,15 @@ import { AlbumPanel } from "@/components/album-panel";
 import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { DevPanel } from "@/components/dev-panel";
 import { RelationsPanel } from "@/components/relations-panel";
+import { VisitPanel } from "@/components/visit-panel";
 import { Button } from "@/components/ui/button";
 import { ActivityIcon, blobStateAt, MoodIcon, moodOf, BRIDGE_THUMB, DECOR_SPRITES, GROUND_THUMBS, RAMP_THUMB, Scene, type SceneBlob } from "@/components/scene";
 import { journalLine, language, listNames, useT } from "@/i18n";
 import type { Messages } from "@/i18n/en";
-import { gardenTime, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
+import { gardenTime, getJournal, type GardenBlob, type GardenClock, type GardenRegion } from "@/lib/api";
 import { DEV, devNow, seasonNow, skyAt, useKnobs, weatherNow } from "@/lib/dev";
 import type { LocalLife } from "@/lib/life";
+import { useHomeIsland } from "@/lib/use-home-island";
 import { canQuit, quit } from "@/lib/quit";
 import { useGardenIsland } from "@/lib/use-garden-island";
 import { DECOR_CATEGORIES, GROUNDS, type DecorKind, type Ground, defaultIsland, MAX_ISLAND_SIZE, MIN_ISLAND_SIZE, paintCell, resizeIsland, type IslandLayout, type IslandTool } from "@/lib/island";
@@ -115,7 +118,7 @@ export function GardenScreen({
   const [editing, setEditing] = useState(false);
   const [tool, setTool] = useState<IslandTool>("grass");
   // The side panel: one at a time.
-  const [panel, setPanel] = useState<"journal" | "family" | "relations" | "news" | "album" | null>(null);
+  const [panel, setPanel] = useState<"journal" | "family" | "relations" | "news" | "album" | "visit" | null>(null);
   // Whose relations the panel opens on: the player's own unless a blob's ID card asked.
   const [relationsOf, setRelationsOf] = useState<{ seed: string; name: string } | undefined>(undefined);
   // Re-render now and then, so states (and expressions) follow the clock.
@@ -127,7 +130,10 @@ export function GardenScreen({
   }, [gardenClock.rate, dev.speed]);
   const gardenClockNow = () => gardenTime(gardenClock);
   const gardenNow = gardenClockNow();
-  const nameOf = (seed: string) => blobs.find((b) => b.seed === seed)?.pseudo ?? t.common.aBlob;
+  // An account's blob is in one place at a time: home on the island while it's on screen (and online), on the server with any visitors; in the garden otherwise.
+  const mineOnServer = account !== null && account.seed === localSeed;
+  const { island: home, refresh: refreshHome } = useHomeIsland(account?.token ?? null, view === "private" && online, gardenClock.rate > 1 ? 5_000 : 30_000);
+  const nameOf = (seed: string) => (blobs.find((b) => b.seed === seed) ?? home?.blobs.find((b) => b.seed === seed))?.pseudo ?? t.common.aBlob;
   // A garden blob as the scene draws it: its face and activity right now, off its timeline.
   const fromGarden = (blob: GardenBlob, label = blob.pseudo ?? t.common.aNewBlob): SceneBlob => {
     const { expression, activity } = blobStateAt(blob.segments, gardenNow);
@@ -168,23 +174,24 @@ export function GardenScreen({
   }, [menuOpen]);
 
   // A taken pseudo forces the account onto a different seed from the private
-  // blob — when that happens, show both rather than pretending they're one.
-  const accountIsSprout = account !== null && account.seed !== localSeed;
-
-  const ownGardenBlob = account ? blobs.find((b) => b.seed === account.seed) : undefined;
-  const privateBlobs: SceneBlob[] = [
-    {
-      seed: localSeed,
-      label: localPseudo,
-      segments: life.segments,
-      ...blobStateAt(life.segments, now),
-      ...life.identity,
-      personality: life.personality,
-      gait: life.gait ?? gaitOf(life.personality),
-    },
-  ];
-  // The sprout lives in the garden; it shows up here once the garden has loaded.
-  if (accountIsSprout && ownGardenBlob) privateBlobs.push(fromGarden(ownGardenBlob, t.common.gardenSprout(account.pseudo)));
+  // blob: then they're two blobs, the private one living here on the device.
+  const privateBlobs: SceneBlob[] = mineOnServer
+    ? []
+    : [
+        {
+          seed: localSeed,
+          label: localPseudo,
+          segments: life.segments,
+          ...blobStateAt(life.segments, now),
+          ...life.identity,
+          personality: life.personality,
+          gait: life.gait ?? gaitOf(life.personality),
+        },
+      ];
+  // The account's blob (a sprout, under another seed than the private one, if the pseudo was taken) and its visitors.
+  for (const b of home?.blobs ?? []) privateBlobs.push(fromGarden(b, b.seed === account?.seed && !mineOnServer ? t.common.gardenSprout(account.pseudo) : undefined));
+  const guests = (home?.blobs ?? []).flatMap((b) => (home?.stays.has(b.seed) ? [{ seed: b.seed, name: b.pseudo ?? t.common.aBlob, until: home.stays.get(b.seed)! }] : []));
+  const islandWeather = home?.weather ?? life.weather;
   // Everyone in the region at once: the scene only draws what's in view.
   const gardenBlobs: SceneBlob[] = inGarden ? blobs.map((blob) => fromGarden(blob)) : [];
 
@@ -212,8 +219,8 @@ export function GardenScreen({
           reducedMotion={reducedMotion}
           layout={island}
           blobScale={0.6 * dev.blobSize}
-          clock={devNow}
-          weather={life.weather}
+          clock={account ? gardenClockNow : devNow}
+          weather={islandWeather}
           cardHidden={panel === "relations"}
           onCellPaint={editing ? (n) => onIslandChange(paintCell(island, n, tool)) : undefined}
         />
@@ -281,6 +288,16 @@ export function GardenScreen({
               }}
             >
               {t.game.relations}
+            </MenuItem>
+            <MenuItem
+              icon={<UserPlus />}
+              active={panel === "visit"}
+              onClick={() => {
+                setPanel((p) => (p === "visit" ? null : "visit"));
+                setMenuOpen(false);
+              }}
+            >
+              {t.game.visits}
             </MenuItem>
             <MenuItem
               icon={<Images />}
@@ -362,11 +379,17 @@ export function GardenScreen({
         </div>
       ) : null}
 
-      <WorldClock at={inGarden ? gardenNow : now} clock={inGarden} weather={inGarden ? regions?.weather : life.weather} />
+      <WorldClock at={inGarden ? gardenNow : now} clock={inGarden} weather={inGarden ? regions?.weather : islandWeather} />
+
+      {!inGarden && mineOnServer && !online ? (
+        <p role="status" className="absolute bottom-4 left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 toon px-4 py-2 text-sm font-medium">
+          {t.visit.away}
+        </p>
+      ) : null}
 
       {inGarden && regions && regions.list.length > 1 ? <RegionSwitcher regions={regions} onVisit={onVisit} /> : null}
 
-      {panel === "journal" ? <JournalPanel segments={life.segments} name={localPseudo} now={now} onClose={() => setPanel(null)} /> : null}
+      {panel === "journal" ? <JournalPanel segments={life.segments} token={mineOnServer ? account.token : null} name={localPseudo} now={mineOnServer ? gardenNow : now} onClose={() => setPanel(null)} /> : null}
       {panel === "family" ? (
         <FamilyPanel
           seed={account?.seed ?? null}
@@ -379,6 +402,16 @@ export function GardenScreen({
         <RelationsPanel key={relationsOf?.seed ?? "mine"} seed={account?.seed ?? null} token={account?.token ?? null} start={relationsOf} onClose={() => setPanel(null)} />
       ) : null}
       {panel === "album" ? <AlbumPanel seed={account?.seed ?? null} token={account?.token ?? null} onClose={() => setPanel(null)} /> : null}
+      {panel === "visit" ? (
+        <VisitPanel
+          seed={account?.seed ?? localSeed}
+          token={account?.token ?? null}
+          open={home !== null}
+          guests={guests}
+          onChanged={() => refreshHome().catch(() => {})}
+          onClose={() => setPanel(null)}
+        />
+      ) : null}
       {panel === "news" && account ? <GardenNewsPanel token={account.token} onClose={() => setPanel(null)} /> : null}
 
       {editing && !inGarden ? (
@@ -399,8 +432,15 @@ export function GardenScreen({
 
 /** What your blob has been up to: its current activity, then the last few
  * days of changes, newest first. */
-function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["segments"]; name: string; now: number; onClose: () => void }) {
+function JournalPanel({ segments: local, token, name, now, onClose }: { segments: LocalLife["segments"]; token: string | null; name: string; now: number; onClose: () => void }) {
   const t = useT();
+  // An account's blob lives on the server, wherever it is: its journal is read from there.
+  const [remote, setRemote] = useState<{ segments: LocalLife["segments"]; names: Record<string, string> } | null>(null);
+  useEffect(() => {
+    if (token) getJournal(token).then(setRemote, () => {});
+  }, [token]);
+  const segments = token ? (remote?.segments ?? []) : local;
+  const nameOf = (seed: string) => remote?.names[seed] ?? t.common.aBlob;
   const current = blobStateAt(segments, now);
   const mood = moodOf(current.expression);
   // What's been lived so far; the timeline runs a little ahead of now.
@@ -439,7 +479,7 @@ function JournalPanel({ segments, name, now, onClose }: { segments: LocalLife["s
               <time className="w-12 shrink-0 text-muted-foreground tabular-nums" dateTime={new Date(e.start).toISOString()}>
                 {time(e.start)}
               </time>
-              {journalLine(e)}
+              {journalLine(e, nameOf)}
             </p>
           </li>
         ))}

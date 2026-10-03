@@ -1,7 +1,7 @@
 import { GAITS, gardenSize, isAttraction, isCountry, isGait, isPersonality, isSex, PERSONALITY_AXES, MAX_NAME_LENGTH, playerPseudo, randomRng, REGION_CAP, type Personality } from "@blob-land/sim";
 import type { HttpBindings } from "@hono/node-server";
 import { normalizeSeed } from "blobatar";
-import { and, asc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -13,9 +13,10 @@ import { hashPassword, verifyPassword } from "./auth";
 import { gardenNow, resetTimeScale, setTimeScale } from "./clock";
 import { db, isTaken, type Db } from "./db";
 import { config } from "./env";
-import { album, forget, join, journal, LOOKAHEAD, reconsider, relationshipsOf, type Newcomer } from "./garden";
+import { album, forget, join, journal, journalOf, LOOKAHEAD, reconsider, relationshipsOf, type Newcomer } from "./garden";
 import { cleanName, nameTaken } from "./names";
 import { forgetViews, live, regionGarden, touch } from "./region";
+import { invite, IslandError, openIsland, openIslandOf, sendHome } from "./island";
 import { blobs, regions, unions, users } from "./schema";
 import { familyTree } from "./tree";
 
@@ -191,7 +192,14 @@ app.post("/auth/login", rateLimitAuth, async (c) => {
 });
 
 /** Where a player's blob lives, or null. */
+/** The player's garden region, even while their blob is away on an island. */
 async function homeOf(userId: string): Promise<number | null> {
+  const [mine] = await db.select({ region: blobs.region, awayFrom: blobs.awayFrom }).from(blobs).where(eq(blobs.ownerUserId, userId));
+  return mine ? (mine.awayFrom ?? mine.region) : null;
+}
+
+/** Where the player's blob is now: its garden region, or an island. */
+async function whereIs(userId: string): Promise<number | null> {
   const [mine] = await db.select({ region: blobs.region }).from(blobs).where(eq(blobs.ownerUserId, userId));
   return mine?.region ?? null;
 }
@@ -209,7 +217,7 @@ app.get("/garden", requireAuth, async (c) => {
   // size must be the same for everyone), so the player can go and visit.
   const [home, all] = await Promise.all([
     homeOf(c.get("userId")),
-    db.select({ region: regions.region, blobs: regions.population }).from(regions).orderBy(asc(regions.region)),
+    db.select({ region: regions.region, blobs: regions.population }).from(regions).where(gte(regions.region, 0)).orderBy(asc(regions.region)),
   ]);
   const n = asked !== undefined ? Number(asked) : (home ?? 0);
   const count = all.find((r) => r.region === n)?.blobs;
@@ -221,7 +229,7 @@ app.get("/garden", requireAuth, async (c) => {
 
 /** Changes what the player owns about their blob, and tells every server its region changed. */
 async function changeMine(c: Context<Env>, changes: Partial<typeof blobs.$inferInsert>) {
-  const home = await homeOf(c.get("userId"));
+  const home = await whereIs(c.get("userId"));
   if (home === null) return c.json({ error: "no blob for this account" }, 404);
   await db.transaction(async (tx) => {
     await touch(tx, home);
@@ -286,8 +294,11 @@ app.delete("/me", rateLimitAuth, requireAuth, async (c) => {
   if (typeof password !== "string" || !(await verifyPassword(password, user.passwordHash, user.passwordSalt))) {
     return c.json({ error: "wrong password" }, 403);
   }
-  const home = await homeOf(user.id);
   const now = await gardenNow();
+  // Its island's visitors go home first.
+  const island = await openIslandOf(user.id);
+  if (island !== null) await sendHome(island, now);
+  const home = await whereIs(user.id);
   await db.transaction(async (tx) => {
     if (home !== null) {
       await touch(tx, home);
@@ -339,6 +350,68 @@ app.get("/me/album", requireAuth, async (c) => {
   return c.json({ milestones: await album(db, mine.seed, await gardenNow()) });
 });
 
+// The player's home island. A blob is in one place at a time: opening it
+// brings their blob home from the garden, and closing it (or the app going
+// quiet, island.ts) sends everyone back. Only its player ever sees it.
+app.post("/me/island", requireAuth, async (c) => {
+  const island = await openIsland(c.get("userId"), await gardenNow());
+  if (island === null) return c.json({ error: "no blob for this account" }, 404);
+  return c.json({ ok: true });
+});
+
+app.delete("/me/island", requireAuth, async (c) => {
+  const island = await openIslandOf(c.get("userId"));
+  if (island !== null) await sendHome(island, await gardenNow());
+  return c.json({ ok: true });
+});
+
+// Its timeline, as /garden's (`since` included), and when each visitor goes home.
+app.get("/me/island", requireAuth, async (c) => {
+  const since = c.req.query("since");
+  if (since !== undefined && !/^\d{1,15}$/.test(since)) return c.json({ error: "since must be a step number from an earlier answer" }, 400);
+  const island = await openIslandOf(c.get("userId"));
+  if (island === null) return c.json({ open: false });
+  const now = await gardenNow();
+  const stays = await db.select({ seed: blobs.seed, until: blobs.stayUntil }).from(blobs).where(and(eq(blobs.region, island), isNotNull(blobs.stayUntil)));
+  const region = await regionGarden(island, c.get("userId"), since === undefined ? undefined : Number(since), now);
+  return c.body(`{"open":true,"now":${now},"rate":${config.timeScale},"stays":${JSON.stringify(stays)},${region}}`, 200, { "content-type": "application/json" });
+});
+
+// A player's blob, by pseudo, comes over for a stay it rolls itself. Its
+// player isn't told; a blob hidden from the garden is no one.
+app.post("/me/island/guests", requireAuth, async (c) => {
+  const { name } = await body<{ name?: unknown }>(c);
+  if (typeof name !== "string" || !name.trim() || name.length > MAX_NAME_LENGTH) return c.json({ error: "no player goes by that pseudo" }, 404);
+  try {
+    await invite(c.get("userId"), name, await gardenNow(), randomRng);
+  } catch (e) {
+    if (e instanceof IslandError) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
+  return c.json({ ok: true });
+});
+
+app.delete("/me/island/guests/:seed", requireAuth, async (c) => {
+  const island = await openIslandOf(c.get("userId"));
+  const guest = c.req.param("seed");
+  // Its own blob stays: that's closing the island.
+  if (island !== null && guest !== (await db.select({ host: regions.host }).from(regions).where(eq(regions.region, island)))[0]?.host) {
+    await sendHome(island, await gardenNow(), [guest]);
+  }
+  return c.json({ ok: true });
+});
+
+// The player's blob's own timeline, the last few days of it, wherever it was:
+// its journal. With the names of whoever it met (hidden blobs have none).
+app.get("/me/journal", requireAuth, async (c) => {
+  const [mine] = await db.select({ seed: blobs.seed }).from(blobs).where(eq(blobs.ownerUserId, c.get("userId")));
+  if (!mine) return c.json({ segments: [], names: {} });
+  const timeline = await journalOf(db, mine.seed, await gardenNow());
+  const met = [...new Set(timeline.flatMap((s) => s.with ?? []))];
+  const rows = met.length ? await db.select({ seed: blobs.seed, name: blobs.name }).from(blobs).where(and(inArray(blobs.seed, met), eq(blobs.visible, true))) : [];
+  return c.json({ segments: timeline, names: Object.fromEntries(rows.map((r) => [r.seed, r.name])) });
+});
+
 // The news of the player's region (or ?region=): couples, breakups, births, big fights.
 app.get("/garden/journal", requireAuth, async (c) => {
   const asked = c.req.query("region");
@@ -372,11 +445,12 @@ export async function placeAccount(tx: Db, friend: string | null, cap = REGION_C
     const [theirs] = await tx
       .select({ region: regions.region, population: regions.population })
       .from(blobs)
-      .innerJoin(regions, eq(regions.region, blobs.region))
+      // Its garden, even while it's away on an island.
+      .innerJoin(regions, eq(regions.region, sql`COALESCE(${blobs.awayFrom}, ${blobs.region})`))
       .where(and(eq(blobs.seed, friend), isNotNull(blobs.ownerUserId)));
     if (theirs && theirs.population < cap + FRIENDS_ROOM) return theirs.region;
   }
-  const [open] = await tx.select({ region: regions.region }).from(regions).where(lt(regions.population, cap)).orderBy(asc(regions.region)).limit(1);
+  const [open] = await tx.select({ region: regions.region }).from(regions).where(and(gte(regions.region, 0), lt(regions.population, cap))).orderBy(asc(regions.region)).limit(1);
   if (open) return open.region;
   const [{ next }] = (await tx.select({ next: sql<number>`COALESCE(MAX(${regions.region}) + 1, 0)` }).from(regions)) as [{ next: number }];
   return next;

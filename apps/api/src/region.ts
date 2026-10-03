@@ -4,6 +4,7 @@ import { gardenNow } from "./clock";
 import { db, type Db } from "./db";
 import { config } from "./env";
 import { gardenView, LOOKAHEAD, segmentsOf, step, STEP_EVERY, type ViewBlob } from "./garden";
+import { tidy } from "./island";
 import { regions } from "./schema";
 
 /**
@@ -150,6 +151,8 @@ export async function stepDue(): Promise<number> {
     [...due].map(async ({ region }) => {
       try {
         const at = await gardenNow();
+        // An island: its visitors whose stay is over go home first, or all of them if its player has gone.
+        if (region < 0) await tidy(region, at, now);
         await live(region, at, at + LOOKAHEAD);
       } catch (e) {
         console.error(JSON.stringify({ event: "step_failed", region, error: String(e), stack: (e as Error).stack }));

@@ -1,11 +1,12 @@
 import { firstSegment, PERSONALITY_AXES, randomPersonality, seededRng, type Personality, type Rng } from "@blob-land/sim";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, gte, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { app, clientIp, placeAccount } from "../src/app";
 import { gardenNow } from "../src/clock";
 import { db } from "../src/db";
 import { join as joinGarden, LOOKAHEAD } from "../src/garden";
+import { HOST_GONE, tidy } from "../src/island";
 import { live, stepDue } from "../src/region";
 import { blobs, milestones, regions, relationships, segments, unions, users } from "../src/schema";
 
@@ -121,6 +122,75 @@ describe("blob-land API", () => {
     expect((await call("/me/album")).status).toBe(401);
   });
 
+  it("keeps a blob in one place: home on its island while its player is there, with visitors, else in the garden", async () => {
+    const host = await register("visithost");
+    const guest = await register("visitguest", { sex: "male" });
+    const hidden = await register("visithidden");
+    const other = await register("visitother");
+    const req = (method: string, path: string, token: string, json?: unknown) => call(path, { method, headers: as(token), body: json === undefined ? undefined : JSON.stringify(json) });
+    type Island = { open: boolean; stays: { seed: string; until: number }[]; blobs: { seed: string; segments: unknown[] }[] };
+    const island = async (token = host.token) => jsonAs<Island>(await req("GET", "/me/island", token));
+    const inGarden = async (seed: string) => (await garden(other.token)).blobs.some((b) => b.seed === seed);
+    const error = async (res: Response) => [res.status, (await jsonAs<{ error: string }>(res)).error];
+    await stepAll();
+
+    expect(await island()).toEqual({ open: false });
+    expect(await error(await req("POST", "/me/island/guests", host.token, { name: "visitguest" }))).toEqual([409, "open your island first"]);
+    // Home: out of the garden, living on its island.
+    expect((await req("POST", "/me/island", host.token)).status).toBe(200);
+    expect(await inGarden(host.seed)).toBe(false);
+    expect((await island()).blobs.map((b) => b.seed)).toEqual([host.seed]);
+    expect((await island()).blobs[0]!.segments.length).toBeGreaterThan(0);
+    // Islands aren't garden regions.
+    expect((await garden(host.token)).regions.every((r) => r.region >= 0)).toBe(true);
+    expect((await garden(host.token)).region).toBe(0);
+
+    // A visitor leaves the garden for a stay of a few hours to two days.
+    const now = await gardenNow();
+    expect((await req("POST", "/me/island/guests", host.token, { name: "VisitGuest" })).status).toBe(200);
+    expect(await inGarden(guest.seed)).toBe(false);
+    const { stays, blobs: here } = await island();
+    expect(here.map((b) => b.seed).sort()).toEqual([host.seed, guest.seed].sort());
+    expect(stays[0]!.until - now).toBeGreaterThanOrEqual(3 * 60 * 60 * 1000 - 60_000);
+    expect(stays[0]!.until - now).toBeLessThanOrEqual(2 * DAY);
+    // No one, oneself and a hidden blob are no one; a blob already away is away.
+    await req("PATCH", "/me/visibility", hidden.token, { visible: false });
+    for (const name of ["nobodyhere", "visithost", "visithidden"]) expect(await error(await req("POST", "/me/island/guests", host.token, { name }))).toEqual([404, "no player goes by that pseudo"]);
+    await req("POST", "/me/island", other.token);
+    expect(await error(await req("POST", "/me/island/guests", other.token, { name: "visitguest" }))).toEqual([409, "that blob is away from the garden"]);
+    expect(await error(await req("POST", "/me/island/guests", host.token, { name: "visitother" }))).toEqual([409, "that blob is away from the garden"]);
+    await req("DELETE", "/me/island", other.token);
+    // Their island lives the visit: the host can't be sent home as a guest.
+    await stepAll();
+    await req("DELETE", `/me/island/guests/${host.seed}`, host.token);
+    expect((await island()).open).toBe(true);
+    // Goodbye: back to the garden.
+    await req("DELETE", `/me/island/guests/${guest.seed}`, host.token);
+    expect(await inGarden(guest.seed)).toBe(true);
+
+    // A stay that's over, or a player gone quiet: tidied before the island's step.
+    await req("POST", "/me/island/guests", host.token, { name: "visitguest" });
+    const at = await gardenNow();
+    const [isle] = await db.select({ region: blobs.region }).from(blobs).where(eq(blobs.seed, host.seed));
+    await db.update(blobs).set({ stayUntil: at - 1 }).where(eq(blobs.seed, guest.seed));
+    await tidy(isle!.region, at, Date.now());
+    expect(await inGarden(guest.seed)).toBe(true);
+    expect(await inGarden(host.seed)).toBe(false);
+    await db.update(users).set({ lastSeenAt: Date.now() - HOST_GONE - 1000 }).where(eq(users.seed, host.seed));
+    await tidy(isle!.region, at, Date.now());
+    expect(await inGarden(host.seed)).toBe(true);
+    expect((await db.select({ n: regions.population }).from(regions).where(eq(regions.region, isle!.region)))[0]!.n).toBe(0);
+
+    // Closing the island sends everyone home; the journal follows the blob everywhere.
+    await req("POST", "/me/island", host.token);
+    await req("POST", "/me/island/guests", host.token, { name: "visitguest" });
+    await req("DELETE", "/me/island", host.token);
+    expect([await inGarden(host.seed), await inGarden(guest.seed)]).toEqual([true, true]);
+    const journal = await jsonAs<{ segments: { start: number }[] }>(await req("GET", "/me/journal", host.token));
+    expect(journal.segments.length).toBeGreaterThan(0);
+    expect((await call("/me/island")).status).toBe(401);
+  });
+
   it("answers the health check", async () => {
     expect(await jsonAs(await call("/health"))).toEqual({ ok: true });
   });
@@ -131,7 +201,7 @@ describe("blob-land API", () => {
     const populate = await call("/__dev/populate", { method: "POST", body: JSON.stringify({ count: 1 }) });
     expect(await jsonAs<{ regions: number[] }>(populate)).toEqual({ regions: [1] });
     // Both due: one claim steps each once, and then neither is due again for a while.
-    await db.update(regions).set({ nextStepAt: 0 });
+    await db.update(regions).set({ nextStepAt: 0 }).where(gte(regions.region, 0));
     expect(await stepDue()).toBe(2);
     expect(await stepDue()).toBe(0);
 
