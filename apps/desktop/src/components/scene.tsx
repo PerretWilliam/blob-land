@@ -646,7 +646,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     if (!world) return;
     const { blobs: seen, map } = inViewRef.current;
     const followed = selectedRef.current;
-    const want = new Set<string>(map ? [] : seen);
+    // Not one that's left (a visitor gone home): it may still be counted in view until the next cull.
+    const want = new Set<string>(map ? [] : [...seen].filter((seed) => bySeedRef.current.has(seed)));
     if (followed && bySeedRef.current.has(followed)) want.add(followed);
     for (const seed of [...world.blobs.keys()]) if (!want.has(seed)) world.dropBlob(seed);
     const at = performance.now();
@@ -657,7 +658,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       const g = gait.current.get(seed);
       if (g) applyGait(seed, g);
     }
-    const dots = new Set(map ? [...seen].filter((seed) => seed !== followed) : []);
+    const dots = new Set(map ? [...seen].filter((seed) => seed !== followed && bySeedRef.current.has(seed)) : []);
     world.keepDots(dots);
     for (const seed of new Set([...want, ...dots])) {
       const p = shown.current.get(seed);
@@ -834,6 +835,8 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         const jump = Math.max(0, t - aimedAt.current) * JUMP_SPEED;
         aimedAt.current = t;
         const ps = targets(layoutRef.current, list, t, segmentsOfRef.current);
+        // Someone new (a visitor, a newborn): placed now, so whether it's in view can be told.
+        const arriving = list.some((b) => !shown.current.has(b.seed));
         list.forEach((b, i) => {
           const to = { ...ps[i]!, lift: liftRef.current(ps[i]!) };
           const last = aimed.current.get(b.seed);
@@ -868,6 +871,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
           applyGait(b.seed, g);
           arrived(b.seed, g.walk < 0.15 && !ps[i]!.comingToMeet, now);
         });
+        if (arriving) cull();
         dirty.current = true;
       }
       applyCamera(kCamera);
