@@ -13,7 +13,7 @@ import { hashPassword, verifyPassword } from "./auth";
 import { gardenNow, resetTimeScale, setTimeScale } from "./clock";
 import { db, isTaken, type Db } from "./db";
 import { config } from "./env";
-import { forget, join, journal, LOOKAHEAD, reconsider, relationshipsOf, type Newcomer } from "./garden";
+import { album, forget, join, journal, LOOKAHEAD, reconsider, relationshipsOf, type Newcomer } from "./garden";
 import { cleanName, nameTaken } from "./names";
 import { forgetViews, live, regionGarden, touch } from "./region";
 import { blobs, regions, unions, users } from "./schema";
@@ -331,6 +331,14 @@ app.get("/blobs/:seed/relationships", async (c) => {
   return c.json({ relationships: await relationshipsOf(db, seed, await gardenNow()) });
 });
 
+// The player's own blob's album: its big moments, newest first. Only theirs:
+// what a blob holds dear isn't anyone else's business.
+app.get("/me/album", requireAuth, async (c) => {
+  const [mine] = await db.select({ seed: blobs.seed }).from(blobs).where(eq(blobs.ownerUserId, c.get("userId")));
+  if (!mine) return c.json({ milestones: [] });
+  return c.json({ milestones: await album(db, mine.seed, await gardenNow()) });
+});
+
 // The news of the player's region (or ?region=): couples, breakups, births, big fights.
 app.get("/garden/journal", requireAuth, async (c) => {
   const asked = c.req.query("region");
@@ -412,7 +420,7 @@ app.post("/__dev/populate", devTools, async (c) => {
 app.post("/__dev/reset", devTools, async (c) => {
   const { count = 16 } = await body<{ count?: number }>(c);
   if (!Number.isInteger(count) || count < 0 || count > 10_000) return c.json({ error: "count must be 0 to 10 000" }, 400);
-  await db.execute(sql`TRUNCATE users, regions, blobs, unions, segments, relationships, interactions, dev_clock RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE users, regions, blobs, unions, segments, relationships, interactions, milestones, dev_clock RESTART IDENTITY CASCADE`);
   resetTimeScale();
   forgetViews();
   return c.json({ regions: count > 0 ? await populate(count) : [], rate: config.timeScale });

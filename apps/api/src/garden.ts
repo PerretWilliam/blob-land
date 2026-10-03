@@ -20,11 +20,11 @@ import {
   type WorldBlob,
 } from "@blob-land/sim";
 import { normalizeSeed } from "blobatar";
-import { and, asc, eq, getTableColumns, gt, isNull, lt, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, gt, inArray, isNull, lt, lte, or, sql, type SQL } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import type { Db } from "./db";
 import { babyName } from "./names";
-import { blobs, interactions, regions, relationships, segments, unions } from "./schema";
+import { blobs, interactions, milestones, regions, relationships, segments, unions } from "./schema";
 
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
@@ -192,6 +192,8 @@ export async function step(tx: Db, region: number, now: number, rng: Rng, until:
     dTension: m.delta.tension,
   }));
   for (const part of chunks(meetingRows)) await tx.insert(interactions).values(part);
+  const milestoneRows = lived.milestones.map((m) => ({ seed: m.seed, region, kind: m.kind, key: m.key, withSeed: m.with.join(","), at: m.at }));
+  for (const part of chunks(milestoneRows)) await tx.insert(milestones).values(part).onConflictDoNothing();
   const relationshipRows = lastBy(
     lived.relationships.map((r) => ({
       seedA: r.a,
@@ -286,6 +288,8 @@ export async function forget(tx: Db, region: number, seed: string, now: number) 
   await tx.update(unions).set({ seedB: gone }).where(eq(unions.seedB, seed));
   await tx.delete(relationships).where(or(eq(relationships.seedA, seed), eq(relationships.seedB, seed)));
   await tx.delete(interactions).where(or(eq(interactions.seedA, seed), eq(interactions.seedB, seed)));
+  // Its album, and every moment of others' it was part of.
+  await tx.delete(milestones).where(or(eq(milestones.seed, seed), sql`string_to_array(${milestones.withSeed}, ',') @> ARRAY[${seed}]`));
   await tx.delete(segments).where(eq(segments.seed, seed));
   // The others' meetings with it no longer say who with.
   await tx.execute(sql`
@@ -482,6 +486,26 @@ export async function journal(db: Db, region: number, now: number) {
       WHERE i.region = ${region} AND i.kind = 'argue' AND i.outcome = 'bad' AND i.ended_at <= ${now} AND ${shown}
         AND r.status IN ('lovers', 'ex', 'rivals', 'complicated', 'best_friends')
     ) news ORDER BY at DESC LIMIT ${JOURNAL_SIZE}`);
+}
+
+/**
+ * A blob's album, newest first: what has happened by now (the step lives a
+ * little ahead), with the names of who it was with. A moment with a blob
+ * hidden from the garden is left out, as everywhere else.
+ */
+export async function album(db: Db, seed: string, now: number) {
+  const rows = await db
+    .select({ kind: milestones.kind, key: milestones.key, withSeed: milestones.withSeed, at: milestones.at })
+    .from(milestones)
+    .where(and(eq(milestones.seed, seed), lte(milestones.at, now)))
+    .orderBy(sql`${milestones.at} DESC`);
+  const others = [...new Set(rows.flatMap((r) => r.withSeed.split(",")))];
+  const named = others.length === 0 ? [] : await db.select({ seed: blobs.seed, name: blobs.name, visible: blobs.visible }).from(blobs).where(inArray(blobs.seed, others));
+  const shown = new Map(named.filter((b) => b.visible).map((b) => [b.seed, b.name]));
+  return rows.flatMap(({ withSeed, ...r }) => {
+    const seeds = withSeed.split(",");
+    return seeds.every((s) => shown.has(s)) ? [{ ...r, with: seeds.map((s) => ({ seed: s, name: shown.get(s)! })) }] : [];
+  });
 }
 
 /** An upsert's `SET col = excluded.col` for `keys` of `table`. */

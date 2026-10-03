@@ -153,6 +153,7 @@ export const en = {
     family: "Family tree",
     relations: "Relations",
     news: "Garden news",
+    album: "Album",
     settings: "Settings",
     mainMenu: "Main menu",
     quit: "Quit the game",
@@ -323,6 +324,37 @@ export const en = {
     noMatchText: "No relation fits that search or filter. Try another name, or clear the filter.",
     failed: "Couldn't load the relations",
     offline: "The relations live online, in the garden. Check your internet connection, then try again.",
+  },
+
+  album: {
+    title: "Album",
+    close: "Close the album",
+    /** Each card's caption: `o` is who it was with, `kid` a newborn's name. */
+    moments: {
+      friends: (o: string) => `A first friend: ${o}.`,
+      best_friends: (o: string) => `Best friends with ${o}.`,
+      crush: (o: string) => `A heart that beats for ${o}.`,
+      couple: (o: string) => `Together with ${o}.`,
+      child: (o: string, kid: string) => `${kid} came into the world, with ${o}.`,
+      made_up: (o: string) => `Made peace with ${o}.`,
+    },
+    firsts: {
+      kiss: (o: string) => `A first kiss, with ${o}.`,
+      stargaze: (o: string) => `A first night under the stars, with ${o}.`,
+      shelter: (o: string) => `Sheltering from the rain for the first time, with ${o}.`,
+      splash: (o: string) => `A first splash in the puddles, with ${o}.`,
+      snowball: (o: string) => `A first snowball fight, with ${o}.`,
+      snowman: (o: string) => `A first snow blob, built with ${o}.`,
+      flowers: (o: string) => `A first bunch of flowers, picked with ${o}.`,
+      leaf_pile: (o: string) => `A first leap into the leaves, with ${o}.`,
+      fireflies: (o: string) => `The first fireflies, watched with ${o}.`,
+    } as Record<string, (o: string) => string>,
+    noGarden: "An album to fill",
+    noGardenText: "Your blob's big moments, its first friend, its first snowball fight, are kept here once it lives in the garden. Join it from the main menu.",
+    noneYet: "Nothing in it yet",
+    noneYetText: "The album fills itself as your blob makes friends and has its firsts. Give it a little time.",
+    failed: "Couldn't load the album",
+    offline: "The album lives online, in the garden. Check your internet connection, then try again.",
   },
 
   family: {

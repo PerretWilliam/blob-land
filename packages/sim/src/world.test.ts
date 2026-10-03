@@ -40,6 +40,24 @@ describe("stepWorld", () => {
     for (const blob of world.blobs.values()) expect(blob.last.end).toBeGreaterThanOrEqual(T0 + 20 * DAY);
   });
 
+  it("keeps the good times for the album: friends made, couples, children", () => {
+    const kinds = new Set(step.milestones.map((m) => m.kind));
+    expect(kinds).toContain("friends");
+    for (const m of step.milestones) {
+      expect(world.blobs.has(m.seed)).toBe(true);
+      for (const o of m.with) expect(world.blobs.has(o)).toBe(true);
+      expect(m.with).not.toContain(m.seed);
+      if (m.kind === "friends") expect(m.key).toBe("");
+      if (m.kind === "couple") expect(step.unionsStarted.some((u) => [u.a, u.b].includes(m.seed) && [u.a, u.b].includes(m.key))).toBe(true);
+      if (m.kind === "child") expect(step.births.some((b) => b.child.seed === m.key && b.child.parents!.includes(m.seed))).toBe(true);
+    }
+    // Both of a couple have it in their album.
+    for (const u of step.unionsStarted) {
+      expect(step.milestones).toContainEqual(expect.objectContaining({ seed: u.a, kind: "couple", key: u.b }));
+      expect(step.milestones).toContainEqual(expect.objectContaining({ seed: u.b, kind: "couple", key: u.a }));
+    }
+  });
+
   it("chains every timeline with no gaps and only allowed transitions", () => {
     for (const segs of bySeed.values()) {
       for (let i = 1; i < segs.length; i++) {

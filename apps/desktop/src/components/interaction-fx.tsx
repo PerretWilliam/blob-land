@@ -629,6 +629,15 @@ export function InteractionFx({ moment, size }: { moment: Moment; size: number }
   );
 }
 
+/** A moment's picture on its own, as it went at its best: for the album. */
+export function MomentArt({ kind, className }: { kind: InteractionKind; className?: string }) {
+  return (
+    <svg viewBox="0 0 40 36" aria-hidden="true" className={`overflow-visible ${className ?? ""}`}>
+      {art(kind, "good")}
+    </svg>
+  );
+}
+
 export type Aura = "newborn" | "heartbroken";
 
 /** A while after something big: a newborn sparkles, a blob just dumped carries a broken heart. */

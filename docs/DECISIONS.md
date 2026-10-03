@@ -60,6 +60,10 @@ The weather is random like everything else in a blob's life, so it is rolled and
 
 Some moments need the right sky (`fitsSky`): sheltering under a leaf together and splashing in puddles only in the rain, snowball fights and building a snow blob only while it snows, picking flowers in blossom time and in bloom, jumping into leaf piles while the leaves fall, watching fireflies on a summer night, and stargazing only under a clear one (three times as often in the shooting-stars season). They go through the relationship's table like any other, so rivals can have a snowball fight (it tends to go badly) but never pick flowers together. A gathering under the rain shelters together rather than dances.
 
+## An album of firsts, kept by the step
+
+A blob's album holds its big moments: its first friend, each best friend, crush, couple, child and reconciliation, and firsts (a first kiss, a first night under the stars, a first snowball fight…). The sim offers a milestone whenever one might be (`WorldStep.milestones`), without knowing what was kept before; storage keeps each (blob, kind, key) the first time only, a primary key in the garden, so the step needs no history. Milestones are written as they happen rather than reconstructed later, because relationships keep no history of their past statuses and interactions are pruned after three days. Only the good times: breakups and fights are the news's, not the album's. An album is its own player's (`GET /me/album`), and a moment with a blob hidden from the garden is left out, as everywhere else. The private island has none yet: its blob lives alone there, so it has no one to share a first with; visits will change that.
+
 ## Hidden means hidden everywhere
 
 An account can hide from the garden. Its seed is its normalized pseudo, so hiding its name alone would hide nothing: a hidden account is left out of everything anyone else is sent — the region's blobs, as someone's partner, from meetings' `with`, from the news, the family tree (its children show with one parent) and relationships. Its own player still sees it whole (`/tree` and `/blobs/:seed/relationships` take an optional token for that).

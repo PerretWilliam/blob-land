@@ -36,6 +36,13 @@
       "when": 1791057771285,
       "tag": "0004_common_rage",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791059770416,
+      "tag": "0005_minor_red_ghost",
+      "breakpoints": true
     }
   ]
 }
