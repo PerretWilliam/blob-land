@@ -1,4 +1,4 @@
-import type { Attraction, Gait, Identity, Kin, Personality, RelationStatus, Segment, Sex, Spell } from "@blob-land/sim";
+import type { Attraction, Gait, Identity, Kin, Personality, Relationship, RelationStatus, Segment, Sex, Spell, Vitals } from "@blob-land/sim";
 import { fetch } from "@tauri-apps/plugin-http";
 import { t } from "@/i18n";
 
@@ -275,4 +275,24 @@ export interface Milestone {
 
 export function getAlbum(token: string): Promise<{ milestones: Milestone[] }> {
   return request("/me/album", { headers: authHeader(token) });
+}
+
+/** A player's blob, come to stay a while on the private island. */
+export interface Visitor {
+  seed: string;
+  name: string;
+  sex: Sex;
+  attraction: Attraction;
+  personality: Personality;
+  gait: Gait | null;
+  vitals: Vitals;
+  /** How it gets on with the player's blob in the garden, if they've met. */
+  relationship: Omit<Relationship, "a" | "b"> | null;
+  /** They're a couple in the garden. */
+  partner: boolean;
+}
+
+/** `name`: the pseudo of a player in the garden. No one is told. */
+export function getVisitor(token: string, name: string): Promise<Visitor> {
+  return request(`/visitors/${encodeURIComponent(name.trim())}`, { headers: authHeader(token) });
 }

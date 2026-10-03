@@ -202,6 +202,19 @@ describe("stepWorld", () => {
     const s = stepWorld(w, T0 + 30 * DAY, rng, DAY);
     expect(Math.min(...s.segments.map((x) => x.start))).toBeGreaterThanOrEqual(T0 + 29 * DAY);
   });
+
+  it("leaves couples and children to the garden on a visit", () => {
+    for (let seed = 0; seed < 5; seed++) {
+      const rng = seededRng(seed);
+      // Two romantic blobs who'd fall for each other anywhere, and a couple.
+      const w = { ...garden(4, rng), visit: true };
+      for (const b of w.blobs.values()) b.personality = { ...b.personality, sociability: 1, romance: 1, loyalty: 0 };
+      w.unions.push({ id: "u", a: "blob2", b: "blob3", startedAt: T0, endedAt: null, lastBirthAt: null });
+      const s = stepWorld(w, T0 + 10 * DAY, rng, 30 * DAY);
+      expect(s.meetings.length).toBeGreaterThan(0);
+      expect([s.unionsStarted, s.unionsEnded, s.births]).toEqual([[], [], []]);
+    }
+  });
 });
 
 describe("relationships", () => {

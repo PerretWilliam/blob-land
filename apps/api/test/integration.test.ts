@@ -121,6 +121,28 @@ describe("blob-land API", () => {
     expect((await call("/me/album")).status).toBe(401);
   });
 
+  it("sends a player's blob off visiting, with how it gets on with the host's", async () => {
+    const host = await register("visithost");
+    const guest = await register("visitguest", { sex: "male", gait: "bouncy" });
+    const hermit = await register("visithidden");
+    const visit = async (name: string, token = host.token) => call(`/visitors/${name}`, { headers: { authorization: `Bearer ${token}` } });
+    type Visitor = { seed: string; name: string; sex: string; gait: string | null; relationship: { status: string; friendship: number } | null; partner: boolean };
+    // Strangers so far; found by pseudo, whatever its case.
+    expect(await jsonAs<Visitor>(await visit("VisitGuest"))).toMatchObject({ seed: guest.seed, name: "visitguest", sex: "male", gait: "bouncy", relationship: null, partner: false });
+    const [a, b] = [host.seed, guest.seed].sort() as [string, string];
+    const region = (await db.select({ region: blobs.region }).from(blobs).where(eq(blobs.seed, a)))[0]!.region;
+    await db.insert(relationships).values({ seedA: a, seedB: b, region, friendship: 80, romance: 70, tension: 0, chemistry: 0.5, status: "lovers" });
+    await db.insert(unions).values({ id: "visit-couple", region, seedA: a, seedB: b, startedAt: Date.now() });
+    expect(await jsonAs<Visitor>(await visit("visitguest"))).toMatchObject({ relationship: { status: "lovers", friendship: 80 }, partner: true });
+    // No one by that name, oneself, and a hidden blob are all no one.
+    await call("/me/visibility", { method: "PATCH", headers: { authorization: `Bearer ${hermit.token}`, "content-type": "application/json" }, body: JSON.stringify({ visible: false }) });
+    for (const res of [await visit("nobodyhere"), await visit("visithost"), await visit("visithidden")]) {
+      expect(res.status).toBe(404);
+      expect(await jsonAs(res)).toEqual({ error: "no player goes by that pseudo" });
+    }
+    expect((await call("/visitors/visitguest")).status).toBe(401);
+  });
+
   it("answers the health check", async () => {
     expect(await jsonAs(await call("/health"))).toEqual({ ok: true });
   });

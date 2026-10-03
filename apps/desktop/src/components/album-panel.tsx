@@ -43,8 +43,18 @@ function Card({ seed, milestone }: { seed: string; milestone: Milestone }) {
   );
 }
 
-/** The player's blob's album: its first friend, its couples and children, its firsts. From the garden, for now. */
-export function AlbumPanel({ seed, token, onClose }: { seed: string | null; token: string | null; onClose: () => void }) {
+/** Each moment once, the first time, from the garden or the island: newest first. */
+function merge(lists: Milestone[][]): Milestone[] {
+  const first = new Map<string, Milestone>();
+  for (const m of lists.flat()) {
+    const k = `${m.kind}|${m.key}`;
+    if (!first.has(k) || first.get(k)!.at > m.at) first.set(k, m);
+  }
+  return [...first.values()].sort((a, b) => b.at - a.at);
+}
+
+/** The player's blob's album: its first friend, its couples and children, its firsts, in the garden and with visitors (`local`). */
+export function AlbumPanel({ seed, token, local, onClose }: { seed: string; token: string | null; local: Milestone[]; onClose: () => void }) {
   const t = useT();
   const [album, setAlbum] = useState<Milestone[] | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -73,23 +83,23 @@ export function AlbumPanel({ seed, token, onClose }: { seed: string | null; toke
         </Button>
       </header>
       <div className="overflow-y-auto p-2">
-        {!seed || !token ? (
+        {!token && local.length === 0 ? (
           <EmptyState face="sleepy" title={t.album.noGarden}>
             {t.album.noGardenText}
           </EmptyState>
         ) : error ? (
           <LoadFailed error={error} title={t.album.failed} offline={t.album.offline} onRetry={() => setAttempt((n) => n + 1)} />
-        ) : !album ? (
+        ) : token && !album ? (
           <p className="p-1 text-sm text-muted-foreground" aria-live="polite">
             {t.common.loading}
           </p>
-        ) : album.length === 0 ? (
+        ) : merge([album ?? [], local]).length === 0 ? (
           <EmptyState face="thinking" seed={seed} title={t.album.noneYet}>
             {t.album.noneYetText}
           </EmptyState>
         ) : (
           <ul className="flex flex-col gap-2">
-            {album.map((m) => (
+            {merge([album ?? [], local]).map((m) => (
               <Card key={`${m.kind}|${m.key}`} seed={seed} milestone={m} />
             ))}
           </ul>

@@ -1,7 +1,7 @@
 import { GAITS, gardenSize, isAttraction, isCountry, isGait, isPersonality, isSex, PERSONALITY_AXES, MAX_NAME_LENGTH, playerPseudo, randomRng, REGION_CAP, type Personality } from "@blob-land/sim";
 import type { HttpBindings } from "@hono/node-server";
 import { normalizeSeed } from "blobatar";
-import { and, asc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -16,7 +16,7 @@ import { config } from "./env";
 import { album, forget, join, journal, LOOKAHEAD, reconsider, relationshipsOf, type Newcomer } from "./garden";
 import { cleanName, nameTaken } from "./names";
 import { forgetViews, live, regionGarden, touch } from "./region";
-import { blobs, regions, unions, users } from "./schema";
+import { blobs, regions, relationships, unions, users } from "./schema";
 import { familyTree } from "./tree";
 
 type Env = { Bindings: HttpBindings; Variables: { userId: string } };
@@ -337,6 +337,32 @@ app.get("/me/album", requireAuth, async (c) => {
   const [mine] = await db.select({ seed: blobs.seed }).from(blobs).where(eq(blobs.ownerUserId, c.get("userId")));
   if (!mine) return c.json({ milestones: [] });
   return c.json({ milestones: await album(db, mine.seed, await gardenNow()) });
+});
+
+// A player's blob, come to stay a while on the asker's private island: who it
+// is, how the two get on in the garden, and whether they're a couple. The
+// island lives the visit on its own; no one is told. A hidden blob is no one.
+app.get("/visitors/:name", requireAuth, async (c) => {
+  const key = normalizeSeed(c.req.param("name").trim());
+  const [mine] = await db.select({ seed: blobs.seed }).from(blobs).where(eq(blobs.ownerUserId, c.get("userId")));
+  const [guest] = await db
+    .select({ seed: blobs.seed, name: blobs.name, sex: blobs.sex, attraction: blobs.attraction, personality: blobs.personality, gait: blobs.gait, energy: blobs.energy, mood: blobs.mood })
+    .from(blobs)
+    .where(and(eq(blobs.nameKey, key), isNotNull(blobs.ownerUserId), eq(blobs.visible, true), lte(blobs.bornAt, await gardenNow())));
+  if (!guest || guest.seed === mine?.seed) return c.json({ error: "no player goes by that pseudo" }, 404);
+  const [a, b] = [mine?.seed ?? "", guest.seed].sort() as [string, string];
+  const [[rel], [couple]] = await Promise.all([
+    db.select().from(relationships).where(and(eq(relationships.seedA, a), eq(relationships.seedB, b))),
+    db.select({ id: unions.id }).from(unions).where(and(eq(unions.seedA, a), eq(unions.seedB, b), isNull(unions.endedAt))),
+  ]);
+  const { personality, energy, mood, ...rest } = guest;
+  return c.json({
+    ...rest,
+    personality: JSON.parse(personality) as Personality,
+    vitals: { energy, mood },
+    relationship: rel ? { friendship: rel.friendship, romance: rel.romance, tension: rel.tension, chemistry: rel.chemistry, status: rel.status, kin: rel.kin, ex: rel.ex, meetings: rel.meetings, lastMetAt: rel.lastMetAt } : null,
+    partner: couple !== undefined,
+  });
 });
 
 // The news of the player's region (or ?region=): couples, breakups, births, big fights.
