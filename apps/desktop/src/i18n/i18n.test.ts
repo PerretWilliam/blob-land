@@ -47,6 +47,13 @@ describe("i18n", () => {
     expect(t().errors["wrong password"]).toMatch(/mot de passe/);
   });
 
+  it("words it in Spanish and German", () => {
+    setLanguage("es");
+    expect(lines().slice(3)).toEqual(["Encontró un guijarro bien liso.", "Abrazó a BOB.", "Tuvo una charla estupenda con ANN, BOB y CY."]);
+    setLanguage("de");
+    expect(lines().slice(3)).toEqual(["Hat einen ganz glatten Kiesel gefunden.", "Hat BOB umarmt.", "Hatte ein schönes Gespräch mit ANN, BOB und CY."]);
+  });
+
   it("names a character by its two most marked poles, in either language", () => {
     const p = { sociability: 0.5, temper: 0.5, playfulness: 0.95, romance: 0.5, chronotype: 0, kindness: 0.8, loyalty: 0.5, curiosity: 0.5 };
     expect(characterName(p)).toBe("Joker & heart of gold");
@@ -56,8 +63,8 @@ describe("i18n", () => {
   });
 
   it("only takes the languages it speaks", () => {
-    expect(["en", "fr"].every(isLanguage)).toBe(true);
+    expect(["en", "fr", "es", "de"].every(isLanguage)).toBe(true);
     expect(isLanguage("toString")).toBe(false);
-    expect(isLanguage("de")).toBe(false);
+    expect(isLanguage("it")).toBe(false);
   });
 });

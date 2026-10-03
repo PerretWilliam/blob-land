@@ -446,7 +446,7 @@ export const fr: Messages = {
     password: "Ton mot de passe, pour vérifier que c'est bien toi",
     confirmDelete: "Supprimer pour de bon",
     cancel: "Annuler",
-    languageText: "La langue que parle Blob Land. D'autres arriveront bientôt.",
+    languageText: "La langue que parle Blob Land.",
   },
   dev: {
     title: "Dev",
