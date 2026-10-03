@@ -1,5 +1,6 @@
 import { between, weighted, type Rng } from "./rng";
 import type { Delta, RelationStatus, Relationship } from "./relationship";
+import { wet, type Season, type Weather } from "./weather";
 
 export const INTERACTIONS = [
   "chat",
@@ -24,6 +25,14 @@ export const INTERACTIONS = [
   "whisper",
   "stargaze",
   "piggyback",
+  // Only in the right weather, or the right season.
+  "shelter",
+  "splash",
+  "snowball",
+  "snowman",
+  "flowers",
+  "leaf_pile",
+  "fireflies",
   // A whole gathering's, never one pair's on its own.
   "ring_dance",
   "story",
@@ -43,17 +52,48 @@ type Weights = Partial<Record<InteractionKind, number>>;
  * kiss — whatever the dice say.
  */
 const BY_STATUS: Record<RelationStatus, Weights> = {
-  strangers: { chat: 5, play: 2, ignore: 2, gift: 0.5, flirt: 1 },
-  acquaintances: { chat: 5, play: 3, ignore: 1, gift: 1, argue: 1, flirt: 2.5, tease: 1, comfort: 0.3, share_find: 2, high_five: 0.7, chase: 0.3 },
-  friends: { chat: 4, play: 4, dance: 2, hug: 2, gift: 1, argue: 1.5, flirt: 3.5, tease: 2, comfort: 1, share_find: 3, high_five: 1.2, chase: 1, whisper: 0.5 },
-  best_friends: { chat: 4, play: 4, dance: 3, hug: 3, gift: 1.5, argue: 1.2, flirt: 3, tease: 2.5, comfort: 1.5, share_find: 3, nap_together: 1, high_five: 1.5, chase: 1.5, whisper: 1.5, stargaze: 1 },
-  crush: { chat: 2, flirt: 5, gift: 2, dance: 2, hug: 1, play: 1, argue: 0.8, confess: 1.5, comfort: 0.5, share_find: 2, whisper: 1, stargaze: 1, chase: 0.5 },
-  lovers: { hug: 4, kiss: 4, dance: 3, gift: 2, chat: 2, play: 2, argue: 1.6, sulk: 0.4, tease: 1.5, comfort: 1.5, share_find: 2, nap_together: 2, whisper: 1.5, stargaze: 2, chase: 1, piggyback: 0.7 },
-  complicated: { chat: 2, argue: 3, make_up: 2, sulk: 2, ignore: 1 },
-  rivals: { argue: 4, sulk: 2, ignore: 3, make_up: 0.5, tease: 1.5 },
+  strangers: { chat: 5, play: 2, ignore: 2, gift: 0.5, flirt: 1, shelter: 2 },
+  acquaintances: { chat: 5, play: 3, ignore: 1, gift: 1, argue: 1, flirt: 2.5, tease: 1, comfort: 0.3, share_find: 2, high_five: 0.7, chase: 0.3, shelter: 2, splash: 1, snowball: 1.5, snowman: 1, flowers: 1, leaf_pile: 1 },
+  friends: { chat: 4, play: 4, dance: 2, hug: 2, gift: 1, argue: 1.5, flirt: 3.5, tease: 2, comfort: 1, share_find: 3, high_five: 1.2, chase: 1, whisper: 0.5, shelter: 2, splash: 2, snowball: 3, snowman: 2, flowers: 1.5, leaf_pile: 2.5, fireflies: 1.5 },
+  best_friends: { chat: 4, play: 4, dance: 3, hug: 3, gift: 1.5, argue: 1.2, flirt: 3, tease: 2.5, comfort: 1.5, share_find: 3, nap_together: 1, high_five: 1.5, chase: 1.5, whisper: 1.5, stargaze: 1, shelter: 2.5, splash: 2.5, snowball: 3, snowman: 2.5, flowers: 1.5, leaf_pile: 3, fireflies: 2 },
+  crush: { chat: 2, flirt: 5, gift: 2, dance: 2, hug: 1, play: 1, argue: 0.8, confess: 1.5, comfort: 0.5, share_find: 2, whisper: 1, stargaze: 1, chase: 0.5, shelter: 3, splash: 1, snowball: 1, flowers: 3, fireflies: 2.5 },
+  lovers: { hug: 4, kiss: 4, dance: 3, gift: 2, chat: 2, play: 2, argue: 1.6, sulk: 0.4, tease: 1.5, comfort: 1.5, share_find: 2, nap_together: 2, whisper: 1.5, stargaze: 2, chase: 1, piggyback: 0.7, shelter: 3, splash: 1.5, snowball: 1.5, snowman: 2, flowers: 3, leaf_pile: 1.5, fireflies: 3 },
+  complicated: { chat: 2, argue: 3, make_up: 2, sulk: 2, ignore: 1, shelter: 1 },
+  // A snowball fight with a rival is no game.
+  rivals: { argue: 4, sulk: 2, ignore: 3, make_up: 0.5, tease: 1.5, snowball: 1.5 },
   ex: { ignore: 4, sulk: 2, argue: 2, chat: 1, make_up: 0.5 },
-  family: { parent_play: 4, hug: 3, chat: 3, play: 2, argue: 1, tease: 1, comfort: 1.5, share_find: 3, nap_together: 2, high_five: 1, chase: 1.5, piggyback: 2, whisper: 0.5 },
+  family: { parent_play: 4, hug: 3, chat: 3, play: 2, argue: 1, tease: 1, comfort: 1.5, share_find: 3, nap_together: 2, high_five: 1, chase: 1.5, piggyback: 2, whisper: 0.5, shelter: 2, splash: 2, snowball: 2.5, snowman: 3, flowers: 2, leaf_pile: 3, fireflies: 2 },
 };
+
+/** The sky a meeting happens under. */
+export interface Sky {
+  weather: Weather;
+  season: Season;
+  /** Night has fallen: stars to look at, fireflies to watch. */
+  night: boolean;
+}
+
+/** Whether `kind` can happen under `sky`: what rain, snow and the season make possible, and what they rule out. */
+export function fitsSky(kind: InteractionKind, { weather, season, night }: Sky): boolean {
+  switch (kind) {
+    case "shelter":
+    case "splash":
+      return wet(weather);
+    case "snowball":
+    case "snowman":
+      return weather === "snow";
+    case "flowers":
+      return (season === "blossom" || season === "bloom") && !night && (weather === "clear" || weather === "cloudy");
+    case "leaf_pile":
+      return season === "falling_leaves" && !night && !wet(weather);
+    case "fireflies":
+      return (season === "fireflies" || season === "summer") && night && !wet(weather);
+    case "stargaze":
+      return night && weather === "clear";
+    default:
+      return true;
+  }
+}
 
 /** Every kind a status can ever produce — what tests hold pickInteraction to. */
 export const allowedFor = (status: RelationStatus) => Object.keys(BY_STATUS[status]) as InteractionKind[];
@@ -66,6 +106,10 @@ const CLOSE: readonly RelationStatus[] = ["friends", "best_friends", "crush", "l
 // their own thing on the side. A group hug needs everyone close.
 const TOGETHER: Partial<Record<InteractionKind, readonly RelationStatus[]>> = {
   story: [...FRIENDLY, "strangers", "complicated", "ex"],
+  shelter: [...FRIENDLY, "strangers", "complicated"],
+  snowball: [...FRIENDLY, "strangers", "rivals"],
+  snowman: [...FRIENDLY, "strangers"],
+  leaf_pile: [...FRIENDLY, "strangers"],
   sing: [...FRIENDLY, "strangers"],
   tag: [...FRIENDLY, "strangers"],
   cheer: [...FRIENDLY, "strangers"],
@@ -77,25 +121,33 @@ const TOGETHER: Partial<Record<InteractionKind, readonly RelationStatus[]>> = {
 export const joinsIn = (kind: InteractionKind, status: RelationStatus) => TOGETHER[kind]?.includes(status) ?? allowedFor(status).includes(kind);
 
 /** What a gathering does together, by the mean of its playfulness. `close`: every pair among them is. */
-export function pickTogether(rng: Rng, playful: number, close: boolean, found: boolean): InteractionKind {
-  return weighted(rng, {
+export function pickTogether(rng: Rng, playful: number, close: boolean, found: boolean, sky: Sky): InteractionKind {
+  // Rain sends a crowd under the nearest tree; it doesn't dance in it.
+  const out = wet(sky.weather) ? 0.3 : 1;
+  const w: Weights = {
     chat: 4,
     story: 2,
     sing: 1.5,
-    play: 3 * playful,
-    tag: 2 * playful,
-    dance: 1.5 * playful,
-    ring_dance: 1.5 * playful,
+    play: 3 * playful * out,
+    tag: 2 * playful * out,
+    dance: 1.5 * playful * out,
+    ring_dance: 1.5 * playful * out,
     group_hug: close ? 2 : 0,
     // Someone has just found something: everyone wants to see.
     cheer: found ? 2 : 0,
-  });
+    shelter: 4,
+    snowball: 2 + 3 * playful,
+    snowman: 3,
+    leaf_pile: 1 + 3 * playful,
+  };
+  for (const kind of Object.keys(w) as InteractionKind[]) if (!fitsSky(kind, sky)) delete w[kind];
+  return weighted(rng, w);
 }
 
 /** Every pair among `statuses` is close enough for a group hug. */
 export const allClose = (statuses: readonly RelationStatus[]) => statuses.every((s) => CLOSE.includes(s));
 
-export interface MeetingContext {
+export interface MeetingContext extends Sky {
   rel: Relationship;
   /** Mutually attracted, both adults, not family: romance is on the table. */
   canRomance: boolean;
@@ -116,8 +168,6 @@ export interface MeetingContext {
   energy: number;
   /** One of them has just found something on a walk. */
   found: boolean;
-  /** Night has fallen: stars to look at. */
-  night: boolean;
 }
 
 export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind {
@@ -125,7 +175,7 @@ export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind 
   if (!ctx.canRomance) for (const kind of ROMANTIC) delete w[kind];
   if (!ctx.parentAndChild) delete w.parent_play;
   if (!ctx.found) delete w.share_find;
-  if (!ctx.night) delete w.stargaze;
+  for (const kind of Object.keys(w) as InteractionKind[]) if (!fitsSky(kind, ctx)) delete w[kind];
   // Personality and mood tilt the table, never add to it.
   const mood = (ctx.moodA + ctx.moodB) / 2;
   const chem = ctx.rel.chemistry;
@@ -154,7 +204,14 @@ export function pickInteraction(ctx: MeetingContext, rng: Rng): InteractionKind 
   scale("nap_together", 10 * Math.max(0, 0.55 - ctx.energy));
   scale("high_five", (0.5 + ctx.playfulness) * (1 + 0.5 * mood));
   scale("chase", 0.3 + 1.4 * ctx.playfulness);
-  scale("stargaze", 0.5 + ctx.romance);
+  scale("stargaze", (0.5 + ctx.romance) * (ctx.season === "shooting_stars" ? 3 : 1));
+  // Out in the rain, games give way to finding cover.
+  if (wet(ctx.weather)) for (const kind of ["play", "chase", "dance", "high_five"] as const) scale(kind, 0.4);
+  scale("snowball", 0.5 + ctx.playfulness);
+  scale("splash", 0.4 + 1.2 * ctx.playfulness);
+  scale("leaf_pile", 0.5 + ctx.playfulness);
+  scale("flowers", 0.5 + 0.5 * ctx.romance + 0.5 * ctx.kindness);
+  scale("fireflies", 0.5 + ctx.romance);
   // Everything else was ruled out (a family with no small child left to play with, say).
   if (Object.keys(w).length === 0) return "chat";
   return weighted(rng, w);
@@ -198,6 +255,14 @@ const DELTAS: Record<InteractionKind, readonly [Triple, Triple, Triple]> = {
   whisper: [[4, 1, -2], [1, 0, 0], [-2, 0, 4]],
   stargaze: [[2, 4, -2], [1, 1, 0], [0, -1, 1]],
   piggyback: [[4, 1, -2], [2, 0, 0], [-1, 0, 2]],
+  shelter: [[3, 1, -2], [1, 0, 0], [-1, 0, 2]],
+  splash: [[4, 0, -2], [1, 0, 0], [-2, 0, 4]],
+  // A snowball too hard, or in the face, and it's war.
+  snowball: [[4, 0, -2], [1, 0, 1], [-3, 0, 5]],
+  snowman: [[4, 1, -2], [2, 0, 0], [-1, 0, 2]],
+  flowers: [[3, 3, -2], [1, 1, 0], [0, -1, 1]],
+  leaf_pile: [[4, 0, -2], [1, 0, 0], [-1, 0, 2]],
+  fireflies: [[3, 3, -2], [1, 1, 0], [0, 0, 1]],
   ring_dance: [[3, 1, -2], [1, 0, 0], [0, 0, 2]],
   story: [[3, 0, -1], [1, 0, 0], [-1, 0, 2]],
   sing: [[3, 1, -1], [1, 0, 0], [-1, 0, 2]],
@@ -260,6 +325,13 @@ export function interactionExpression(kind: InteractionKind, outcome: Outcome): 
       return outcome === "good" ? "wink" : "shy";
     case "stargaze":
       return outcome === "good" ? "happy" : "thinking";
+    case "fireflies":
+      return outcome === "good" ? "surprised" : "thinking";
+    case "snowman":
+      return outcome === "good" ? "happy" : "thinking";
+    case "shelter":
+    case "flowers":
+      return outcome === "good" ? "happy" : "idle";
     case "story":
       return outcome === "good" ? "surprised" : "idle";
     case "flirt":

@@ -22,7 +22,7 @@ Blob Land is a desktop app about a blob that lives a life of its own. You don't 
 - **Your blob, from its name.** Pick a name and your blob appears, drawn by [blobatar](https://blobatar.dev). Same name, same blob, always.
 - **Your own island.** It lives on a floating island you can shape as you like: grass, sand, snow, ice, rivers, roads, bridges, hills, trees, rocks. It works offline, with no account.
 - **The garden.** When you're ready, join the shared garden: islands full of other players' blobs, living together. Blobs meet, gather in little groups, fall for each other and start families, and the garden's news tells you who did what.
-- **Seasons and weather.** Nine seasons by the calendar, from blossom time and firefly nights to shooting stars and falling leaves, and a sky that changes every few hours: rain keeps blobs in, snow draws them out, fog hides things worth finding.
+- **Seasons and weather.** Nine seasons by the calendar, from blossom time and firefly nights to shooting stars and falling leaves, and a sky that changes every few hours: rain keeps blobs in, snow draws them out, fog hides things worth finding. And each brings its own moments: sheltering together from the rain, snowball fights, picking flowers, jumping into leaf piles, watching fireflies.
 - **Always living.** Close the app and your blob carries on. Come back to its journal to see what it's been up to.
 - **Yours to choose.** Who your blob is, who it falls for and its character (eight traits, one slider each) and how it walks, what the garden sees of it (or nothing at all), and the language the app speaks: English or French, with more to come. You can leave the garden for good whenever you like.
 

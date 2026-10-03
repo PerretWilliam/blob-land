@@ -11,6 +11,7 @@ import {
   type InteractionKind,
   type MeetingContext,
   type Outcome,
+  type Sky,
 } from "./interactions";
 import { canSocialize, DURATION, firstSegment, isNight, liveThrough, nextSolo, type Segment, type Vitals } from "./life";
 import {
@@ -29,7 +30,7 @@ import {
 } from "./relationship";
 import { between, randomSeed, weighted, type Rng } from "./rng";
 import { childTraits } from "./traits";
-import { forecast, weatherAt, type Spell } from "./weather";
+import { forecast, seasonAt, weatherAt, type Spell } from "./weather";
 
 /** Everything the world step needs to know about one blob. */
 export interface WorldBlob {
@@ -227,7 +228,8 @@ function gather(
   const playful = mean(members.map((m) => m.personality.playfulness));
   const statuses = members.flatMap((m, i) => members.slice(i + 1).map((o) => world.relationships.get(pairKey(m.seed, o.seed))?.status ?? "strangers"));
   const found = members.some((m) => m.last.activity === "discover");
-  const together: InteractionKind | null = crowd ? pickTogether(rng, playful, allClose(statuses), found) : null;
+  const sky = { weather: weatherAt(world.weather ?? [], start), season: seasonAt(start), night: isNight(start) };
+  const together: InteractionKind | null = crowd ? pickTogether(rng, playful, allClose(statuses), found, sky) : null;
 
   // Meet in the middle, a little off to the side.
   const clamp = (v: number) => Math.min(0.85, Math.max(0.15, v));
@@ -241,7 +243,7 @@ function gather(
   let kind: InteractionKind = "chat";
   for (let i = 0; i < members.length; i++) {
     for (let j = i + 1; j < members.length; j++) {
-      const moment = pair(world, members[i]!, members[j]!, start, end, together, rng, out, touched);
+      const moment = pair(world, members[i]!, members[j]!, start, end, together, sky, rng, out, touched);
       kind = moment.kind;
       for (const k of [i, j]) {
         scores[k]!.push(SCORE[moment.outcome]);
@@ -284,6 +286,7 @@ function pair(
   start: number,
   end: number,
   together: InteractionKind | null,
+  sky: Sky,
   rng: Rng,
   out: WorldStep,
   touched: Map<string, Relationship>,
@@ -309,7 +312,7 @@ function pair(
     taken: takenBy(world, b, c),
     energy: (b.vitals.energy + c.vitals.energy) / 2,
     found: b.last.activity === "discover" || c.last.activity === "discover",
-    night: isNight(start),
+    ...sky,
   };
   const kind = together && joinsIn(together, rel.status) ? together : pickInteraction(ctx, rng);
   const outcome = rollOutcome(ctx, rng);

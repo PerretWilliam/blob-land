@@ -240,7 +240,104 @@ const Confetti = () => (
   </g>
 );
 
-const SHARED = new Set<InteractionKind>(["play", "parent_play", "gift", "kiss", "make_up", "confess", "comfort", "share_find", "high_five", "stargaze", "piggyback", "group_hug"]);
+// A big leaf held over two heads, under the rain.
+const LeafShelter = () => (
+  <>
+    <g stroke="#5b8def" strokeWidth="1.4" strokeLinecap="round">
+      {[3, 37, 8, 32].map((x, i) => (
+        <path key={x} d={`M${x} ${14 + (i % 2) * 6} l-1 4`} className="fx-rain" style={{ animationDelay: `${i * 0.2}s` }} />
+      ))}
+    </g>
+    <g className="fx-bob" stroke={INK} strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M20 13 V32" fill="none" />
+      <path d="M4 15 Q 20 -1 36 15 Q 28 12 20 15 Q 12 12 4 15 Z" fill="#7cc85a" />
+      <path d="M20 4 V14 M13 8 l3 5 M27 8 l-3 5" fill="none" strokeWidth="0.9" />
+    </g>
+  </>
+);
+
+const DROP = "M0 -3 q-2.6 3.6 0 5.2 q2.6 -1.6 0 -5.2 Z";
+// Water flying up out of a puddle.
+const Splash = () => (
+  <>
+    <ellipse cx="20" cy="32" rx="12" ry="3" fill="#9fd3ff" stroke={INK} strokeWidth="1.2" />
+    {[
+      [11, 26, 0],
+      [20, 22, 0.3],
+      [29, 26, 0.6],
+    ].map(([x, y, delay]) => (
+      <g key={x} transform={`translate(${x} ${y})`}>
+        <path d={DROP} fill="#9fd3ff" stroke={INK} strokeWidth="0.9" className="fx-rise" style={{ animationDelay: `${delay}s` }} />
+      </g>
+    ))}
+  </>
+);
+
+const Snowball = () => (
+  <g className="fx-ball">
+    <circle cx="20" cy="30" r="4.5" fill="#fff" stroke={INK} strokeWidth="1.4" />
+    <path d="M17.5 28.5 q1.5 -1 3 0" fill="none" stroke="#c7d9ef" strokeWidth="1.2" strokeLinecap="round" />
+  </g>
+);
+
+// A blob made of snow, eyes of pebbles and a twig for an arm.
+const SnowBlob = () => (
+  <g className="fx-bob" stroke={INK} strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round">
+    <path d="M27 21 l6 -4 M31 18.5 l1 -3" fill="none" stroke="#8f5530" />
+    <circle cx="20" cy="27" r="7" fill="#fff" />
+    <circle cx="20" cy="16" r="5.5" fill="#fff" />
+    <circle cx="18" cy="15.5" r="0.9" fill={INK} stroke="none" />
+    <circle cx="22" cy="15.5" r="0.9" fill={INK} stroke="none" />
+  </g>
+);
+
+const Flower = ({ x, y, s = 1, fill = "#ff8fc0", delay = 0 }: { x: number; y: number; s?: number; fill?: string; delay?: number }) => (
+  <g transform={`translate(${x} ${y}) scale(${s})`}>
+    <g className="fx-bob" style={{ animationDelay: `${delay}s` }} stroke={INK} strokeWidth={1.2 / s}>
+      <path d="M0 2 V12" fill="none" stroke="#3f8f3a" strokeWidth={1.6 / s} strokeLinecap="round" />
+      {[0, 72, 144, 216, 288].map((a) => (
+        <circle key={a} cx={3.2 * Math.cos((a * Math.PI) / 180)} cy={3.2 * Math.sin((a * Math.PI) / 180)} r="2.6" fill={fill} />
+      ))}
+      <circle r="2" fill="#ffd23f" />
+    </g>
+  </g>
+);
+
+// Leaves thrown up out of a pile.
+const LeafPile = () => (
+  <>
+    <path d="M6 33 Q 20 22 34 33 Z" fill="#e8833a" stroke={INK} strokeWidth="1.2" strokeLinejoin="round" />
+    {[
+      [10, 22, "#d9502f", 0],
+      [20, 17, "#f2c14e", 0.4],
+      [30, 22, "#b5651d", 0.8],
+    ].map(([x, y, fill, delay]) => (
+      <g key={x as number} transform={`translate(${x} ${y})`}>
+        <path d="M-4 0 Q 0 -4 4 0 Q 0 4 -4 0 Z" fill={fill as string} stroke={INK} strokeWidth="0.9" className="fx-float" style={{ animationDelay: `${delay}s` }} />
+      </g>
+    ))}
+  </>
+);
+
+// Fireflies, blinking on and off around them.
+const Fireflies = () => (
+  <g>
+    {[
+      [8, 10, 0],
+      [20, 4, 0.5],
+      [33, 12, 1],
+      [14, 20, 1.5],
+      [28, 22, 0.8],
+    ].map(([x, y, delay]) => (
+      <g key={x} transform={`translate(${x} ${y})`} className="fx-twinkle" style={{ animationDelay: `${delay}s` }}>
+        <circle r="4.5" fill="#eaff8a" opacity="0.4" />
+        <circle r="2" fill="#f6ffc4" stroke={INK} strokeWidth="0.6" />
+      </g>
+    ))}
+  </g>
+);
+
+const SHARED = new Set<InteractionKind>(["play", "parent_play", "gift", "kiss", "make_up", "confess", "comfort", "share_find", "high_five", "stargaze", "piggyback", "group_hug", "shelter", "snowman", "fireflies"]);
 const ROMANTIC = new Set<InteractionKind>(["hug", "kiss", "flirt", "confess"]);
 
 function art(kind: InteractionKind, outcome: Outcome): ReactNode {
@@ -393,6 +490,58 @@ function art(kind: InteractionKind, outcome: Outcome): ReactNode {
         <>
           <Sparkle x={10} y={12} delay={0} />
           <Heart x={28} y={16} s={0.7} delay={0.3} fill="#ffb3cf" />
+        </>
+      );
+    case "shelter":
+      return bad ? (
+        <>
+          <LeafShelter />
+          <SweatDrop />
+        </>
+      ) : (
+        <LeafShelter />
+      );
+    case "splash":
+      return (
+        <>
+          <Splash />
+          {bad ? <Vein /> : <Sparkle x={34} y={8} delay={0.2} fill="#7ee0ff" />}
+        </>
+      );
+    case "snowball":
+      return (
+        <>
+          <Snowball />
+          {bad ? <Vein /> : <Sparkle x={32} y={10} delay={0.4} fill="#c7e6ff" />}
+        </>
+      );
+    case "snowman":
+      return (
+        <>
+          <SnowBlob />
+          {bad ? <SweatDrop /> : <Sparkle x={33} y={6} delay={0.3} fill="#c7e6ff" />}
+        </>
+      );
+    case "flowers":
+      return (
+        <>
+          <Flower x={20} y={18} s={1.3} />
+          <Flower x={10} y={24} s={0.8} fill="#d7b8ff" delay={0.4} />
+          {outcome === "good" ? <Heart x={32} y={10} s={0.6} delay={0.6} fill="#ffb3cf" /> : bad ? <SweatDrop /> : null}
+        </>
+      );
+    case "leaf_pile":
+      return (
+        <>
+          <LeafPile />
+          {bad ? <SweatDrop /> : null}
+        </>
+      );
+    case "fireflies":
+      return (
+        <>
+          <Fireflies />
+          {outcome === "good" ? <Heart x={20} y={30} s={0.55} delay={1} fill="#ffb3cf" /> : null}
         </>
       );
     case "ring_dance":
