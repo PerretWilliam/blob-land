@@ -262,3 +262,17 @@ export interface GardenEvent {
 export function getGardenJournal(token: string): Promise<{ now: number; events: GardenEvent[] }> {
   return request("/garden/journal", { headers: authHeader(token) });
 }
+
+/** GET /me/album — the player's own blob's big moments, newest first. */
+export interface Milestone {
+  kind: "friends" | "best_friends" | "crush" | "couple" | "child" | "made_up" | "first";
+  /** For a first, what was done (an interaction kind); else the other blob, the child, or "". */
+  key: string;
+  at: number;
+  /** Who it was with: the other blob, or the other parent and the child. */
+  with: { seed: string; name: string }[];
+}
+
+export function getAlbum(token: string): Promise<{ milestones: Milestone[] }> {
+  return request("/me/album", { headers: authHeader(token) });
+}

@@ -7,7 +7,7 @@ import { gardenNow } from "../src/clock";
 import { db } from "../src/db";
 import { join as joinGarden, LOOKAHEAD } from "../src/garden";
 import { live, stepDue } from "../src/region";
-import { blobs, regions, relationships, segments, unions, users } from "../src/schema";
+import { blobs, milestones, regions, relationships, segments, unions, users } from "../src/schema";
 
 const call = (path: string, init?: RequestInit) => app.request(path, init);
 
@@ -90,6 +90,35 @@ describe("blob-land API", () => {
     // Kept, not rolled again: the next step carries on from it.
     await stepAll(now + 60_000);
     expect((await garden(token)).weather[0]).toEqual(weather[0]);
+  });
+
+  it("keeps each blob's big moments in its own album, the first time only", async () => {
+    const me = await register("keepsake");
+    const pal = await register("pal");
+    const shy = await register("shyone");
+    const now = await gardenNow();
+    const row = (kind: string, key: string, withSeed: string, at: number) => ({ seed: me.seed, region: 0, kind, key, withSeed, at });
+    await db.insert(milestones).values([
+      row("friends", "", pal.seed, now - 3000),
+      row("first", "snowball", pal.seed, now - 2000),
+      row("couple", shy.seed, shy.seed, now - 1000),
+      // Not yet: the step lives a little ahead.
+      row("best_friends", pal.seed, pal.seed, now + 60_000),
+    ]);
+    // A second first friend isn't one: the first is kept.
+    await db.insert(milestones).values(row("friends", "", shy.seed, now)).onConflictDoNothing();
+    const get = async (token: string) => (await jsonAs<{ milestones: { kind: string; key: string; with: { name: string }[] }[] }>(await call("/me/album", { headers: { authorization: `Bearer ${token}` } }))).milestones;
+    expect((await get(me.token)).map((m) => [m.kind, m.key, m.with[0]!.name])).toEqual([
+      ["couple", shy.seed, "shyone"],
+      ["first", "snowball", "pal"],
+      ["friends", "", "pal"],
+    ]);
+    // Someone else's album is theirs.
+    expect(await get(pal.token)).toEqual([]);
+    // A blob hidden from the garden is left out of others' albums.
+    await call("/me/visibility", { method: "PATCH", headers: { authorization: `Bearer ${shy.token}`, "content-type": "application/json" }, body: JSON.stringify({ visible: false }) });
+    expect((await get(me.token)).map((m) => m.kind)).toEqual(["first", "friends"]);
+    expect((await call("/me/album")).status).toBe(401);
   });
 
   it("answers the health check", async () => {
@@ -408,6 +437,18 @@ describe("security", () => {
   it("caps how many blobs the dev tools make at once", async () => {
     const res = await call("/__dev/populate", { method: "POST", body: JSON.stringify({ count: 1e9 }) });
     expect(res.status).toBe(400);
+  });
+
+  // Just before the reset: it fills a second region.
+  it("writes milestones as the garden lives", async () => {
+    await call("/__dev/populate", { method: "POST", body: JSON.stringify({ count: 30 }) });
+    const now = Date.now();
+    for (const { region } of await db.select({ region: regions.region }).from(regions)) await live(region, now, now + 3 * DAY, seededRng(9));
+    const rows = await db.select().from(milestones);
+    expect(rows.some((m) => m.kind === "friends" && m.key === "")).toBe(true);
+    // One first friend each, at most.
+    const firsts = rows.filter((m) => m.kind === "friends").map((m) => m.seed);
+    expect(new Set(firsts).size).toBe(firsts.length);
   });
 
   it("resets the garden to a seeded blank slate", async () => {

@@ -149,6 +149,24 @@ export const interactions = pgTable(
   (t) => [index("interactions_region_end").on(t.region, t.endedAt)],
 );
 
+/**
+ * Each blob's album: its big moments, kept for good. One row per (seed, kind,
+ * key), the first time it happens (the sim's Milestone): the step offers
+ * every candidate and the primary key keeps the first.
+ */
+export const milestones = pgTable(
+  "milestones",
+  {
+    seed: text().notNull(), // whose album
+    region: integer().notNull(),
+    kind: text().notNull(), // friends | best_friends | crush | couple | child | made_up | first
+    key: text().notNull(), // the other blob, the child, what was done, or "" (a first friend)
+    withSeed: text("with_seed").notNull(), // who it was with, comma-separated
+    at: ms("at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.seed, t.kind, t.key] })],
+);
+
 /** Local dev only: where the sped-up garden clock is anchored (clock.ts). */
 export const devClock = pgTable("dev_clock", {
   id: integer().primaryKey(),

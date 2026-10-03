@@ -84,6 +84,26 @@ export interface Birth {
   unionId: string;
 }
 
+/**
+ * A big moment in a blob's life, for its album. Kept once per (seed, kind,
+ * key), the first time: `friends` (key "") is its first friend; `best_friends`,
+ * `crush`, `couple` and `made_up` are keyed by the other blob, `child` by the
+ * child, `first` by what was done (a first kiss, a first snowball fight…).
+ * Breakups and fights aren't kept: an album holds the good times.
+ */
+export interface Milestone {
+  seed: string;
+  kind: "friends" | "best_friends" | "crush" | "couple" | "child" | "made_up" | "first";
+  key: string;
+  /** Who it was with: the other blob, or for a child, the other parent and the child. */
+  with: string[];
+  at: number;
+}
+
+// What a blob remembers doing for the first time, when it went well.
+const FIRSTS: readonly InteractionKind[] = ["kiss", "stargaze", "shelter", "splash", "snowball", "snowman", "flowers", "leaf_pile", "fireflies"];
+const WARM: readonly RelationStatus[] = ["acquaintances", "friends", "best_friends", "crush", "lovers"];
+
 /** What one step produced, for the caller to store. */
 export interface WorldStep {
   segments: (Segment & { seed: string })[];
@@ -93,6 +113,8 @@ export interface WorldStep {
   unionsStarted: Union[];
   unionsEnded: Union[];
   births: Birth[];
+  /** Candidates: whoever stores them keeps each (seed, kind, key) the first time only. */
+  milestones: Milestone[];
 }
 
 const MIN = 60 * 1000;
@@ -137,7 +159,7 @@ const MEET_WEIGHT: Record<RelationStatus, number> = {
  * living through it (the app was closed for a week, the server was down).
  */
 export function stepWorld(world: World, until: number, rng: Rng, maxCatchUp = 2 * DAY): WorldStep {
-  const out: WorldStep = { segments: [], meetings: [], relationships: [], unionsStarted: [], unionsEnded: [], births: [] };
+  const out: WorldStep = { segments: [], meetings: [], relationships: [], unionsStarted: [], unionsEnded: [], births: [], milestones: [] };
   const touched = new Map<string, Relationship>();
   const weather = (world.weather = forecast(world.weather ?? [], until, rng, maxCatchUp));
 
@@ -292,6 +314,10 @@ function pair(
   touched: Map<string, Relationship>,
 ): { kind: InteractionKind; outcome: Outcome; status: RelationStatus } {
   const key = pairKey(b.seed, c.seed);
+  // A milestone for each of them, keyed by the other unless `k` says otherwise.
+  const both = (kind: Milestone["kind"], k?: string) => {
+    for (const [x, o] of [[b, c], [c, b]] as const) out.milestones.push({ seed: x.seed, kind, key: k ?? o.seed, with: [o.seed], at: end });
+  };
   const union = activeUnion(world, b.seed);
   const couple = union !== undefined && (union.a === c.seed || union.b === c.seed);
   let rel = decay(world.relationships.get(key) ?? newRelationship(b.seed, c.seed, rng, null, affinity(b.personality, c.personality)), start, couple);
@@ -334,7 +360,14 @@ function pair(
     world.unions.push(started);
     out.unionsStarted.push(started);
     rel = { ...rel, status: relationStatus(rel, true) };
+    both("couple");
   }
+  if (rel.status !== before) {
+    if ((before === "strangers" || before === "acquaintances") && rel.status !== "acquaintances" && WARM.includes(rel.status)) both("friends", "");
+    if (rel.status === "best_friends" || rel.status === "crush") both(rel.status);
+    if ((before === "rivals" || before === "complicated" || before === "ex") && WARM.includes(rel.status)) both("made_up");
+  }
+  if (outcome === "good" && FIRSTS.includes(kind)) both("first", kind);
   world.relationships.set(key, rel);
   touched.set(key, rel);
   return { kind, outcome, status: rel.status };
@@ -449,4 +482,5 @@ function born(
   world.blobs.set(child.seed, child);
   union.lastBirthAt = at;
   out.births.push({ child, unionId: union.id });
+  for (const [p, other] of [[b, c], [c, b]] as const) out.milestones.push({ seed: p.seed, kind: "child", key: child.seed, with: [other.seed, child.seed], at });
 }

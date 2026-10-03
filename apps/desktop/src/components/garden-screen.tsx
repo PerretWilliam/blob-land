@@ -30,10 +30,12 @@ import {
   Moon,
   Snowflake,
   Sun,
+  Images,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { EmptyState, RetryButton } from "@/components/empty-state";
 import { FamilyPanel } from "@/components/family-tree";
+import { AlbumPanel } from "@/components/album-panel";
 import { GardenNewsPanel } from "@/components/garden-news-panel";
 import { DevPanel } from "@/components/dev-panel";
 import { RelationsPanel } from "@/components/relations-panel";
@@ -113,7 +115,7 @@ export function GardenScreen({
   const [editing, setEditing] = useState(false);
   const [tool, setTool] = useState<IslandTool>("grass");
   // The side panel: one at a time.
-  const [panel, setPanel] = useState<"journal" | "family" | "relations" | "news" | null>(null);
+  const [panel, setPanel] = useState<"journal" | "family" | "relations" | "news" | "album" | null>(null);
   // Whose relations the panel opens on: the player's own unless a blob's ID card asked.
   const [relationsOf, setRelationsOf] = useState<{ seed: string; name: string } | undefined>(undefined);
   // Re-render now and then, so states (and expressions) follow the clock.
@@ -280,6 +282,16 @@ export function GardenScreen({
             >
               {t.game.relations}
             </MenuItem>
+            <MenuItem
+              icon={<Images />}
+              active={panel === "album"}
+              onClick={() => {
+                setPanel((p) => (p === "album" ? null : "album"));
+                setMenuOpen(false);
+              }}
+            >
+              {t.game.album}
+            </MenuItem>
             {account ? (
               <MenuItem
                 icon={<Newspaper />}
@@ -366,6 +378,7 @@ export function GardenScreen({
       {panel === "relations" ? (
         <RelationsPanel key={relationsOf?.seed ?? "mine"} seed={account?.seed ?? null} token={account?.token ?? null} start={relationsOf} onClose={() => setPanel(null)} />
       ) : null}
+      {panel === "album" ? <AlbumPanel seed={account?.seed ?? null} token={account?.token ?? null} onClose={() => setPanel(null)} /> : null}
       {panel === "news" && account ? <GardenNewsPanel token={account.token} onClose={() => setPanel(null)} /> : null}
 
       {editing && !inGarden ? (
