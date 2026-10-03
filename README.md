@@ -26,7 +26,7 @@ Blob Land is a desktop app about a blob that lives a life of its own. You don't 
 - **An album.** Your blob's big moments, kept for good: its first friend, its best friends, its couples and children, its first kiss, its first snowball fight.
 - **Visits.** Once your blob lives in the garden, it comes home to your island while you're there, and you can invite up to five other players' blobs over by their pseudo. Each leaves the garden for its stay, a few hours or up to two days for a close friend, and everyone goes back when it's over or when you leave your island: a blob is never in two places at once. Its player isn't told.
 - **Always living.** Close the app and your blob carries on. Come back to its journal to see what it's been up to.
-- **Yours to choose.** Who your blob is, who it falls for and its character (eight traits, one slider each) and how it walks, what the garden sees of it (or nothing at all), and the language the app speaks: English or French, with more to come. You can leave the garden for good whenever you like.
+- **Yours to choose.** Who your blob is, who it falls for and its character (eight traits, one slider each) and how it walks, what the garden sees of it (or nothing at all), and the language the app speaks: English, French, Spanish or German. You can leave the garden for good whenever you like.
 
 ## The rules of the game
 

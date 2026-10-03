@@ -438,7 +438,7 @@ export const en = {
     password: "Your password, to be sure it's you",
     confirmDelete: "Delete it for good",
     cancel: "Cancel",
-    languageText: "The language Blob Land speaks. More are on the way.",
+    languageText: "The language Blob Land speaks.",
   },
   // The dev panel (dev builds only), spoken like the rest.
   dev: {

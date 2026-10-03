@@ -1,6 +1,8 @@
 import { character, type InteractionKind, type Outcome, type Personality, type Segment } from "@blob-land/sim";
 import { useSyncExternalStore } from "react";
+import { de } from "./de";
 import { en, type Messages } from "./en";
+import { es } from "./es";
 import { fr } from "./fr";
 
 /**
@@ -10,6 +12,8 @@ import { fr } from "./fr";
 export const LANGUAGES = {
   en: { name: "English", messages: en },
   fr: { name: "Français", messages: fr },
+  es: { name: "Español", messages: es },
+  de: { name: "Deutsch", messages: de },
 } satisfies Record<string, { name: string; messages: Messages }>;
 export type Language = keyof typeof LANGUAGES;
 
