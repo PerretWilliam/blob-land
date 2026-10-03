@@ -32,6 +32,7 @@ export const regions = pgTable(
     step: integer().notNull().default(0), // how many steps it has lived: segments carry the one that wrote them
     version: integer().notNull().default(0), // bumped by every change, so servers know their cached view is stale
     nextStepAt: ms("next_step_at").notNull().default(0), // real time, not garden time
+    weather: text().notNull().default("[]"), // JSON: its sky, a spell at a time (the sim's forecast), rolled on by each step
   },
   (t) => [index("regions_due").on(t.nextStepAt)],
 );

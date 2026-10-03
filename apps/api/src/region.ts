@@ -1,4 +1,4 @@
-import { randomRng, type Rng } from "@blob-land/sim";
+import { randomRng, SPELL, type Rng, type Spell } from "@blob-land/sim";
 import { eq, sql } from "drizzle-orm";
 import { gardenNow } from "./clock";
 import { db, type Db } from "./db";
@@ -59,7 +59,8 @@ const publicJson = ({ owner: _owner, visible: _visible, ...blob }: ViewBlob) => 
 
 /**
  * A region as `viewer` plays it back, as the inside of a JSON object
- * (`"step":…,"delta":…,"blobs":[…]`). `since` (a step number from an earlier
+ * (`"step":…,"delta":…,"weather":[…],"blobs":[…]`): the weather is the
+ * spell on now and those rolled ahead, in full every time (a few of them). `since` (a step number from an earlier
  * answer) sends only the timeline written after it. The view is kept until
  * the region changes (its version, checked on each ask: one indexed read) or
  * is a step old, and shared by everyone asking meanwhile.
@@ -70,8 +71,10 @@ export async function regionGarden(region: number, viewer: string, since: number
   // timeline skipped.
   // Any other version than the view's is a change, backwards too (the
   // database was restored or reset under a running server).
-  const [meta] = await db.select({ step: regions.step, version: regions.version }).from(regions).where(eq(regions.region, region));
-  if (!meta) return `"step":0,"delta":false,"blobs":[]`;
+  const [row] = await db.select({ step: regions.step, version: regions.version, weather: regions.weather }).from(regions).where(eq(regions.region, region));
+  if (!row) return `"step":0,"delta":false,"weather":[],"blobs":[]`;
+  const { weather, ...meta } = row;
+  const sky = JSON.stringify((JSON.parse(weather) as Spell[]).filter((s) => s.start + SPELL > now));
   let view = views.get(region);
   if (!view || view.version !== meta.version || now - view.at >= STEP_EVERY) {
     const fresh: View = { ...meta, at: now, blobs: gardenView(db, region, now), answers: new Map() };
@@ -84,7 +87,7 @@ export async function regionGarden(region: number, viewer: string, since: number
   const delta = since !== undefined && since <= view.step;
   const answer = await answerFor(region, view, delta ? since : -1);
   const blobs = [answer.shared, answer.hidden.get(viewer)].filter(Boolean).join(",");
-  return `"step":${view.step},"delta":${delta},"blobs":[${blobs}]`;
+  return `"step":${view.step},"delta":${delta},"weather":${sky},"blobs":[${blobs}]`;
 }
 
 /**

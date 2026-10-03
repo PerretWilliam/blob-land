@@ -1,0 +1,1 @@
+ALTER TABLE "regions" ADD COLUMN "weather" text DEFAULT '[]' NOT NULL;

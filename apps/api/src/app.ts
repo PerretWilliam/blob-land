@@ -215,7 +215,7 @@ app.get("/garden", requireAuth, async (c) => {
   const count = all.find((r) => r.region === n)?.blobs;
   const head = `"now":${now},"region":${n},"home":${home ?? 0},"regions":${JSON.stringify(all)},"size":${gardenSize(count ?? 0)},"rate":${config.timeScale}`;
   // Timelines, not states: the client plays the stored segments back itself.
-  const region = count === undefined ? `"step":0,"delta":false,"blobs":[]` : await regionGarden(n, c.get("userId"), since === undefined ? undefined : Number(since), now);
+  const region = count === undefined ? `"step":0,"delta":false,"weather":[],"blobs":[]` : await regionGarden(n, c.get("userId"), since === undefined ? undefined : Number(since), now);
   return c.body(`{${head},${region}}`, 200, { "content-type": "application/json" });
 });
 

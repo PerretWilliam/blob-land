@@ -3,7 +3,7 @@
  * MAX_GARDEN tiles), put through the same scripted moves every run while
  * every frame is timed. Twice over: everyone out walking, then everyone in
  * the middle of a conversation (their effects over their heads); and by
- * night. Each zoom that costs something is covered: close up, the widest
+ * night, in a storm (the sky's busiest: rain, lightning, a grey gloom). Each zoom that costs something is covered: close up, the widest
  * view still drawn blob by blob, the map, and sweeps across the switch
  * between the two. It also starts on a small island that grows, as the app
  * does before the server says how big the garden is.
@@ -37,6 +37,7 @@ const SLOT = 10 * 60 * 1000;
 const WALK = Date.UTC(2026, 0, 1, 12);
 const TALK = Date.UTC(2026, 0, 2, 12);
 const NIGHT = Date.UTC(2026, 0, 3, 1);
+const STORM = [{ start: NIGHT - 6 * HOUR, weather: "storm" as const }];
 const EXPRESSIONS = ["idle", "happy", "sleepy", "love", "thinking", "wink"];
 const OUTCOMES = ["good", "good", "meh", "bad"];
 
@@ -279,7 +280,7 @@ export default function Bench() {
 
   return (
     <main ref={root} className="fixed inset-0">
-      {blank || !layout ? null : <Scene key={base} blobs={blobs} reducedMotion={false} layout={layout} blobScale={0.55} startAt="bench-0" clock={clock} />}
+      {blank || !layout ? null : <Scene key={base} blobs={blobs} reducedMotion={false} layout={layout} blobScale={0.55} startAt="bench-0" clock={clock} weather={base === NIGHT ? STORM : undefined} />}
       {results ? (
         <table className="absolute top-4 left-4 z-20 rounded-lg bg-background/90 text-xs shadow-lg [&_td]:px-2 [&_th]:px-2">
           <thead>

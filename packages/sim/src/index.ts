@@ -33,3 +33,4 @@ export { COUNTRIES, flagOf, isCountry } from "./countries";
 export { activityLog, notable } from "./journal";
 export { childTraits, type Parent } from "./traits";
 export { daylight } from "./time";
+export { forecast, seasonAt, SEASONS, SPELL, weatherAt, WEATHERS, wet, type Season, type Spell, type Weather } from "./weather";

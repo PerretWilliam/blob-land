@@ -15,6 +15,7 @@ import {
   type Rng,
   type Segment,
   type Sex,
+  type Spell,
   type World,
   type WorldBlob,
 } from "@blob-land/sim";
@@ -79,7 +80,7 @@ export async function join(db: Db, region: number, newcomers: Newcomer[], now: n
 /** The region's blobs, with the relationships and couples they're in: a
  * blob only ever meets its own region's, so each region is a world of its own. */
 async function loadWorld(db: Db, region: number): Promise<World> {
-  const [blobRows, relRows, unionRows] = await Promise.all([
+  const [blobRows, relRows, unionRows, [sky]] = await Promise.all([
     db
       .select({
         seed: blobs.seed,
@@ -100,8 +101,9 @@ async function loadWorld(db: Db, region: number): Promise<World> {
       .where(eq(blobs.region, region)),
     db.select().from(relationships).where(eq(relationships.region, region)),
     db.select().from(unions).where(and(eq(unions.region, region), isNull(unions.endedAt))),
+    db.select({ weather: regions.weather }).from(regions).where(eq(regions.region, region)),
   ]);
-  const world: World = { blobs: new Map(), relationships: new Map(), unions: [] };
+  const world: World = { blobs: new Map(), relationships: new Map(), unions: [], weather: JSON.parse(sky?.weather ?? "[]") as Spell[] };
   for (const r of blobRows) {
     const blob: WorldBlob = {
       seed: r.seed,
@@ -137,7 +139,7 @@ export async function step(tx: Db, region: number, now: number, rng: Rng, until:
   const lived = stepWorld(world, until, rng, MAX_CATCH_UP);
   const [{ step: n }] = (await tx
     .update(regions)
-    .set({ step: sql`${regions.step} + 1`, version: sql`${regions.version} + 1` })
+    .set({ step: sql`${regions.step} + 1`, version: sql`${regions.version} + 1`, weather: JSON.stringify(world.weather) })
     .where(eq(regions.region, region))
     .returning({ step: regions.step })) as [{ step: number }];
 

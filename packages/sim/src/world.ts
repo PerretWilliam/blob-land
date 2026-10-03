@@ -29,6 +29,7 @@ import {
 } from "./relationship";
 import { between, randomSeed, weighted, type Rng } from "./rng";
 import { childTraits } from "./traits";
+import { forecast, weatherAt, type Spell } from "./weather";
 
 /** Everything the world step needs to know about one blob. */
 export interface WorldBlob {
@@ -60,6 +61,8 @@ export interface World {
   relationships: Map<string, Relationship>;
   /** Active unions (ended ones may be left in; they're ignored). */
   unions: Union[];
+  /** Its sky, rolled on by each step with everything else. Clear when unset. */
+  weather?: Spell[];
 }
 
 export interface Meeting {
@@ -135,6 +138,7 @@ const MEET_WEIGHT: Record<RelationStatus, number> = {
 export function stepWorld(world: World, until: number, rng: Rng, maxCatchUp = 2 * DAY): WorldStep {
   const out: WorldStep = { segments: [], meetings: [], relationships: [], unionsStarted: [], unionsEnded: [], births: [] };
   const touched = new Map<string, Relationship>();
+  const weather = (world.weather = forecast(world.weather ?? [], until, rng, maxCatchUp));
 
   for (const blob of world.blobs.values()) {
     if (blob.last.end >= until - maxCatchUp) continue;
@@ -166,7 +170,7 @@ export function stepWorld(world: World, until: number, rng: Rng, maxCatchUp = 2 
         continue;
       }
     }
-    push(b, nextSolo(b.last, b.vitals, rng, b.personality.chronotype, b.personality.curiosity));
+    push(b, nextSolo(b.last, b.vitals, rng, b.personality.chronotype, b.personality.curiosity, weatherAt(weather, t)));
   }
 
   out.relationships = [...touched.values()];

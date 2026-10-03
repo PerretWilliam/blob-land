@@ -51,6 +51,7 @@ interface GardenBody {
   home: number;
   size: number;
   regions: { region: number; blobs: number }[];
+  weather: { start: number; weather: string }[];
   blobs: { seed: string; pseudo: string | null; country: string | null; sex: string; attraction: string; personality: Personality; gait: string | null; partner: string | null; segments: { start: number; end: number }[] }[];
 }
 
@@ -75,6 +76,20 @@ describe("blob-land API", () => {
     // Chained: each segment starts where the one before ended.
     for (let i = 1; i < after.segments.length; i++) expect(after.segments[i]!.start).toBe(after.segments[i - 1]!.end);
     expect(after.segments.at(-1)!.end).toBeGreaterThan(Date.now());
+  });
+
+  it("rolls each region's weather with its step, and serves what's on and to come", async () => {
+    const { token } = await register("weathervane");
+    const now = Date.now();
+    await stepAll(now);
+    const { weather } = await garden(token);
+    expect(weather.length).toBeGreaterThan(0);
+    // Only the spell on now and those ahead; the stored past stays on the server.
+    expect(weather[0]!.start).toBeLessThanOrEqual(now);
+    expect(weather[0]!.start + 3 * 60 * 60 * 1000).toBeGreaterThan(now);
+    // Kept, not rolled again: the next step carries on from it.
+    await stepAll(now + 60_000);
+    expect((await garden(token)).weather[0]).toEqual(weather[0]);
   });
 
   it("answers the health check", async () => {

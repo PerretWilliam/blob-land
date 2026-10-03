@@ -16,6 +16,7 @@ import { _posed, fadeHex, lerpPose } from "blobatar/internal";
 import { Application, ColorMatrixFilter, Container, Graphics, GraphicsContext, GraphicsPath, ImageSource, Matrix, RenderTexture, Sprite, Texture } from "pixi.js";
 import { genderAnchor, SIGNS } from "@/components/blob-gender";
 import type { Moment } from "@/components/interaction-fx";
+import { Sky } from "@/components/sky";
 import DECOR_WIDTHS from "@/assets/iso/widths.json";
 import {
   canHoldDecor,
@@ -831,6 +832,8 @@ export class World {
   private readonly dots = new Container();
   private bake: Sprite | null = null;
   private readonly night = new ColorMatrixFilter({ antialias: "inherit" });
+  /** Rain, snow, petals, fireflies…, over everything. */
+  readonly sky: Sky;
   private chunks = new Map<string, Chunk>();
   private readonly mounted = new Map<string, Sprite[]>();
   private island: IslandGeometry | null = null;
@@ -847,7 +850,8 @@ export class World {
     this.camera.addChild(this.ground, this.nests, this.sorted, this.dots);
     this.dots.visible = false;
     this.lit.addChild(this.clouds, this.camera);
-    app.stage.addChild(this.lit);
+    this.sky = new Sky(app.renderer);
+    app.stage.addChild(this.lit, this.sky.root);
     for (const _ of CLOUDS) {
       const sprite = new Sprite();
       this.cloudSprites.push(sprite);
@@ -857,6 +861,14 @@ export class World {
   }
 
   private greyClouds = false;
+  private snowyTerrain = false;
+  private gloomy = false;
+  /** Grey clouds over snow, or under a grey sky. */
+  private greyIfNeeded() {
+    if ((this.snowyTerrain || this.gloomy) === this.greyClouds) return;
+    this.greyClouds = !this.greyClouds;
+    this.loadClouds();
+  }
   private loadClouds() {
     CLOUDS.forEach((c, k) => {
       const src = cloudSrc(c.kind, this.greyClouds);
@@ -900,10 +912,8 @@ export class World {
    */
   async setTerrain(layout: IslandLayout, island: IslandGeometry, nests: { x: number; y: number; r: number }[]): Promise<void> {
     const generation = ++this.generation;
-    if (snowy(layout) !== this.greyClouds) {
-      this.greyClouds = !this.greyClouds;
-      this.loadClouds();
-    }
+    this.snowyTerrain = snowy(layout);
+    this.greyIfNeeded();
     const chunks = terrainOf(layout, island);
     const srcs = new Map<string, number>();
     for (const chunk of chunks.values()) for (const item of chunk.items) srcs.set(item.src, item.w);
@@ -1024,12 +1034,19 @@ export class World {
     });
   }
 
-  /** Daylight in [0, 1]: night dims and desaturates the world, and the clouds fade. */
-  setLight(light: number) {
-    for (const sprite of this.cloudSprites) sprite.alpha = 0.4 + 0.6 * light;
-    this.night.matrix = nightMatrix(light) as ColorMatrixFilter["matrix"];
-    // No pass at all by day.
-    this.lit.filters = light >= 1 ? null : this.night;
+  /**
+   * Daylight in [0, 1]: night dims and desaturates the world, and the clouds
+   * fade. `gloom` in [0, 1], a grey sky's, dims it a little too, and greys
+   * the clouds.
+   */
+  setLight(light: number, gloom = 0) {
+    for (const sprite of this.cloudSprites) sprite.alpha = Math.min(1, (0.4 + 0.6 * light) * (1 + 0.5 * gloom));
+    const seen = light * (1 - 0.3 * gloom);
+    this.night.matrix = nightMatrix(seen) as ColorMatrixFilter["matrix"];
+    // No pass at all on a clear day.
+    this.lit.filters = seen >= 1 ? null : this.night;
+    this.gloomy = gloom >= 0.5;
+    this.greyIfNeeded();
   }
 
   /** The blob `seed`, drawn from now on. */
@@ -1105,6 +1122,7 @@ export class World {
     for (const key of [...this.mounted.keys()]) this.unmount(key);
     for (const view of this.blobs.values()) view.destroy();
     this.bake?.destroy({ texture: true, textureSource: true });
+    this.sky.destroy();
     // Shared textures and shapes stay loaded, for the next world.
     this.app.destroy({ removeView: true }, { children: true });
   }

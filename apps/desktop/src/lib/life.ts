@@ -1,4 +1,4 @@
-import { firstSegment, personalityOf, randomPersonality, randomRng, stepWorld, type Gait, type Identity, type Personality, type Segment, type Vitals } from "@blob-land/sim";
+import { firstSegment, personalityOf, randomPersonality, randomRng, stepWorld, type Gait, type Identity, type Personality, type Segment, type Spell, type Vitals } from "@blob-land/sim";
 
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
@@ -19,6 +19,8 @@ export interface LocalLife {
   vitals: Vitals;
   /** Sorted by start, running a little ahead of now. */
   segments: Segment[];
+  /** The island's own sky, rolled on with its life (unset before weather existed). */
+  weather?: Spell[];
 }
 
 export function newLife(identity: Identity, now: number): LocalLife {
@@ -43,8 +45,9 @@ export function advanceLife(seed: string, life: LocalLife, now: number): { life:
     vitals: life.vitals,
     last: life.segments[life.segments.length - 1] ?? firstSegment(now, randomRng),
   };
-  const step = stepWorld({ blobs: new Map([[seed, blob]]), relationships: new Map(), unions: [] }, now + LOOKAHEAD, randomRng, MAX_CATCH_UP);
+  const world = { blobs: new Map([[seed, blob]]), relationships: new Map(), unions: [], weather: life.weather };
+  const step = stepWorld(world, now + LOOKAHEAD, randomRng, MAX_CATCH_UP);
   const lived = step.segments.map(({ seed: _, ...segment }) => segment);
   const segments = [...life.segments, ...lived].filter((s) => s.end > now - KEEP);
-  return { life: { ...life, personality: blob.personality, vitals: blob.vitals, segments }, lived };
+  return { life: { ...life, personality: blob.personality, vitals: blob.vitals, segments, weather: world.weather }, lived };
 }
