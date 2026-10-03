@@ -7,13 +7,12 @@ import { JoinGardenScreen } from "@/components/join-garden-screen";
 import { MainMenu } from "@/components/main-menu";
 import { PseudoScreen } from "@/components/pseudo-screen";
 import { SettingsScreen } from "@/components/settings-screen";
-import { isLanguage, journalLine, language, setLanguage, t, useT, type Language } from "@/i18n";
+import { isLanguage, journalLine, language, setLanguage, useT, type Language } from "@/i18n";
 import {
-  ApiError,
   deleteAccount,
   gardenTime,
   getGarden,
-  getVisitor,
+  getJournal,
   resetGarden,
   setGardenSpeed,
   ping,
@@ -28,7 +27,7 @@ import {
   type GardenRegion,
 } from "@/lib/api";
 import { defaultIsland, ISLAND_SIZE, loadIsland, saveIsland, type IslandLayout } from "@/lib/island";
-import { advanceLife, farewell, newLife, welcome } from "@/lib/life";
+import { advanceLife, newLife } from "@/lib/life";
 import { useOnline } from "@/lib/online";
 import { DEV, devNow, useKnobs } from "@/lib/dev";
 import { loadState, resetState, saveState, type AppState } from "@/lib/state";
@@ -125,14 +124,22 @@ export default function App() {
   useEffect(() => {
     if (!appState) return;
     const now = Date.now();
-    const { life, lived } = advanceLife(appState.localSeed, appState.life, now);
-    const entries = notable(lived.filter((s) => s.start > appState.lastOpenedAt && s.start <= now));
-    if (entries.length > 0) {
-      void (async () => {
-        const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
-        if (!granted) return;
-        for (const entry of entries) sendNotification({ title: appState.localPseudo, body: journalLine(entry, (seed) => life.met?.[seed]?.name ?? seed) });
-      })();
+    const notify = async (lived: Segment[], nameOf?: (seed: string) => string) => {
+      const entries = notable(lived.filter((s) => s.start > appState.lastOpenedAt && s.start <= now));
+      if (entries.length === 0) return;
+      const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
+      if (!granted) return;
+      for (const entry of entries) sendNotification({ title: appState.localPseudo, body: journalLine(entry, nameOf) });
+    };
+    // An account's blob lives on the server, wherever it is (one place at a time): what it did is read from there.
+    const { account } = appState;
+    let life = appState.life;
+    if (account && account.seed === appState.localSeed) {
+      getJournal(account.token).then(({ segments, names }) => notify(segments, (seed) => names[seed] ?? seed), () => {});
+    } else {
+      const step = advanceLife(appState.localSeed, appState.life, now);
+      life = step.life;
+      void notify(step.lived);
     }
     const next = { ...appState, life, lastOpenedAt: now };
     setAppState(next);
@@ -143,8 +150,10 @@ export default function App() {
   }, [appState?.localSeed]);
 
   // Keep living while the app is open: the timeline stays a little ahead of now.
+  // Not an account's blob: the server lives that one.
+  const livesHere = !!appState && appState.account?.seed !== appState.localSeed;
   useEffect(() => {
-    if (!appState?.localSeed) return;
+    if (!appState?.localSeed || !livesHere) return;
     const id = setInterval(() => {
       setAppState((prev) => {
         if (!prev) return prev;
@@ -154,7 +163,7 @@ export default function App() {
       });
     }, Math.max(1000, LIFE_TICK_MS / Math.max(1, speed)));
     return () => clearInterval(id);
-  }, [appState?.localSeed, speed]);
+  }, [appState?.localSeed, speed, livesHere]);
 
   // Real time between refreshes: a minute, or at a faster rate a third of the lookahead (1 to 10 s).
   const rate = gardenClock.rate;
@@ -179,32 +188,6 @@ export default function App() {
       document.removeEventListener("visibilitychange", back);
     };
   }, [appState?.account?.token, refreshGarden, refreshEvery, visiting]);
-
-  // A player's blob comes to stay on the private island; no one is told.
-  async function handleInvite(name: string) {
-    const token = appState?.account?.token;
-    if (!token) return;
-    const visitor = await getVisitor(token, name);
-    // A pseudo taken from the private blob: it can't visit itself.
-    if (visitor.seed === appState.localSeed) throw new ApiError(t().errors["no player goes by that pseudo"]!);
-    setAppState((prev) => {
-      if (!prev) return prev;
-      const now = devNow();
-      const next = { ...prev, life: advanceLife(prev.localSeed, welcome(prev.localSeed, prev.life, visitor, now), now).life };
-      void saveState(next);
-      return next;
-    });
-  }
-
-  function handleFarewell() {
-    setAppState((prev) => {
-      if (!prev) return prev;
-      const now = devNow();
-      const next = { ...prev, life: advanceLife(prev.localSeed, farewell(prev.life, now), now).life };
-      void saveState(next);
-      return next;
-    });
-  }
 
   // Dev panel: the server runs the garden faster, then the answers follow at once.
   async function handleGardenSpeed(scale: number) {
@@ -407,8 +390,6 @@ export default function App() {
         onGardenSpeed={DEV ? handleGardenSpeed : undefined}
         onReset={DEV ? handleReset : undefined}
         onJoinGarden={() => setJoining(true)}
-        onInvite={handleInvite}
-        onFarewell={handleFarewell}
         onSettings={() => setSettingsOpen(true)}
         island={island}
         onIslandChange={handleIslandChange}

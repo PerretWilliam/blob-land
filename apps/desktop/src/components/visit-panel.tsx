@@ -1,33 +1,37 @@
-import { MAX_NAME_LENGTH } from "@blob-land/sim";
+import { MAX_GUESTS, MAX_NAME_LENGTH } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
 import { UserPlus, X } from "lucide-react";
 import { useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { language, useT } from "@/i18n";
-import type { Guest } from "@/lib/life";
+import { inviteGuest, sendGuestHome } from "@/lib/api";
 
-/** Who's visiting the private island, and inviting someone over: a player's blob, by pseudo. */
+/** Who's visiting the player's island, and inviting someone over: a player's blob, by pseudo. */
 export function VisitPanel({
   seed,
-  inGarden,
-  guest,
-  onInvite,
-  onFarewell,
+  token,
+  open,
+  guests,
+  onChanged,
   onClose,
 }: {
-  /** The private blob's. */
+  /** The player's blob's. */
   seed: string;
-  inGarden: boolean;
-  guest: Guest | undefined;
-  onInvite: (name: string) => Promise<void>;
-  onFarewell: () => void;
+  /** Null without an account: visitors come from the garden. */
+  token: string | null;
+  /** Whether the island is on the server (online, the player's blob home). */
+  open: boolean;
+  guests: { seed: string; name: string; until: number }[];
+  /** After an invitation or a goodbye: reads the island again. */
+  onChanged: () => Promise<void>;
   onClose: () => void;
 }) {
   const t = useT();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const until = (at: number) => new Intl.DateTimeFormat(language(), { weekday: "long", hour: "2-digit", minute: "2-digit" }).format(at);
 
   async function invite(e: React.FormEvent) {
     e.preventDefault();
@@ -35,7 +39,8 @@ export function VisitPanel({
     setBusy(true);
     setError(null);
     try {
-      await onInvite(name);
+      await inviteGuest(token!, name);
+      await onChanged();
       setName("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -54,36 +59,52 @@ export function VisitPanel({
         </Button>
       </header>
       <div className="overflow-y-auto p-3">
-        {guest ? (
-          <div className="flex flex-col items-center gap-2 text-center">
-            <div className="flex items-end gap-1" aria-hidden="true">
-              <Blobatar name={seed} size={48} />
-              <Blobatar name={guest.seed} size={48} />
-            </div>
-            <p className="text-sm font-medium">
-              {t.visit.staying(guest.name, new Intl.DateTimeFormat(language(), { weekday: "long", hour: "2-digit", minute: "2-digit" }).format(guest.until))}
-            </p>
-            <Button variant="outline" onClick={onFarewell}>
-              {t.visit.farewell}
-            </Button>
-          </div>
-        ) : !inGarden ? (
+        {!token ? (
           <EmptyState face="sleepy" seed={seed} title={t.visit.noGarden}>
             {t.visit.noGardenText}
           </EmptyState>
+        ) : !open ? (
+          <EmptyState face="sad" seed={seed} title={t.common.noConnection}>
+            {t.visit.offline}
+          </EmptyState>
         ) : (
-          <form className="flex flex-col gap-2" onSubmit={invite}>
-            <p className="text-sm text-muted-foreground">{t.visit.intro}</p>
-            <input className="toon-input" aria-label={t.visit.pseudo} placeholder={t.visit.pseudo} maxLength={MAX_NAME_LENGTH} value={name} onChange={(e) => setName(e.target.value)} />
-            {error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
+          <div className="flex flex-col gap-3">
+            {guests.length > 0 ? (
+              <ul className="flex flex-col gap-2">
+                {guests.map((g) => (
+                  <li key={g.seed} className="flex items-center gap-2 rounded-lg border-2 border-ink bg-white p-2">
+                    <Blobatar name={g.seed} size={36} aria-hidden="true" />
+                    <p className="flex-1 text-sm font-medium">{t.visit.staying(g.name, until(g.until))}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        void sendGuestHome(token, g.seed).then(onChanged, () => {});
+                      }}
+                    >
+                      {t.visit.farewell}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
             ) : null}
-            <Button type="submit" disabled={busy || !name.trim()}>
-              {busy ? t.visit.inviting : t.visit.invite}
-            </Button>
-          </form>
+            {guests.length < MAX_GUESTS ? (
+              <form className="flex flex-col gap-2" onSubmit={invite}>
+                <p className="text-sm text-muted-foreground">{t.visit.intro}</p>
+                <input className="toon-input" aria-label={t.visit.pseudo} placeholder={t.visit.pseudo} maxLength={MAX_NAME_LENGTH} value={name} onChange={(e) => setName(e.target.value)} />
+                {error ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {error}
+                  </p>
+                ) : null}
+                <Button type="submit" disabled={busy || !name.trim()}>
+                  {busy ? t.visit.inviting : t.visit.invite}
+                </Button>
+              </form>
+            ) : (
+              <p className="text-sm text-muted-foreground">{t.visit.full}</p>
+            )}
+          </div>
         )}
       </div>
     </aside>

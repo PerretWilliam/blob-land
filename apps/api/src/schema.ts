@@ -33,6 +33,7 @@ export const regions = pgTable(
     version: integer().notNull().default(0), // bumped by every change, so servers know their cached view is stale
     nextStepAt: ms("next_step_at").notNull().default(0), // real time, not garden time
     weather: text().notNull().default("[]"), // JSON: its sky, a spell at a time (the sim's forecast), rolled on by each step
+    host: text().unique(), // a player's home island (a negative region): its blob's seed; null for the garden's
   },
   (t) => [index("regions_due").on(t.nextStepAt)],
 );
@@ -52,7 +53,9 @@ export const blobs = pgTable(
       .references(() => users.id),
     name: text().notNull(), // the account's pseudo, or the child's name
     nameKey: text("name_key").notNull().unique(),
-    region: integer().notNull(),
+    region: integer().notNull(), // where it is now: its garden region, or an island (negative) while away
+    awayFrom: integer("away_from"), // while on an island: the garden region it goes back to
+    stayUntil: ms("stay_until"), // a visitor's: when it goes home on its own
     country: text(), // ISO 3166-1 alpha-2, shown as a flag; null stays anonymous
     visible: boolean().notNull().default(true), // an account can hide from the garden
     traits: text(), // frozen JSON look for a child, null when the seed draws it

@@ -4,7 +4,7 @@ import { allowedFor, feeling, INTERACTIONS, joinsIn, MAX_STEP, moodShift, pickIn
 import { DURATION, firstSegment, NEXT, nextSolo, SLEEP_HOURS, sleepPressure, type Segment } from "./life";
 import { affinity, applyDelta, newRelationship, readyForUnion, readyToBreakUp, relationStatus, type RelationStatus, type Relationship } from "./relationship";
 import { randomRng, seededRng, type Rng } from "./rng";
-import { GROUP_MAX, stepWorld, type World, type WorldBlob } from "./world";
+import { GROUP_MAX, stayFor, stepWorld, type World, type WorldBlob } from "./world";
 
 const T0 = Date.UTC(2026, 8, 25, 8);
 const HOUR = 60 * 60 * 1000;
@@ -201,6 +201,15 @@ describe("stepWorld", () => {
     const w = garden(2, rng);
     const s = stepWorld(w, T0 + 30 * DAY, rng, DAY);
     expect(Math.min(...s.segments.map((x) => x.start))).toBeGreaterThanOrEqual(T0 + 29 * DAY);
+  });
+
+  it("rolls a stay of a few hours between strangers, up to two days between close friends", () => {
+    for (let i = 0; i < 200; i++) {
+      const rng = seededRng(i);
+      expect(stayFor(null, rng)).toBeGreaterThanOrEqual(3 * HOUR);
+      expect(stayFor(null, rng)).toBeLessThanOrEqual(12 * HOUR);
+      expect(stayFor({ friendship: 100, romance: 0 }, rng)).toBeLessThanOrEqual(48 * HOUR);
+    }
   });
 
   it("leaves couples and children to the garden on a visit", () => {

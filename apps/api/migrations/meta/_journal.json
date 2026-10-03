@@ -43,6 +43,13 @@
       "when": 1791059770416,
       "tag": "0005_minor_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791061397266,
+      "tag": "0006_smart_rattler",
+      "breakpoints": true
     }
   ]
 }

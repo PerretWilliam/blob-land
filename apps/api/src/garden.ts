@@ -80,6 +80,10 @@ export async function join(db: Db, region: number, newcomers: Newcomer[], now: n
 /** The region's blobs, with the relationships and couples they're in: a
  * blob only ever meets its own region's, so each region is a world of its own. */
 async function loadWorld(db: Db, region: number): Promise<World> {
+  // An island (a negative region) holds blobs from all over the garden: what
+  // binds them is found by who's there, not by where it was written.
+  const island = region < 0;
+  const here = sql`(SELECT ${blobs.seed} FROM ${blobs} WHERE ${blobs.region} = ${region})`;
   const [blobRows, relRows, unionRows, [sky]] = await Promise.all([
     db
       .select({
@@ -99,11 +103,17 @@ async function loadWorld(db: Db, region: number): Promise<World> {
       .from(blobs)
       .leftJoin(unions, eq(unions.id, blobs.parentUnionId))
       .where(eq(blobs.region, region)),
-    db.select().from(relationships).where(eq(relationships.region, region)),
-    db.select().from(unions).where(and(eq(unions.region, region), isNull(unions.endedAt))),
+    db
+      .select()
+      .from(relationships)
+      .where(island ? and(inArray(relationships.seedA, here), inArray(relationships.seedB, here)) : eq(relationships.region, region)),
+    db
+      .select()
+      .from(unions)
+      .where(and(island ? and(inArray(unions.seedA, here), inArray(unions.seedB, here)) : eq(unions.region, region), isNull(unions.endedAt))),
     db.select({ weather: regions.weather }).from(regions).where(eq(regions.region, region)),
   ]);
-  const world: World = { blobs: new Map(), relationships: new Map(), unions: [], weather: JSON.parse(sky?.weather ?? "[]") as Spell[] };
+  const world: World = { blobs: new Map(), relationships: new Map(), unions: [], weather: JSON.parse(sky?.weather ?? "[]") as Spell[], visit: island };
   for (const r of blobRows) {
     const blob: WorldBlob = {
       seed: r.seed,
@@ -378,6 +388,12 @@ export async function segmentsOf(db: Db, region: number, now: number, sinceStep?
     list.push({ ...r, activity: r.activity as Segment["activity"], with: withSeed?.split(",") ?? null });
   }
   return out;
+}
+
+/** One blob's timeline as lived by `now`, oldest first, wherever it was (the island's or the garden's). */
+export async function journalOf(db: Db, seed: string, now: number): Promise<Segment[]> {
+  const rows = await db.select().from(segments).where(and(eq(segments.seed, seed), lte(segments.start, now))).orderBy(asc(segments.start));
+  return rows.map(({ seed: _, region: _r, step: _s, withSeed, ...r }) => ({ ...r, activity: r.activity as Segment["activity"], with: withSeed?.split(",") ?? null }));
 }
 
 /** Everyone born by `now`, with their couples and timelines: what every player of the region is sent. */

@@ -4,4 +4,4 @@
 "@blob-land/desktop": minor
 ---
 
-Visits: invite another player's blob to your island by their pseudo, from the game menu. It stays a few hours, or up to two days for a close friend, then heads home; you can also say goodbye early. The two chat, play, argue and share firsts, which go into the album, and the visit carries on offline once it has started. Its player isn't told, and a blob hidden from the garden can't be invited.
+Visits, and a blob in one place at a time. Once your blob lives in the garden, it comes home to your island while you're there, and leaves the garden meanwhile. From the game menu, invite up to five other players' blobs over by their pseudo: each leaves the garden for its stay, a few hours or up to two days for a close friend, and everyone goes back when it's over, when you say goodbye or when you leave your island. What happens there counts everywhere, firsts in the album included. Its player isn't told, and a blob hidden from the garden can't be invited.

@@ -110,6 +110,18 @@ export interface Milestone {
 const FIRSTS: readonly InteractionKind[] = ["kiss", "stargaze", "shelter", "splash", "snowball", "snowman", "flowers", "leaf_pile", "fireflies"];
 const WARM: readonly RelationStatus[] = ["acquaintances", "friends", "best_friends", "crush", "lovers"];
 
+/** How many may stay on an island at once, besides its own blob. */
+export const MAX_GUESTS = 5;
+
+/**
+ * How long a visit lasts, rolled on arrival: a few hours between strangers,
+ * up to two days between those who are close.
+ */
+export function stayFor(rel: Pick<Relationship, "friendship" | "romance"> | null, rng: Rng): number {
+  const close = Math.max(rel?.friendship ?? 0, rel?.romance ?? 0) / 100;
+  return between(rng, 3, 12) * HOUR + close * between(rng, 0, 36) * HOUR;
+}
+
 /** What one step produced, for the caller to store. */
 export interface WorldStep {
   segments: (Segment & { seed: string })[];
@@ -124,7 +136,8 @@ export interface WorldStep {
 }
 
 const MIN = 60 * 1000;
-const DAY = 24 * 60 * MIN;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
 // How long a blob that wants company waits for someone to come free.
 const SOCIAL_WAIT = 5 * MIN;
 // On a visit, for the one they came to see.
