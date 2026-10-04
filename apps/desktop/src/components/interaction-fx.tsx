@@ -1,4 +1,4 @@
-import { segmentAt, type InteractionKind, type Outcome, type Segment } from "@blob-land/sim";
+import { segmentNow, type InteractionKind, type Outcome, type Segment } from "@blob-land/sim";
 import type { CSSProperties, ReactNode } from "react";
 import { greets } from "@/lib/blob-motion";
 
@@ -26,12 +26,12 @@ const LEAVING_MS = 15_000;
  * (another page of the garden) just leaves it facing right.
  */
 export function momentAt(seed: string, segments: readonly Segment[], t: number, others: (seed: string) => readonly Segment[] | undefined): Moment | null {
-  const seg = segmentAt(segments, t)?.seg;
+  const seg = segmentNow(segments, t);
   if (!seg || seg.activity !== "meet" || !seg.detail || t >= seg.end) return null;
   const [kind, outcome] = seg.detail.split(":") as [InteractionKind, Outcome];
   const everyone = [seed, ...(seg.with ?? [])].sort();
   const spots = (seg.with ?? []).flatMap((s) => {
-    const theirs = others(s) && segmentAt(others(s)!, t)?.seg;
+    const theirs = others(s) && segmentNow(others(s)!, t);
     return theirs ? [theirs.x - theirs.y] : [];
   });
   // On screen, ground x runs right and ground y runs left.

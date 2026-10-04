@@ -1,11 +1,11 @@
-import { alongPath, flagOf, legIn, NEST, segmentAt, walkMs, type Activity, type Attraction, type Gait, type GroundPoint, type Personality, type Route, type Segment, type Sex, type Spell } from "@blob-land/sim";
+import { alongPath, flagOf, legIn, legProgress, NEST, segmentAt, segmentNow, walkMs, type Activity, type Attraction, type Gait, type GroundPoint, type Personality, type Route, type Segment, type Sex, type Spell } from "@blob-land/sim";
 import * as EXPRESSIONS from "blobatar/expression";
 import { happy, idle, love, mad, sad, scared, shy, sleepy, smug, surprised, thinking, unsure, wink, type Expression } from "blobatar/expression";
 import { Coffee, Footprints, HeartHandshake, Moon, Sparkles, Sunrise, Users, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { AuraFx, InteractionFx, momentAt, type Aura } from "@/components/interaction-fx";
-import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, HALF_W, islandGeometry, LEVEL, WATER_DROP, World, type IslandGeometry } from "@/components/world";
+import { AuraFx, InteractionFx, momentAt, type Aura, type Moment } from "@/components/interaction-fx";
+import { CHUNK, depthZ, MAP_CELLS, NAME_CELLS, HALF_W, islandGeometry, LEVEL, prepareBlob, WATER_DROP, World, type IslandGeometry } from "@/components/world";
 import { canWalkStraight, cellAt, findPath, homeNest, isSunken, nestCell, snapToGround, surfaceHeight, type IslandLayout } from "@/lib/island";
 import { GLOOM } from "@/components/sky";
 import { seasonNow, skyAt, weatherNow } from "@/lib/dev";
@@ -49,7 +49,7 @@ export const expressionNamed = (name: string): Expression =>
 
 /** What a blob is doing and wearing at `t`, read off its timeline. */
 export function blobStateAt(segments: readonly Segment[], t: number): { activity: Activity; expression: Expression; since: number } {
-  const seg = segmentAt(segments, t)?.seg;
+  const seg = segmentNow(segments, t);
   if (!seg) return { activity: "rest", expression: idle, since: t };
   return { activity: seg.activity, expression: expressionNamed(seg.expression), since: seg.start };
 }
@@ -126,6 +126,12 @@ const UNFOLLOW_ZOOM = 0.5;
 const ZOOM_AFTER_PAN = 3;
 // The outline around a blob under the pointer, focused or followed, in screen px.
 const OUTLINE_PX = 2;
+/*
+ * The garden draws at the screen's rate up to about 120 fps: a 240 Hz screen
+ * gets every other frame. Blobs stroll; past 120, a frame costs as much and
+ * shows nothing more. Screens in between (144 Hz) keep their own rate.
+ */
+const FRAME_MS = 1000 / 120;
 
 type Rgb = [number, number, number];
 const hex = (h: string): Rgb => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as Rgb;
@@ -157,15 +163,38 @@ const FREE = new Set<Activity>(["explore", "rest", "discover"]);
 type Target = GroundPoint & { comingToMeet?: boolean };
 
 /**
+ * A blob's walk, worked out once and played back frame after frame: the
+ * waypoints, when it sets off and how long it takes, until when it holds, and
+ * when everyone it's meeting has arrived. Only how far along changes in between.
+ */
+interface Plan {
+  seg: Segment;
+  ended: boolean;
+  path: GroundPoint[];
+  /** How far along the path each of its points is. */
+  reach: Float64Array;
+  start: number;
+  ms: number;
+  until: number;
+  arrive: number;
+  /** Where it stands, handed back by `targets`: the same object every frame, updated. */
+  at: Target;
+}
+// For the layout and timelines last asked about: a new one of either starts over.
+let plans = { layout: null as IslandLayout | null, segmentsOf: null as Map<string, Segment[]> | null, of: new Map<string, Plan>() };
+
+/**
  * Where each blob should stand at `t`, played back from its timeline and
  * routed around cliffs and water. A couple who are both free walks together,
- * converging on the midpoint of their two own positions.
+ * converging on the midpoint of their two own positions. Asked again about
+ * the same timelines, it updates and hands back the same points: read them first.
  */
 export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, segmentsOf = new Map(blobs.map((b) => [b.seed, b.segments]))): Target[] {
   const zoom = walkZoom(layout.size);
   const gap = PAIR_GAP / zoom;
   const route: Route = (a, b) => findPath(layout, a, b);
-  const ps = blobs.map((b): Target => {
+  if (plans.layout !== layout || plans.segmentsOf !== segmentsOf) plans = { layout, segmentsOf, of: new Map() };
+  const planFor = (b: SceneBlob): Plan | null => {
     // Each to its own nest at night.
     const home = homeNest(layout, b.seed, b.partner);
     const snap = (p: GroundPoint, from?: GroundPoint) => {
@@ -177,20 +206,37 @@ export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, seg
     };
     const endOf = (seg: Segment) => endPoint(seg, segmentsOf, snap, zoom);
     const at = segmentAt(b.segments, t, snap);
-    if (!at) return { x: 0.5, y: 0.5 };
-    if (t >= at.seg.end) return endOf(at.seg);
+    if (!at) return null;
+    const stand: Target = { x: 0, y: 0 };
+    if (t >= at.seg.end) return { seg: at.seg, ended: true, path: [endOf(at.seg)], reach: new Float64Array(1), start: 0, ms: 0, until: Infinity, arrive: -Infinity, at: stand };
     const before = b.segments[b.segments.indexOf(at.seg) - 1];
     const start = before ? endOf(before) : at.from;
     const spot = at.seg.activity === "meet" ? meetingSpot(at.seg, segmentsOf, snap, zoom) : null;
-    const { from, to, e } = legIn(at.seg, start, t, spot ? () => spot : snap, zoom, route);
-    return { ...alongPath(findPath(layout, from, to), e), comingToMeet: spot !== null && !allThere(layout, at.seg, b.segments, t, segmentsOf, zoom) };
+    const leg = legIn(at.seg, start, t, spot ? () => spot : snap, zoom, route);
+    const arrive = spot ? arrival(layout, at.seg, b.segments, segmentsOf, zoom) : -Infinity;
+    const path = findPath(layout, leg.from, leg.to);
+    const reach = new Float64Array(path.length);
+    for (let k = 1; k < path.length; k++) reach[k] = reach[k - 1]! + Math.hypot(path[k]!.x - path[k - 1]!.x, path[k]!.y - path[k - 1]!.y);
+    return { seg: at.seg, ended: false, path, reach, start: leg.start, ms: leg.ms, until: leg.until, arrive, at: stand };
+  };
+  const ps = blobs.map((b): Target => {
+    const seg = segmentNow(b.segments, t);
+    let plan = plans.of.get(b.seed);
+    if (!plan || plan.seg !== seg || t >= plan.until || t >= plan.seg.end !== plan.ended) {
+      const made = planFor(b);
+      if (!made) return { x: 0.5, y: 0.5 };
+      plans.of.set(b.seed, (plan = made));
+    }
+    along(plan, legProgress(plan, t));
+    plan.at.comingToMeet = t < plan.arrive;
+    return plan.at;
   });
   const index = new Map(blobs.map((b, i) => [b.seed, i]));
   const clamp = (v: number) => Math.min(1 - gap, Math.max(gap, v));
   blobs.forEach((b, i) => {
     const j = b.partner ? index.get(b.partner) : undefined;
     if (j === undefined || b.seed > blobs[j]!.seed) return;
-    const [sa, sb] = [segmentAt(b.segments, t)?.seg, segmentAt(blobs[j]!.segments, t)?.seg];
+    const [sa, sb] = [segmentNow(b.segments, t), segmentNow(blobs[j]!.segments, t)];
     if (!sa || !sb || !FREE.has(sa.activity) || !FREE.has(sb.activity)) return;
     const mid = { x: clamp((ps[i]!.x + ps[j]!.x) / 2), y: clamp((ps[i]!.y + ps[j]!.y) / 2) };
     // Side by side along the screen's horizontal, so neither hides the other.
@@ -200,6 +246,29 @@ export function targets(layout: IslandLayout, blobs: SceneBlob[], t: number, seg
   return ps;
 }
 
+/** Puts a plan's `at` at the point `e` of the way along its path: alongPath, by the lengths worked out once. */
+function along({ path, reach, at }: Plan, e: number) {
+  const total = reach[reach.length - 1]!;
+  if (path.length < 2 || total === 0) {
+    const p = alongPath(path, e);
+    [at.x, at.y] = [p.x, p.y];
+    return;
+  }
+  const left = e * total;
+  // The first point at least that far along.
+  let [lo, hi] = [1, path.length - 1];
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (reach[mid]! >= left) hi = mid;
+    else lo = mid + 1;
+  }
+  const [a, b] = [path[lo - 1]!, path[lo]!];
+  const len = reach[lo]! - reach[lo - 1]!;
+  const f = len === 0 ? 0 : Math.min(1, (left - reach[lo - 1]!) / len);
+  at.x = a.x + (b.x - a.x) * f;
+  at.y = a.y + (b.y - a.y) * f;
+}
+
 /** Where a segment leaves its blob: for a meeting, its place in the gathering
  * as drawn, not the sim's own point for it (see meetingSpot). */
 function endPoint(seg: Segment, segmentsOf: Map<string, Segment[]>, snap: (p: GroundPoint) => GroundPoint, zoom: number): GroundPoint {
@@ -207,21 +276,22 @@ function endPoint(seg: Segment, segmentsOf: Map<string, Segment[]>, snap: (p: Gr
 }
 
 /**
- * Whether everyone at the gathering `seg` is part of has arrived by `t`: no
- * one talks to someone still finishing another meeting, or still on the way.
- * A member whose timeline isn't here (hidden) counts as never arriving.
+ * When everyone at the gathering `seg` is part of has arrived: no one talks
+ * to someone still finishing another meeting, or still on the way. A member
+ * whose timeline isn't here (hidden) never arrives.
  */
-function allThere(layout: IslandLayout, seg: Segment, mine: Segment[], t: number, segmentsOf: Map<string, Segment[]>, zoom: number): boolean {
+function arrival(layout: IslandLayout, seg: Segment, mine: Segment[], segmentsOf: Map<string, Segment[]>, zoom: number): number {
   const snap = (p: GroundPoint) => snapToGround(layout, p);
   const members = gathering(seg, segmentsOf);
-  if (members.length < (seg.with?.length ?? 0) + 1) return false;
-  return members.every((x, i) => {
-    if (x.start > t) return false;
-    const own = i === 0 ? mine : segmentsOf.get(seg.with![i - 1]!)!;
-    const before = own[own.indexOf(x) - 1];
-    const from = before ? endPoint(before, segmentsOf, snap, zoom) : snap({ x: x.x, y: x.y });
-    return x.start + walkMs(x, from, meetingSpot(x, segmentsOf, snap, zoom), zoom, (a, b) => findPath(layout, a, b)) <= t;
-  });
+  if (members.length < (seg.with?.length ?? 0) + 1) return Infinity;
+  return Math.max(
+    ...members.map((x, i) => {
+      const own = i === 0 ? mine : segmentsOf.get(seg.with![i - 1]!)!;
+      const before = own[own.indexOf(x) - 1];
+      const from = before ? endPoint(before, segmentsOf, snap, zoom) : snap({ x: x.x, y: x.y });
+      return x.start + walkMs(x, from, meetingSpot(x, segmentsOf, snap, zoom), zoom, (a, b) => findPath(layout, a, b));
+    }),
+  );
 }
 
 /** Everyone's segment of the gathering `seg` is part of (the ones the timelines hold), its own first. */
@@ -275,7 +345,11 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   bySeedRef.current = bySeed;
   // Everyone's timeline by seed, for meetings, whoever is being moved this frame.
   const segmentsOfRef = useRef(new Map<string, Segment[]>());
-  segmentsOfRef.current = useMemo(() => new Map(blobs.map((b) => [b.seed, b.segments])), [blobs]);
+  // Kept while every timeline is the same one: the screen re-renders now and then with the same timelines,
+  // and a new map would make every walk be worked out again (see targets).
+  const lastSegmentsOf = segmentsOfRef.current;
+  if (lastSegmentsOf.size !== blobs.length || blobs.some((b) => lastSegmentsOf.get(b.seed) !== b.segments))
+    segmentsOfRef.current = new Map(blobs.map((b) => [b.seed, b.segments]));
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const reducedRef = useRef(reducedMotion);
@@ -394,11 +468,14 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   // Something to draw since the last frame, when nothing moves on its own.
   const dirty = useRef(true);
 
-  /** A blob's feet, in pack px. */
+  /** A blob's feet, in pack px: read at once, the same object is reused on the next call. */
+  const foot = useRef({ x: 0, y: 0 }).current;
   function feet(p: GroundPoint & { lift: number }) {
     const n = layoutRef.current.size;
     const at = islandRef.current.at(p.x * n, p.y * n);
-    return { x: at.x, y: at.y - p.lift };
+    foot.x = at.x;
+    foot.y = at.y - p.lift;
+    return foot;
   }
 
   function applyPosition(seed: string, p: GroundPoint & { lift: number }) {
@@ -439,7 +516,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     const lift = Math.abs(Math.sin(g.phase)) * hop * g.style.lift; // 0 on the ground, 1 at the top of a hop
     const squash = g.style.squash * hop * (1 - Math.abs(Math.sin(g.phase))) ** 2; // flattens on landing
     const waddle = Math.sin(g.phase) * g.style.waddle * g.walk * (1 - g.hop); // side to side, feet on the ground
-    worldRef.current?.blobs.get(seed)?.walk({ lift, rotate: g.lean + waddle, squash });
+    worldRef.current?.blobs.get(seed)?.walk(lift, g.lean + waddle, squash);
   }
 
   /**
@@ -612,12 +689,15 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       const { x, y } = feet(p);
       if (x > r.x0 - pad && x < r.x1 + pad && y > r.y0 - pad && y < r.y1 + pad * 1.5) blobs.add(b.seed);
     }
+    world.wantMap(far || map);
     if (chunks !== prev.chunks) world.showChunks(chunks);
     if (map !== prev.map) world.setMap(map);
     const sameBlobs = prev.blobs.size === blobs.size && [...blobs].every((seed) => prev.blobs.has(seed));
     if (chunks === prev.chunks && map === prev.map && far === prev.far && sameBlobs) return;
     inViewRef.current = { chunks, map, far, blobs: sameBlobs ? prev.blobs : blobs };
-    setInView(inViewRef.current);
+    // The names that come with it render between frames: a few dozen at once would hold one up.
+    const latest = inViewRef.current;
+    startTransition(() => setInView(latest));
     syncViews();
   }
 
@@ -676,6 +756,18 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     for (const seed of world.blobs.keys()) refresh(seed, at);
     dirty.current = true;
   });
+
+  // Everyone's shapes, a few at a time between frames, before they're first seen.
+  useEffect(() => {
+    const queue = [...blobs];
+    let timer = 0;
+    const next = () => {
+      for (const blob of queue.splice(0, 8)) prepareBlob(blob.seed, blob.sex, blob.expression);
+      if (queue.length) timer = window.setTimeout(next, 30);
+    };
+    timer = window.setTimeout(next, 500);
+    return () => clearTimeout(timer);
+  }, [blobs]);
 
   // The ground, whenever the layout changes: shown once its sprites are loaded.
   useEffect(() => {
@@ -837,23 +929,31 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         const ps = targets(layoutRef.current, list, t, segmentsOfRef.current);
         // Someone new (a visitor, a newborn): placed now, so whether it's in view can be told.
         const arriving = list.some((b) => !shown.current.has(b.seed));
+        // Positions are kept in the same objects frame after frame, updated in place: a few hundred new ones a frame add up.
         list.forEach((b, i) => {
-          const to = { ...ps[i]!, lift: liftRef.current(ps[i]!) };
-          const last = aimed.current.get(b.seed);
-          aimed.current.set(b.seed, ps[i]!);
-          // Out of view (or a dot): straight there, no easing or gait to keep up.
-          const prev = close(b) ? shown.current.get(b.seed) : undefined;
+          const to = ps[i]!;
+          const lift = liftRef.current(to);
+          let last = aimed.current.get(b.seed);
           // Walking, the blob moves as its timeline does and only what's left
           // of an earlier jump fades; a jump fades from where it's drawn.
-          const from = last && Math.hypot(to.x - last.x, to.y - last.y) <= jump ? last : to;
-          const p = prev
-            ? { x: to.x + (prev.x - from.x) * (1 - k), y: to.y + (prev.y - from.y) * (1 - k), lift: prev.lift + (to.lift - prev.lift) * k }
-            : to;
-          shown.current.set(b.seed, p);
+          const [fromX, fromY] = last && Math.hypot(to.x - last.x, to.y - last.y) <= jump ? [last.x, last.y] : [to.x, to.y];
+          if (!last) aimed.current.set(b.seed, (last = { x: 0, y: 0 }));
+          last.x = to.x;
+          last.y = to.y;
+          let p = shown.current.get(b.seed);
+          // Out of view (or a dot): straight there, no easing or gait to keep up.
+          const eased = p !== undefined && close(b);
+          if (!p) shown.current.set(b.seed, (p = { x: to.x, y: to.y, lift }));
+          const [px, py] = [p.x, p.y];
+          if (eased) {
+            p.x = to.x + (px - fromX) * (1 - k);
+            p.y = to.y + (py - fromY) * (1 - k);
+            p.lift += (lift - p.lift) * k;
+          } else [p.x, p.y, p.lift] = [to.x, to.y, lift];
           applyPosition(b.seed, p);
-          if (snap || !prev) return arrived(b.seed, true, now);
+          if (snap || !eased) return arrived(b.seed, true, now);
           // Screen-space direction: +x on screen is ground (x - y).
-          const [dx, dy] = [p.x - prev.x, p.y - prev.y];
+          const [dx, dy] = [p.x - px, p.y - py];
           const dist = Math.hypot(dx, dy);
           // Per tile, like the walks themselves (see walkZoom): a stroll across a big island is as slow as one across a small one.
           const pace = (dist / dt) * walkZoom(layoutRef.current.size);
@@ -897,7 +997,7 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         view.frame(now, reduced, outlined ? OUTLINE_PX : 0, world.scale);
       }
       const drawn = performance.now();
-      world.render();
+      world.render(now);
       dirty.current = false;
       if (profile) {
         profile.renderMs += performance.now() - drawn;
@@ -905,9 +1005,19 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
         profile.tickMs += drawn - now;
       }
     };
-    let raf = requestAnimationFrame(function loop() {
-      tick();
+    // The screen's frame interval, smoothed (hitches left out). On a screen at
+    // twice FRAME_MS's rate or more, only every so many frames are drawn.
+    let interval = FRAME_MS;
+    let lastFrame = 0;
+    let skipped = 0;
+    let raf = requestAnimationFrame(function loop(at) {
       raf = requestAnimationFrame(loop);
+      const gap = at - lastFrame;
+      lastFrame = at;
+      if (gap > 0 && gap < 20) interval += (gap - interval) * 0.05;
+      if (++skipped < Math.max(1, Math.floor((FRAME_MS + 0.5) / interval))) return;
+      skipped = 0;
+      tick();
     });
     return () => cancelAnimationFrame(raf);
     // The loop runs this render's functions, which read the island's size
@@ -917,6 +1027,14 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
   useEffect(() => {
     dirty.current = true;
   }, [selected]);
+
+  // Stable, so labels needn't re-render with the scene: they only read refs.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const placeLabelRef = useCallback((seed: string, node: HTMLElement | null) => placeRef(seed, node), []);
+  const focusBlob = useCallback((seed: string | null) => {
+    focused.current = seed;
+    dirty.current = true;
+  }, []);
 
   function placeRef(seed: string, node: HTMLElement | null) {
     if (!node) {
@@ -983,67 +1101,22 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
       {/* Names — and meeting effects — float above everything and don't hop,
           so they stay readable. Placed on screen by the same loop. */}
       <div ref={overlayRef} className="pointer-events-none absolute inset-0">
-        {blobs.map((blob) => {
+        {blobs.map((blob) =>
           // Names only close up (and yours, and the one followed, always).
-          if (blob.seed !== selected && blob.seed !== startAt && (inView.far || !seesBlob(blob.seed))) return null;
-          const moment = moments.get(blob.seed);
-          const size = sizeOf(blob);
-          return (
-            <div
+          blob.seed !== selected && blob.seed !== startAt && (inView.far || !seesBlob(blob.seed)) ? null : (
+            <Label
               key={blob.seed}
-              ref={(node) => placeRef(blob.seed, node)}
-              className="absolute top-0 left-0 will-change-transform"
-              data-label={blob.seed}
-              data-fx-key={moment?.key}
-            >
-              {/* The effects zoom with the world, from the blob's feet. */}
-              <div className="absolute top-0 left-0 origin-top-left" style={{ transform: "scale(var(--camera-zoom, 1))" }}>
-                {moment ? (
-                  <InteractionFx moment={moment} size={size} />
-                ) : blob.aura ? (
-                  <AuraFx aura={blob.aura} size={size} />
-                ) : null}
-              </div>
-              {/* Clicking a name selects its blob, even one hidden behind another. */}
-              <p
-                className="pointer-events-auto absolute flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-full border-2 border-ink bg-card px-2 py-px text-xs font-semibold text-ink shadow-[0_2px_0_var(--ink)] transition-colors hover:bg-sun"
-                style={{ bottom: `calc(${blobSize * 0.84}px * var(--camera-zoom, 1))`, transform: "translateX(-50%)" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelected(blob.seed);
-                }}
-              >
-                {blob.country ? (
-                  <span role="img" aria-label={countryName(blob.country)} title={countryName(blob.country)}>
-                    {flagOf(blob.country)}
-                  </span>
-                ) : null}
-                {blob.label}
-                <MoodIcon expression={blob.expression} />
-                {blob.activity ? <ActivityIcon activity={blob.activity} /> : null}
-              </p>
-              {/* The blob itself, for the keyboard: focus outlines it, Enter follows it. */}
-              <button
-                type="button"
-                className="sr-only"
-                aria-label={t.card.follow(blob.label)}
-                aria-pressed={blob.seed === selected}
-                onFocus={(e) => {
-                  focused.current = e.currentTarget.matches(":focus-visible") ? blob.seed : null;
-                  dirty.current = true;
-                }}
-                onBlur={() => {
-                  focused.current = null;
-                  dirty.current = true;
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelected(blob.seed);
-                }}
-              />
-            </div>
-          );
-        })}
+              blob={blob}
+              size={sizeOf(blob)}
+              blobSize={blobSize}
+              moment={moments.get(blob.seed)}
+              selected={blob.seed === selected}
+              place={placeLabelRef}
+              select={setSelected}
+              focus={focusBlob}
+            />
+          ),
+        )}
       </div>
 
       {/* The selected blob's ID card: everything known about it, at a glance. */}
@@ -1138,6 +1211,78 @@ export function Scene({ blobs, reducedMotion, layout, onCellPaint, blobScale = 0
     </div>
   );
 }
+
+interface LabelProps {
+  blob: SceneBlob;
+  /** Its size and a grown-up's, in fit px. */
+  size: number;
+  blobSize: number;
+  moment: Moment | null | undefined;
+  selected: boolean;
+  place: (seed: string, node: HTMLElement | null) => void;
+  select: (seed: string) => void;
+  /** Keyboard focus on a blob (null: off it), for its outline. */
+  focus: (seed: string | null) => void;
+}
+
+// What a label shows of its blob: the screen hands over new blobs every few seconds, mostly unchanged.
+const sameShown = (a: SceneBlob, b: SceneBlob) =>
+  a === b || (a.seed === b.seed && a.label === b.label && a.expression === b.expression && a.activity === b.activity && a.country === b.country && a.aura === b.aura);
+
+const sameMoment = (a: Moment | null | undefined, b: Moment | null | undefined) =>
+  a === b || (!!a && !!b && a.key === b.key && a.leaving === b.leaving && a.kind === b.kind && a.outcome === b.outcome && a.turn === b.turn && a.count === b.count && a.face === b.face);
+
+/**
+ * A blob's name (and its meeting effects), placed over its head by the
+ * scene's loop. Re-rendered only when what it shows changes: the scene
+ * renders again whenever who's in view does, with a few dozen of these.
+ */
+const Label = memo(
+  function Label({ blob, size, blobSize, moment, selected, place, select, focus }: LabelProps) {
+    const t = useT();
+    return (
+      <div ref={(node) => place(blob.seed, node)} className="absolute top-0 left-0 will-change-transform" data-label={blob.seed} data-fx-key={moment?.key}>
+        {/* The effects zoom with the world, from the blob's feet. */}
+        <div className="absolute top-0 left-0 origin-top-left" style={{ transform: "scale(var(--camera-zoom, 1))" }}>
+          {moment ? <InteractionFx moment={moment} size={size} /> : blob.aura ? <AuraFx aura={blob.aura} size={size} /> : null}
+        </div>
+        {/* Clicking a name selects its blob, even one hidden behind another. */}
+        <p
+          className="pointer-events-auto absolute flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-full border-2 border-ink bg-card px-2 py-px text-xs font-semibold text-ink shadow-[0_2px_0_var(--ink)] transition-colors hover:bg-sun"
+          style={{ bottom: `calc(${blobSize * 0.84}px * var(--camera-zoom, 1))`, transform: "translateX(-50%)" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            select(blob.seed);
+          }}
+        >
+          {blob.country ? (
+            <span role="img" aria-label={countryName(blob.country)} title={countryName(blob.country)}>
+              {flagOf(blob.country)}
+            </span>
+          ) : null}
+          {blob.label}
+          <MoodIcon expression={blob.expression} />
+          {blob.activity ? <ActivityIcon activity={blob.activity} /> : null}
+        </p>
+        {/* The blob itself, for the keyboard: focus outlines it, Enter follows it. */}
+        <button
+          type="button"
+          className="sr-only"
+          aria-label={t.card.follow(blob.label)}
+          aria-pressed={selected}
+          onFocus={(e) => focus(e.currentTarget.matches(":focus-visible") ? blob.seed : null)}
+          onBlur={() => focus(null)}
+          onClick={(e) => {
+            e.stopPropagation();
+            select(blob.seed);
+          }}
+        />
+      </div>
+    );
+  },
+  (a, b) =>
+    sameShown(a.blob, b.blob) && a.size === b.size && a.blobSize === b.blobSize && a.selected === b.selected && a.place === b.place && a.select === b.select && a.focus === b.focus && sameMoment(a.moment, b.moment),
+);
 
 /**
  * Edit mode: one clickable diamond per walkable cell, over the island's box.

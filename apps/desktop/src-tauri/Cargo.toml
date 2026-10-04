@@ -30,6 +30,11 @@ tauri-plugin-autostart = "2.5.1"
 # the two halves of the plugin must match. Bump both together.
 tauri-plugin-http = "=2.7.0"
 
+# To lift WebKit's 60 fps cap on the webview (see lib.rs). Already in the tree through Tauri.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

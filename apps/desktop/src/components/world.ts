@@ -13,7 +13,7 @@ import type { Sex } from "@blob-land/sim";
 import type { Expression } from "blobatar/expression";
 import { idleAt, idleSeeds, type IdleSeeds } from "blobatar/idle";
 import { _posed, fadeHex, lerpPose } from "blobatar/internal";
-import { Application, ColorMatrixFilter, Container, Graphics, GraphicsContext, GraphicsPath, ImageSource, Matrix, RenderTexture, Sprite, Texture } from "pixi.js";
+import { Application, ColorMatrixFilter, Container, Graphics, GraphicsContext, GraphicsPath, ImageSource, Matrix, RenderTexture, Sprite, Texture, Ticker } from "pixi.js";
 import { genderAnchor, SIGNS } from "@/components/blob-gender";
 import type { Moment } from "@/components/interaction-fx";
 import { Sky } from "@/components/sky";
@@ -95,6 +95,18 @@ export const MAP_CELLS = 8000;
 export const NAME_CELLS = 2500;
 // Sprites reach this far past the grid points they hang off (trees, stacks), in pack px.
 const CHUNK_PAD = 420;
+/*
+ * A new depth order makes Pixi rebuild and repack every sprite it draws, the
+ * whole island in view: walking blobs would cause that every frame. Their new
+ * depths are applied this often instead, a pass in front of or behind a tree
+ * a frame or two late.
+ */
+const SORT_MS = 50;
+// The map's picture is made this many sprites a frame, and let go of after this long close up.
+const BAKE_SLICE = 1500;
+const BAKE_KEEP_MS = 30_000;
+// Pixi's own upkeep (freeing what's gone unused on the GPU) runs this often, from the scene's frames.
+const UPKEEP_MS = 1000;
 
 /*
  * The island is `tiles` rows by `tiles + 1` columns: the extra column along
@@ -409,7 +421,12 @@ function textureOf(src: string, w?: number): Promise<Texture> {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       img.close();
       const bitmap = await createImageBitmap(canvas);
-      return new Texture({ source: new ImageSource({ resource: bitmap, autoGenerateMipmaps: true }) });
+      const texture = new Texture({ source: new ImageSource({ resource: bitmap, autoGenerateMipmaps: true }) });
+      // Uploaded now and the decoded copy let go, so only the GPU holds the pixels; it keeps them (never collected).
+      (await sharedApp()).renderer.texture.initSource(texture.source);
+      texture.source.autoGarbageCollect = false;
+      bitmap.close();
+      return texture;
     })()
       .catch((error: unknown) => {
         // One broken sprite shouldn't keep the whole island from showing.
@@ -562,6 +579,30 @@ function figureOf(seed: string): Figure {
   return figure;
 }
 
+/** A blob's pose and colours wearing an expression, and how it morphs there: worked out once per seed and expression. */
+const poses = new WeakMap<Expression, Map<string, { to: ReturnType<typeof lerpPose>; toFill: { head: string; eye: string }; clock: typeof MORPH_IN }>>();
+function poseFor(seed: string, expression: Expression) {
+  let bySeed = poses.get(expression);
+  if (!bySeed) poses.set(expression, (bySeed = new Map()));
+  let pose = bySeed.get(seed);
+  if (!pose) {
+    const posed = _posed(seed, { expression });
+    pose = { to: lerpPose(undefined, posed.pose, 1), toFill: posed.hot ?? posed.fill, clock: posed.expr ? MORPH_IN : MORPH_OUT };
+    bySeed.set(seed, pose);
+  }
+  return pose;
+}
+
+/**
+ * Works out ahead what drawing a blob needs (its shapes, its pose, where its
+ * sign sits), so a blob first seen while panning costs its frame nothing extra.
+ */
+export function prepareBlob(seed: string, sex: Sex, expression: Expression) {
+  figureOf(seed);
+  poseFor(seed, expression);
+  genderAnchor(seed, sex);
+}
+
 const signs = new Map<string, GraphicsContext>();
 function signOf(sex: "female" | "male"): GraphicsContext {
   let ctx = signs.get(sex);
@@ -616,6 +657,8 @@ function dotOf(home: boolean): Texture {
 
 const scratch = new Matrix();
 const aff = new Affine();
+const body = new Affine();
+const eye = new Affine();
 function put(container: Container, m: Affine) {
   scratch.set(m.a, m.b, m.c, m.d, m.e, m.f);
   container.setFromMatrix(scratch);
@@ -633,24 +676,20 @@ export interface Stride {
 }
 
 /**
- * One blob, as the blobatar's element tree: the figure scaled into its box,
- * then `.mo-root` (tremor, hover lift), `.mo-breathe`, `.mo-bob`, and in
- * there its shapes, its eye pair and each eye, and the sign it wears.
+ * One blob, as the blobatar's element tree: its walk and meeting moves about
+ * the feet, the figure scaled into its box, then `.mo-root` (tremor, hover
+ * lift), `.mo-breathe`, `.mo-bob`, and in there its shapes, its eye pair and
+ * each eye, and the sign it wears. Those nested transforms are multiplied out
+ * here, into one per shape group: Pixi has that many fewer to work out a frame.
  */
 export class BlobView {
   readonly root = new Container();
   private readonly shadow = new Sprite(shadowOf());
-  private readonly body = new Container();
-  private readonly figure = new Container();
-  private readonly moRoot = new Container();
-  private readonly breathe = new Container();
-  /** `.mo-bob`, where the shapes are: picking reads the pointer in its frame. */
+  /** `.mo-bob`, where the shapes are, with everything above it: picking reads the pointer in its frame. */
   readonly bob = new Container();
   private readonly outline = new Container();
   private readonly head: Graphics;
-  private readonly eyePair = new Container();
-  private readonly eyes: Container[];
-  private readonly glances: Container[];
+  /** Each eye, with the pair's, its own and its glance's transforms. */
   private readonly eyeShapes: Graphics[];
   private sign: Container | null = null;
   private readonly fig: Figure;
@@ -680,25 +719,13 @@ export class BlobView {
     }
     this.outline.visible = false;
     this.eyeShapes = this.fig.eyes.map((ctx) => new Graphics(ctx));
-    this.glances = this.eyeShapes.map((g) => new Container({ children: [g] }));
-    this.eyes = this.glances.map((g) => new Container({ children: [g] }));
-    this.eyePair.addChild(...this.eyes);
-    this.bob.addChild(this.outline, this.head, this.eyePair);
-    this.breathe.addChild(this.bob);
-    this.moRoot.addChild(this.breathe);
-    this.figure.addChild(this.moRoot);
-    this.body.addChild(this.figure);
-    this.root.addChild(this.shadow, this.body);
+    this.bob.addChild(this.outline, this.head, ...this.eyeShapes);
+    this.root.addChild(this.shadow, this.bob);
   }
 
   /** What it looks like: `size` in pack px, its sex's sign, its expression (morphed to), its meeting. */
   update(size: number, sex: Sex, expression: Expression, moment: Moment | null, reduced: boolean, now: number) {
-    if (size !== this.size) {
-      this.size = size;
-      // The blobatar's 0–100 box, its bottom 20% below the feet.
-      this.figure.scale.set(size / 100);
-      this.figure.position.set(-size / 2, -0.8 * size);
-    }
+    this.size = size;
     if (sex !== this.sex) {
       this.sex = sex;
       this.sign?.destroy({ children: true });
@@ -712,10 +739,7 @@ export class BlobView {
       }
     }
     if (expression !== this.expression) {
-      const posed = _posed(this.seed, { expression });
-      const to = lerpPose(undefined, posed.pose, 1);
-      const toFill = posed.hot ?? posed.fill;
-      const clock = posed.expr ? MORPH_IN : MORPH_OUT;
+      const { to, toFill, clock } = poseFor(this.seed, expression);
       const current = this.morph ? this.poseAt(now) : null;
       this.morph = {
         from: current?.pose ?? to,
@@ -732,23 +756,36 @@ export class BlobView {
     this.moment = moment;
   }
 
+  // The pose a finished morph rests on: worked out once, not every frame.
+  private settled: { morph: Morph; pose: ReturnType<typeof lerpPose>; fill: { head: string; eye: string } } | null = null;
+
   private poseAt(now: number) {
     const m = this.morph!;
+    if (this.settled?.morph === m) return this.settled;
     const k = morphProgress(m, now);
-    return {
+    const at = {
       pose: lerpPose(m.from, m.to, k),
       fill: { head: fadeHex(m.fromFill.head, m.toFill.head, k), eye: fadeHex(m.fromFill.eye, m.toFill.eye, k) },
     };
+    if (now - m.start >= m.ms) this.settled = { morph: m, ...at };
+    return at;
   }
+
+  /** Its depth, applied by the world now and then (see SORT_MS). */
+  depth = 0;
 
   /** Where its feet are, in pack px, and its depth. */
   place(x: number, y: number, z: number) {
     this.root.position.set(x, y);
-    if (this.root.zIndex !== z) this.root.zIndex = z;
+    this.depth = z;
+    // A newcomer goes straight to its place.
+    if (this.root.zIndex === 0) this.root.zIndex = z;
   }
 
-  walk(stride: Stride) {
-    this.stride = stride;
+  walk(lift: number, rotate: number, squash: number) {
+    this.stride.lift = lift;
+    this.stride.rotate = rotate;
+    this.stride.squash = squash;
   }
 
   /** Walking or standing: a meeting's moves only play once it has arrived. */
@@ -779,14 +816,11 @@ export class BlobView {
     const { pose, fill } = this.poseAt(now);
     // Reduced motion: every loop stops where it starts, as the stylesheet does.
     const f = reduced ? idleAt(this.fig.seeds, 0, 0, 0) : idleAt(this.fig.seeds, now, 1, pose.shake);
-    put(this.moRoot, rootTransform(aff, f, reduced ? this.lift.to : this.liftAt(now)));
-    put(this.breathe, breatheTransform(aff, f));
-    this.bob.position.set(0, pose.bdy + f.bob);
-    this.eyePair.position.set(f.saccade[0], f.saccade[1]);
-    this.fig.frames.forEach((e, i) => {
-      put(this.eyes[i]!, eyeTransform(aff, e, i, pose, f.rockp));
-      put(this.glances[i]!, glanceTransform(aff, e, i, f));
-    });
+    for (let i = 0; i < this.fig.frames.length; i++) {
+      const e = this.fig.frames[i]!;
+      eye.reset().translate(f.saccade[0], f.saccade[1]).append(eyeTransform(aff, e, i, pose, f.rockp)).append(glanceTransform(aff, e, i, f));
+      put(this.eyeShapes[i]!, eye);
+    }
     if (fill.head !== this.tints.head) this.head.tint = colour((this.tints.head = fill.head));
     if (fill.eye !== this.tints.eye) for (const g of this.eyeShapes) g.tint = colour((this.tints.eye = fill.eye));
 
@@ -799,11 +833,14 @@ export class BlobView {
     // The body: the meeting's move (translate, rotate, scale), then the walk cycle, about the feet.
     const m = this.moment;
     const move = m && this.stillSince !== null && !reduced ? moveAt(m.kind, m.face, m.turn, m.count, now, now - this.stillSince, m.leaving) : null;
-    aff.reset();
-    if (move) aff.translate(move.tx * this.size, move.ty * this.size).rotate(move.rot).scale(move.sx, move.sy);
+    body.reset();
+    if (move) body.translate(move.tx * this.size, move.ty * this.size).rotate(move.rot).scale(move.sx, move.sy);
     const { lift, rotate, squash } = this.stride;
-    aff.translate(0, -lift * this.size * 0.13).rotate(rotate).scale(1 + squash, 1 - squash);
-    put(this.body, aff);
+    body.translate(0, -lift * this.size * 0.13).rotate(rotate).scale(1 + squash, 1 - squash);
+    // The blobatar's 0–100 box, its bottom 20% below the feet; then `.mo-root`, `.mo-breathe` and `.mo-bob`.
+    body.translate(-this.size / 2, -0.8 * this.size).scale(this.size / 100);
+    body.append(rootTransform(aff, f, reduced ? this.lift.to : this.liftAt(now))).append(breatheTransform(aff, f)).translate(0, pose.bdy + f.bob);
+    put(this.bob, body);
     this.shadow.setSize(this.size * 0.6 * (1 - 0.35 * lift), this.size * 0.18 * (1 - 0.35 * lift));
   }
 
@@ -818,6 +855,41 @@ export class BlobView {
   }
 }
 
+/*
+ * One renderer for the app's whole life, handed from scene to scene (the
+ * island, the garden): its WebGL context, and everything uploaded to it, are
+ * kept instead of made again at every switch.
+ */
+let shared: Promise<Application> | null = null;
+// The world whose scene shows the canvas now.
+let shownBy: World | null = null;
+function sharedApp(): Promise<Application> {
+  shared ??= (async () => {
+    // Pixi's upkeep would otherwise run a frame loop of its own, beside the scene's (see World.render).
+    Ticker.system.autoStart = false;
+    Ticker.system.stop();
+    const app = new Application();
+    await app.init({
+      preference: "webgl",
+      backgroundAlpha: 0,
+      antialias: true,
+      autoDensity: true,
+      resolution: window.devicePixelRatio || 1,
+      width: 1,
+      height: 1,
+      autoStart: false,
+      sharedTicker: false,
+    });
+    // The scene draws a frame when it has one to draw: no ticker of Pixi's own.
+    app.ticker.stop();
+    app.canvas.className = "pointer-events-none absolute inset-0";
+    // Sprites are on the GPU only (see textureOf): if it loses them, start the page afresh.
+    app.canvas.addEventListener("webglcontextlost", () => location.reload());
+    return app;
+  })();
+  return shared;
+}
+
 /** The world: one per scene. Everything in pack px under the camera. */
 export class World {
   private readonly lit = new Container();
@@ -826,7 +898,9 @@ export class World {
   private readonly camera = new Container();
   /** The base-level tiles, below everything, back to front. */
   private readonly ground = new Container({ isRenderGroup: true, sortableChildren: true });
-  private readonly nests = new Graphics();
+  /** The nests: one picture of a nest per size, drawn once (see nestPicture). */
+  private readonly nests = new Container();
+  private readonly nestPictures = new Map<number, { texture: Texture; x: number; y: number }>();
   /** Raised blocks, bridges, decor and blobs, by depth. */
   private readonly sorted = new Container({ sortableChildren: true });
   private readonly dots = new Container();
@@ -877,24 +951,13 @@ export class World {
     });
   }
 
+  /** A world drawn into `host`, on the app's one renderer. */
   static async create(host: HTMLElement): Promise<World> {
-    const app = new Application();
-    await app.init({
-      preference: "webgl",
-      backgroundAlpha: 0,
-      antialias: true,
-      autoDensity: true,
-      resolution: window.devicePixelRatio || 1,
-      width: host.clientWidth || 1,
-      height: host.clientHeight || 1,
-      autoStart: false,
-      sharedTicker: false,
-    });
-    // The scene draws a frame when it has one to draw: no ticker of Pixi's own.
-    app.ticker.stop();
-    app.canvas.className = "pointer-events-none absolute inset-0";
+    const app = await sharedApp();
     host.prepend(app.canvas);
-    return new World(app);
+    // At this screen's density: the window may have moved to another since the last scene.
+    app.renderer.resize(Math.max(1, host.clientWidth), Math.max(1, host.clientHeight), window.devicePixelRatio || 1);
+    return (shownBy = new World(app));
   }
 
   resize(w: number, h: number) {
@@ -920,28 +983,52 @@ export class World {
     await Promise.all([...srcs].map(([src, w]) => textureOf(src, w)));
     if (generation !== this.generation) return;
     const keys = [...this.mounted.keys()];
-    for (const key of keys) this.unmount(key);
-    this.bake?.destroy({ texture: true, textureSource: true });
-    this.bake = null;
+    this.unmount(keys);
+    this.dropBake();
     this.chunks = chunks;
     this.island = island;
-    // Baked now, with every texture at hand, so the map shows at once when asked for.
-    this.bakeIsland();
+    // Back to front, for the map's picture: sorted now, while the island loads, rather than when zooming out.
+    this.bakeOrder = chunks.size * CHUNK * CHUNK > MAP_CELLS ? [...chunks.values()].flatMap((c) => c.items).sort((a, b) => a.z - b.z || a.seq - b.seq) : [];
     // The nests, flat on the ground over exactly the squares blobs sleep in.
-    this.nests.clear();
+    for (const sprite of this.nests.removeChildren()) sprite.destroy();
     const tiles = layout.size;
     for (const nest of nests) {
       const at = island.at(nest.x * tiles, nest.y * tiles);
-      drawNest(this.nests, at.x, at.y + nest.r * tiles * HALF_H * 0.15, nest.r * 2 * tiles * 2 * HALF_W + 40);
+      const picture = this.nestPicture(Math.round(nest.r * 2 * tiles * 2 * HALF_W + 40));
+      const sprite = new Sprite(picture.texture);
+      sprite.position.set(at.x + picture.x, at.y + nest.r * tiles * HALF_H * 0.15 + picture.y);
+      this.nests.addChild(sprite);
     }
     for (const key of keys) if (chunks.has(key)) this.mount(key);
     if (this.map) this.setMap(true);
   }
 
+  /**
+   * A nest `w` pack px wide, as a picture (and where its top-left corner is
+   * from the nest's centre), at a texel per pack px like the ground. Drawn
+   * as shapes, a nest is ~14 000 triangle corners kept in memory and packed
+   * again whenever the scene's drawing order changes; as a picture, four.
+   */
+  private nestPicture(w: number) {
+    let picture = this.nestPictures.get(w);
+    if (!picture) {
+      const g = new Graphics();
+      drawNest(g, 0, 0, w);
+      const bounds = g.getLocalBounds();
+      const texture = this.app.renderer.generateTexture({ target: g, resolution: 1, antialias: true, textureSourceOptions: { autoGenerateMipmaps: true } });
+      // Shown shrunk from afar: its smaller copies are made from what was drawn.
+      texture.source.updateMipmaps();
+      g.destroy();
+      picture = { texture, x: bounds.x, y: bounds.y };
+      this.nestPictures.set(w, picture);
+    }
+    return picture;
+  }
+
   /** Mounts the chunks in `keys` and drops the rest. */
   showChunks(keys: Iterable<string>) {
     const want = new Set(keys);
-    for (const key of [...this.mounted.keys()]) if (!want.has(key)) this.unmount(key);
+    this.unmount([...this.mounted.keys()].filter((key) => !want.has(key)));
     for (const key of want) if (!this.mounted.has(key)) this.mount(key);
   }
 
@@ -974,38 +1061,85 @@ export class World {
     });
   }
 
-  private unmount(key: string) {
-    for (const sprite of this.mounted.get(key) ?? []) sprite.destroy();
-    this.mounted.delete(key);
+  /**
+   * Drops chunks. Their sprites are sorted to the end of their layers and cut
+   * off in one go: taken out one by one, each would be looked for among
+   * thousands of others.
+   */
+  private unmount(keys: string[]) {
+    const gone = keys.flatMap((key) => this.mounted.get(key) ?? []);
+    for (const key of keys) this.mounted.delete(key);
+    if (!gone.length) return;
+    for (const sprite of gone) sprite.zIndex = Infinity;
+    for (const layer of [this.ground, this.sorted]) {
+      layer.sortChildren();
+      const first = layer.children.findIndex((child) => child.zIndex === Infinity);
+      if (first >= 0) layer.removeChildren(first);
+    }
+    for (const sprite of gone) sprite.destroy();
   }
 
   /** The zoomed-out map: the baked island and a dot per blob, instead of chunks and blobatars. */
   setMap(map: boolean) {
     this.map = map;
     this.dots.visible = map;
+    // Asked for before its picture was made in the background (a jump straight out): made now, at once.
+    if (map) while (!this.bakeSome(Infinity));
     if (this.bake) this.bake.visible = map;
   }
 
-  /** The whole island in one picture, for the map. Only big islands have a map. */
-  private bakeIsland() {
+  /**
+   * Whether the camera is zoomed out far (the map is near): the map's picture
+   * is then made, a slice a frame, and let go of after a while back close up.
+   * It's ~120 MB of video memory most players never zoom out for.
+   */
+  wantMap(want: boolean) {
+    this.mapWanted = want;
+  }
+  private mapWanted = false;
+  private mapWantedAt = -Infinity;
+  private bakeOrder: TerrainItem[] = [];
+  private baking: { target: RenderTexture; items: TerrainItem[]; done: number; scale: number } | null = null;
+
+  /**
+   * Draws up to `count` more of the island's sprites into the map's picture,
+   * back to front, and shows it once they're all in. Whether it's made (or
+   * not needed: only big islands have a map).
+   */
+  private bakeSome(count: number): boolean {
     const island = this.island;
-    if (!island || this.chunks.size * CHUNK * CHUNK <= MAP_CELLS) return;
-    const scale = Math.min(BAKE_PX / island.w, BAKE_PX / island.h);
-    const target = RenderTexture.create({ width: Math.round(island.w * scale), height: Math.round(island.h * scale), autoGenerateMipmaps: true });
-    const items = [...this.chunks.values()].flatMap((c) => c.items).sort((a, b) => a.z - b.z || a.seq - b.seq);
+    if (this.bake) return true;
+    if (!island || this.chunks.size * CHUNK * CHUNK <= MAP_CELLS) return true;
+    if (!this.baking) {
+      const scale = Math.min(BAKE_PX / island.w, BAKE_PX / island.h);
+      const target = RenderTexture.create({ width: Math.round(island.w * scale), height: Math.round(island.h * scale), autoGenerateMipmaps: true });
+      this.baking = { target, items: this.bakeOrder, done: 0, scale };
+    }
+    const { target, items, done, scale } = this.baking;
+    // Every texture was loaded with the terrain.
+    const slice = new Container();
+    for (const item of items.slice(done, done + count)) slice.addChild(terrainSprite(item, loadedTextures.get(item.src) ?? Texture.EMPTY));
+    slice.scale.set(scale);
+    this.app.renderer.render({ container: slice, target, clear: done === 0 });
+    slice.destroy({ children: true });
+    this.baking.done = Math.min(items.length, done + count);
+    if (this.baking.done < items.length) return false;
+    // Shown shrunk: the smaller copies the GPU reads from have to be made again from what was drawn.
+    target.source.updateMipmaps();
+    this.baking = null;
     const bake = new Sprite(target);
     bake.scale.set(1 / scale);
     bake.visible = this.map;
     this.bake = bake;
     this.camera.addChildAt(bake, 0);
-    // Every texture was loaded with the terrain.
-    const all = new Container();
-    for (const item of items) all.addChild(terrainSprite(item, loadedTextures.get(item.src) ?? Texture.EMPTY));
-    all.scale.set(scale);
-    this.app.renderer.render({ container: all, target, clear: true });
-    // Shown shrunk: the smaller copies the GPU reads from have to be made again from what was drawn.
-    target.source.updateMipmaps();
-    all.destroy({ children: true });
+    return true;
+  }
+
+  private dropBake() {
+    this.bake?.destroy({ texture: true, textureSource: true });
+    this.bake = null;
+    this.baking?.target.destroy(true);
+    this.baking = null;
   }
 
   /** Screen px per pack px, and where pack (0, 0) lands on screen. */
@@ -1113,17 +1247,39 @@ export class World {
     return best;
   }
 
-  render() {
+  private sortedAt = 0;
+  private upkeptAt = 0;
+
+  /** Draws a frame, at `now` (performance clock). */
+  render(now: number) {
+    if (now - this.sortedAt >= SORT_MS) {
+      this.sortedAt = now;
+      for (const view of this.blobs.values()) view.root.zIndex = view.depth;
+    }
+    if (this.mapWanted) {
+      this.mapWantedAt = now;
+      this.bakeSome(BAKE_SLICE);
+    } else if (this.bake && !this.map && now - this.mapWantedAt > BAKE_KEEP_MS) this.dropBake();
+    if (now - this.upkeptAt >= UPKEEP_MS) {
+      this.upkeptAt = now;
+      Ticker.system.update(now);
+    }
     this.app.renderer.render(this.app.stage);
   }
 
   destroy() {
     this.generation++;
-    for (const key of [...this.mounted.keys()]) this.unmount(key);
+    this.unmount([...this.mounted.keys()]);
     for (const view of this.blobs.values()) view.destroy();
-    this.bake?.destroy({ texture: true, textureSource: true });
+    this.dropBake();
+    for (const { texture } of this.nestPictures.values()) texture.destroy(true);
     this.sky.destroy();
-    // Shared textures and shapes stay loaded, for the next world.
-    this.app.destroy({ removeView: true }, { children: true });
+    this.night.destroy();
+    // Shared textures and shapes stay loaded, and the renderer up, for the next world.
+    this.lit.destroy({ children: true });
+    if (shownBy === this) {
+      this.app.canvas.remove();
+      shownBy = null;
+    }
   }
 }

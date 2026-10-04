@@ -87,14 +87,17 @@ export function alongPath(path: readonly GroundPoint[], e: number): GroundPoint 
  * stroll slows by as much (so blobs keep their pace across the tiles) and
  * explore stops stay that much nearer each other instead of criss-crossing
  * the whole map.
+ *
+ * The leg holds until `until`; till then only `e` moves, walked from `start`
+ * over `ms` (eased): a renderer can keep the rest and work `e` out itself.
  */
-export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = same, zoom = 1, route: Route = straight): { from: GroundPoint; to: GroundPoint; e: number } {
+export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = same, zoom = 1, route: Route = straight): Leg {
   const end = snap({ x: seg.x, y: seg.y });
   const local = Math.max(0, t - seg.start);
   const length = Math.max(1, seg.end - seg.start);
   if (seg.activity !== "explore") {
     const walk = walkMs(seg, from, end, zoom, route);
-    return { from, to: end, e: walk <= 0 ? 1 : smoothstep(Math.min(1, local / walk)) };
+    return { from, to: end, e: walk <= 0 ? 1 : smoothstep(Math.min(1, local / walk)), start: seg.start, ms: walk, until: seg.end };
   }
   const legs = Math.max(1, Math.round(length / LEG_MS));
   const legMs = length / legs;
@@ -120,7 +123,31 @@ export function legIn(seg: Segment, from: GroundPoint, t: number, snap: Snap = s
   const before = k > 0 ? draw() : null;
   const mine = draw();
   const prev = before ? stopAt(k - 1, before) : from;
-  return { from: prev, to: stopAt(k, mine), e: smoothstep(Math.min(1, (local - k * legMs) / legMs / mine[2])) };
+  return {
+    from: prev,
+    to: stopAt(k, mine),
+    e: smoothstep(Math.min(1, (local - k * legMs) / legMs / mine[2])),
+    start: seg.start + k * legMs,
+    ms: legMs * mine[2],
+    until: k === legs - 1 ? seg.end : seg.start + (k + 1) * legMs,
+  };
+}
+
+/** One walk of a segment (see legIn). */
+export interface Leg {
+  from: GroundPoint;
+  to: GroundPoint;
+  /** How far along at the `t` asked for, eased, in [0, 1]. */
+  e: number;
+  /** When the walk starts, and how long it takes (ms): `e` at any time before `until`. */
+  start: number;
+  ms: number;
+  until: number;
+}
+
+/** `e` of a leg at `t`. */
+export function legProgress(leg: Pick<Leg, "start" | "ms">, t: number): number {
+  return leg.ms <= 0 ? 1 : smoothstep(Math.min(1, Math.max(0, t - leg.start) / leg.ms));
 }
 
 /** How long a blob takes to walk to `end` at the start of `seg` (not an
@@ -134,13 +161,23 @@ export function walkMs(seg: Segment, from: GroundPoint, end: GroundPoint, zoom =
 /** The segment running at `t` (the last one begun), and where the blob stood
  * when it began. `segments` are one blob's, sorted by start. */
 export function segmentAt(segments: readonly Segment[], t: number, snap: Snap = same): { seg: Segment; from: GroundPoint } | null {
-  let i = segments.length - 1;
-  while (i > 0 && segments[i]!.start > t) i--;
+  const i = segmentIndex(segments, t);
   const seg = segments[i];
   if (!seg) return null;
   const before = segments[i - 1];
   // Without the one before (the start of a fetched window), it began where it ends.
   return { seg, from: snap(before ? { x: before.x, y: before.y } : { x: seg.x, y: seg.y }) };
+}
+
+/** The segment running at `t` alone (see segmentAt), for a renderer asking every frame. */
+export function segmentNow(segments: readonly Segment[], t: number): Segment | undefined {
+  return segments[segmentIndex(segments, t)];
+}
+
+function segmentIndex(segments: readonly Segment[], t: number): number {
+  let i = segments.length - 1;
+  while (i > 0 && segments[i]!.start > t) i--;
+  return i;
 }
 
 /** Where the blob stands at `t`, played back from its stored segments.

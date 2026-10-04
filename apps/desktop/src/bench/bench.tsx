@@ -104,7 +104,7 @@ interface Result {
   meanMs: number;
   p95Ms: number;
   maxMs: number;
-  /** Share of frames over 20 ms: the ones that show as stutter. */
+  /** Share of frames over 12 ms: at 120 Hz, a frame missed, which shows as stutter. */
   jank: number;
   /** The scene's own work per frame: moving everyone (ms), drawing (ms), and how many frames it drew. */
   tickMs: number;
@@ -161,7 +161,7 @@ async function sample(name: string, ms: number, act?: (elapsed: number, n: numbe
     meanMs: round(total / gaps.length),
     p95Ms: round(sorted[Math.floor(sorted.length * 0.95)]!),
     maxMs: round(sorted[sorted.length - 1]!),
-    jank: round((100 * gaps.filter((g) => g > 20).length) / gaps.length),
+    jank: round((100 * gaps.filter((g) => g > 12).length) / gaps.length),
     tickMs: round(profile.tickMs / (profile.renders || 1)),
     renderMs: round(profile.renderMs / (profile.renders || 1)),
     drawnPct: Math.round((100 * profile.renders) / (profile.ticks || 1)),

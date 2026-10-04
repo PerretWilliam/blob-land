@@ -64,9 +64,11 @@ let last = null;
 const timer = setInterval(() => {
   const ours = processes().filter((p) => p.pid === app.pid || (isWebKit(p) && !before.has(p.pid)));
   const mb = (match) => ours.filter((p) => p.comm.includes(match)).reduce((s, p) => s + p.rss, 0) / 1024;
-  const now = { at: Date.now(), rssMB: ours.reduce((s, p) => s + p.rss, 0) / 1024, webMB: mb("WebContent"), gpuMB: mb("WebKit.GPU"), cpuS: ours.reduce((s, p) => s + p.cpu, 0) };
-  // CPU %, from the CPU time used since the last sample (100 = one core).
-  if (last) samples.push({ at: now.at, rssMB: now.rssMB, webMB: now.webMB, gpuMB: now.gpuMB, cpu: (100 * (now.cpuS - last.cpuS) * 1000) / (now.at - last.at) });
+  const cpuS = (match) => ours.filter((p) => p.comm.includes(match)).reduce((s, p) => s + p.cpu, 0);
+  const now = { at: Date.now(), rssMB: ours.reduce((s, p) => s + p.rss, 0) / 1024, webMB: mb("WebContent"), gpuMB: mb("WebKit.GPU"), cpuS: ours.reduce((s, p) => s + p.cpu, 0), webS: cpuS("WebContent"), gpuS: cpuS("WebKit.GPU") };
+  // CPU %, from the CPU time used since the last sample (100 = one core): in all, and the page's and the GPU process's share.
+  const pct = (key) => (100 * (now[key] - last[key]) * 1000) / (now.at - last.at);
+  if (last) samples.push({ at: now.at, rssMB: now.rssMB, webMB: now.webMB, gpuMB: now.gpuMB, cpu: pct("cpuS"), webCpu: pct("webS"), gpuCpu: pct("gpuS") });
   last = now;
 }, EVERY_MS);
 
@@ -100,6 +102,9 @@ const rows = report.results.map((r) => {
     view: r.view,
     names: r.shown,
     "CPU %": during.length ? round(during.reduce((s, x) => s + x.cpu, 0) / during.length) : null,
+    // Of which the page (JS, DOM, layout) and WebKit's GPU process (WebGL, compositing).
+    "page CPU": during.length ? round(during.reduce((s, x) => s + x.webCpu, 0) / during.length) : null,
+    "GPU CPU": during.length ? round(during.reduce((s, x) => s + x.gpuCpu, 0) / during.length) : null,
     "RAM MB": during.length ? Math.round(Math.max(...during.map((s) => s.rssMB))) : null,
     // Of which the page (JS, DOM, images) and WebKit's GPU process (WebGL, compositing).
     "page MB": during.length ? Math.round(Math.max(...during.map((s) => s.webMB))) : null,

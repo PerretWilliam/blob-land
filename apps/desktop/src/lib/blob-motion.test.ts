@@ -25,6 +25,11 @@ const close = (a: Affine, b: Affine) => {
 };
 
 describe("blob motion", () => {
+  it("multiplies out nested transforms as the nesting would", () => {
+    const inner = new Affine().scale(2, 0.5).rotate(-12).translate(3, 4);
+    close(new Affine().translate(1, 2).rotate(30).append(inner), new Affine().translate(1, 2).rotate(30).scale(2, 0.5).rotate(-12).translate(3, 4));
+  });
+
   it("moves the eyes exactly as blobatar's own idle layer does", () => {
     for (const seed of ["alain", "bench-3", "zoé", "🦊"]) {
       const figure = _posed(seed);
