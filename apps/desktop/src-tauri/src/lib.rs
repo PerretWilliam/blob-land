@@ -11,6 +11,32 @@ fn quit(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// WebKit draws pages at 60 fps at most, even on a 120 Hz screen, unless its
+/// "PreferPageRenderingUpdatesNear60FPS" feature is turned off. Only reachable
+/// through WKPreferences' private feature list, so a missing feature is skipped.
+#[cfg(target_os = "macos")]
+fn unlock_frame_rate(window: &tauri::WebviewWindow) {
+    use objc2::{msg_send, runtime::{AnyClass, AnyObject, Bool}};
+    use objc2_foundation::{NSArray, NSString};
+    let _ = window.with_webview(|webview| unsafe {
+        let Some(class) = AnyClass::get(c"WKPreferences") else { return };
+        let wk = webview.inner() as *mut AnyObject;
+        // The configuration is a copy, but shares the live preferences object.
+        let config: *mut AnyObject = msg_send![wk, configuration];
+        let prefs: *mut AnyObject = msg_send![config, preferences];
+        let features: *mut NSArray<AnyObject> = msg_send![class, _features];
+        if prefs.is_null() || features.is_null() {
+            return;
+        }
+        for feature in (*features).iter() {
+            let key: *mut NSString = msg_send![&*feature, key];
+            if !key.is_null() && (*key).to_string() == "PreferPageRenderingUpdatesNear60FPSEnabled" {
+                let _: () = msg_send![prefs, _setEnabled: Bool::NO, forFeature: &*feature];
+            }
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -25,6 +51,10 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![quit])
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                unlock_frame_rate(&window);
+            }
             // Tray: left-click shows/focuses the main window, "Quit" actually exits.
             // Closing the window instead hides it (see on_window_event below) so the
             // blob keeps living in the background.

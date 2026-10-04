@@ -1,6 +1,6 @@
 import { ATTRACTIONS, SEXES, type Attraction, type Identity, type Sex } from "@blob-land/sim";
 import { Blobatar } from "@blobatar/react";
-import { blobatar } from "blobatar";
+import { _posed } from "blobatar/internal";
 import type { ReactNode } from "react";
 import { useT } from "@/i18n";
 
@@ -18,33 +18,89 @@ const anchors = new Map<string, Anchor | null>();
 /**
  * Samples the outline of the blob's body — every shape blobatar draws for
  * it — and finds the top of its head. Blobs come in ten silhouettes, rotated
- * and squashed, so the top is measured, not assumed. Measured on a throwaway
- * copy of the blob's SVG: the one on screen may be an <img>, or not drawn yet.
- * `offset` slides along the head (negative = to the left), for a bow worn
- * on the side.
+ * and squashed, so the top is measured, not assumed. `offset` slides along
+ * the head (negative = to the left), for a bow worn on the side.
  */
 function measure(seed: string, offset: number): Anchor | null {
-  const box = document.createElement("div");
-  box.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
-  box.innerHTML = blobatar(seed);
-  document.body.append(box);
-  try {
-    return measureBody(box.querySelector("g[fill]"), offset);
-  } finally {
-    box.remove();
-  }
+  return measureBody(_posed(seed).marks.flatMap((mark) => (mark.kind === "circle" ? circlePoints(mark.cx, mark.cy, mark.r) : pathPoints(mark.d))), offset);
 }
 
-function measureBody(body: Element | null, offset: number): Anchor | null {
-  if (!body) return null;
-  const points: { x: number; y: number }[] = [];
-  for (const el of body.querySelectorAll<SVGGeometryElement>("path, circle, ellipse, rect")) {
-    const length = el.getTotalLength();
-    for (let i = 0; i < 96; i++) {
-      const p = el.getPointAtLength((length * i) / 96);
-      points.push({ x: p.x, y: p.y });
+// Points sampled along each shape, evenly by length (as SVG's getPointAtLength would).
+const SAMPLES = 96;
+
+function circlePoints(cx: number, cy: number, r: number): { x: number; y: number }[] {
+  return Array.from({ length: SAMPLES }, (_, i) => ({ x: cx + r * Math.cos((2 * Math.PI * i) / SAMPLES), y: cy + r * Math.sin((2 * Math.PI * i) / SAMPLES) }));
+}
+
+/** A path of absolute M, L, H, V, Q, C and Z, as blobatar writes them: curves are cut into short lines first. */
+function pathPoints(d: string): { x: number; y: number }[] {
+  const line: { x: number; y: number }[] = [];
+  const tokens = d.match(/[A-Za-z]|-?[\d.]+(?:e-?\d+)?/g) ?? [];
+  let [x, y, x0, y0] = [0, 0, 0, 0];
+  let command = "";
+  for (let k = 0; k < tokens.length; ) {
+    if (/[A-Za-z]/.test(tokens[k]!)) command = tokens[k++]!;
+    const n = () => Number(tokens[k++]);
+    switch (command) {
+      case "M":
+        [x, y] = [n(), n()];
+        [x0, y0] = [x, y];
+        line.push({ x, y });
+        command = "L";
+        break;
+      case "L":
+        [x, y] = [n(), n()];
+        line.push({ x, y });
+        break;
+      case "H":
+        x = n();
+        line.push({ x, y });
+        break;
+      case "V":
+        y = n();
+        line.push({ x, y });
+        break;
+      case "Q": {
+        const [cx, cy, ex, ey] = [n(), n(), n(), n()];
+        for (let i = 1; i <= 32; i++) {
+          const t = i / 32;
+          line.push({ x: (1 - t) ** 2 * x + 2 * (1 - t) * t * cx + t * t * ex, y: (1 - t) ** 2 * y + 2 * (1 - t) * t * cy + t * t * ey });
+        }
+        [x, y] = [ex, ey];
+        break;
+      }
+      case "C": {
+        const [c1x, c1y, c2x, c2y, ex, ey] = [n(), n(), n(), n(), n(), n()];
+        for (let i = 1; i <= 32; i++) {
+          const [t, u] = [i / 32, 1 - i / 32];
+          line.push({ x: u ** 3 * x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t ** 3 * ex, y: u ** 3 * y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t ** 3 * ey });
+        }
+        [x, y] = [ex, ey];
+        break;
+      }
+      case "Z":
+        [x, y] = [x0, y0];
+        line.push({ x, y });
+        command = "";
+        break;
+      default:
+        k++;
     }
   }
+  const reach = [0];
+  for (let i = 1; i < line.length; i++) reach.push(reach[i - 1]! + Math.hypot(line[i]!.x - line[i - 1]!.x, line[i]!.y - line[i - 1]!.y));
+  const length = reach[reach.length - 1] ?? 0;
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0, j = 1; i < SAMPLES && line.length > 1; i++) {
+    const at = (length * i) / SAMPLES;
+    while (j < line.length - 1 && reach[j]! < at) j++;
+    const f = reach[j]! === reach[j - 1]! ? 0 : (at - reach[j - 1]!) / (reach[j]! - reach[j - 1]!);
+    points.push({ x: line[j - 1]!.x + (line[j]!.x - line[j - 1]!.x) * f, y: line[j - 1]!.y + (line[j]!.y - line[j - 1]!.y) * f });
+  }
+  return points;
+}
+
+function measureBody(points: { x: number; y: number }[], offset: number): Anchor | null {
   if (points.length === 0) return null;
   // The highest point, then the middle of the flat-ish crown around it.
   const top = Math.min(...points.map((p) => p.y));

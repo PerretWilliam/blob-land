@@ -1,4 +1,4 @@
-import { activityLog, gaitOf, gardenSize, segmentAt, type Spell } from "@blob-land/sim";
+import { activityLog, gaitOf, gardenSize, segmentNow, type Spell } from "@blob-land/sim";
 import {
   BookOpen,
   Check,
@@ -137,7 +137,7 @@ export function GardenScreen({
   // A garden blob as the scene draws it: its face and activity right now, off its timeline.
   const fromGarden = (blob: GardenBlob, label = blob.pseudo ?? t.common.aNewBlob): SceneBlob => {
     const { expression, activity } = blobStateAt(blob.segments, gardenNow);
-    const withSeed = segmentAt(blob.segments, gardenNow)?.seg.with;
+    const withSeed = segmentNow(blob.segments, gardenNow)?.with;
     return {
       seed: blob.seed,
       label,

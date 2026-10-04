@@ -7,8 +7,8 @@ the garden is drawn or served is measured against this.
 
 | | Target |
 |---|---|
-| Frame rate | 60 fps on a 128×128 island with 450 blobs — zooming, following a blob, panning fast — release build |
-| Stutter | under 1 % of frames over 20 ms |
+| Frame rate | the screen's own rate up to ~120 fps (120 on a ProMotion Mac; a 240 Hz screen gets every other frame), on a 128×128 island with 450 blobs — zooming, following a blob, panning fast — release build |
+| Stutter | under 1 % of frames over 12 ms (a frame missed at 120 Hz) |
 | CPU while nothing is asked of it (map view, window in the background) | under 5 % |
 | RAM (app + its WebKit processes) | under 300 MB |
 | API | 10 000 blobs without slowing down, `/garden` under 50 ms, no lost data when a step fails |
@@ -30,11 +30,13 @@ sky's busiest: 200 raindrops, lightning, the grey gloom's filter): close up, the
 widest view still drawn blob by blob, panning there, the map, a slow zoom
 sweep across the switch to the map, and (by day) a zoom jump, following a
 blob, letting go and a fast pan. The page times every frame and the scene's
-own work in it (`move ms`, `draw ms`, and how many frames it actually drew),
+own work in it (`move ms`, `draw ms`, and how many frames it actually drew;
+`jank %` is the share of frames over 12 ms, a frame missed at 120 Hz),
 and says which view each scenario ended in (`near` with names, `far` without,
 `map` with dots) and how many names were shown; `scripts/bench.mjs` samples
 CPU and RAM of the app and its WebKit processes from outside, split into the
-page (JS, DOM, images) and WebKit's GPU process (WebGL, compositing). macOS
+page (JS, DOM, images) and WebKit's GPU process (WebGL, compositing), for
+RAM and CPU alike (100 % CPU is one core busy). macOS
 only; keep its window in front while it runs, as a hidden webview slows its
 frames down. `VITE_BENCH_SIZE` and `VITE_BENCH_N` change the island and the crowd.
 
@@ -230,3 +232,59 @@ on every row, the walking ones included, which draw no weather (a January noon,
 clear): the run-to-run spread, mostly, and the leak the performance phase is
 for. Two runs timed out first, with the Browser pane open over the bench
 window; closing it, the third finished.
+
+## 120 fps — 2026-10-04
+
+WebKit drew at 60 fps at most, even on a 120 Hz screen: its "prefer page
+rendering updates near 60 fps" feature is now turned off at start (see
+DECISIONS.md). At 120 fps a frame has 8.3 ms, so the work per frame was cut
+down, profiled scenario by scenario:
+
+- A blob's walk is worked out once per leg (routes, snapped stops, meeting
+  places) and only played along after: `targets` went from 1.9–3.9 ms to
+  0.2–0.4 ms a frame for 450 blobs.
+- Walking blobs changed the depth order every frame, which makes Pixi rebuild
+  and repack everything it draws: their depths now apply 20 times a second.
+- The nests were shapes, 785 000 triangle corners kept in memory and repacked
+  with every new order: now one picture, drawn once.
+- Pixi ran a frame loop of its own for its upkeep: now once a second, from the scene's.
+- A blob's nested transforms are multiplied out (3 per blob instead of 7),
+  its pose is kept once a change of expression has played, and its shapes,
+  poses and sign are worked out ahead, a few blobs at a time.
+- Measuring where a sign sits went through the DOM (`getPointAtLength`), up to
+  ~7 ms a blob the first time it came into view, 770 ms for a crowd: now
+  sampled in JS, 0.05 ms, the same anchors within a hundredth of a blob.
+- Chunks are dropped in one go, labels re-render only when what they show
+  changes and between frames, and the timelines map stays the same while the
+  timelines do.
+- One renderer for the app's life; a sprite's pixels on the GPU only; the
+  map's picture made on demand, a slice a frame, and let go of after half a
+  minute close up.
+
+Release build, M4 Pro, ProMotion screen. Before: the weather run (2026-10-03,
+capped at 60), then the same code with the cap lifted; after: this branch.
+
+| Scenario | fps 60 cap → lifted → after | jank % (>12 ms) after | CPU % 60 cap → lifted → after | RAM MB 60 cap → lifted → after |
+|---|---|---|---|---|
+| walking: close up | 60 → 120 → 120 | 0 | 28 → 41 → 32 | 1041 → 1001 → 721 |
+| walking: widest before map | – → 120 → 120 | 0 | – → 88 → 64 | – → 1006 → 726 |
+| walking: widest, pan | 57.8 → 111 → 118 | 1.1 | 57 → 81 → 67 | 1175 → 1068 → 804 |
+| walking: map | – → 120 → 120 | 0 | – → 35 → 29 | – → 1067 → 825 |
+| walking: follow a blob | – → 120 → 120 | 0 | – → 38 → 27 | – → 1125 → 865 |
+| talking: widest before map | 60 → 99 → 120 | 0 | 72 → 114 → 76 | 1302 → 1202 → 886 |
+| talking: widest, pan | – → 114.5 → 117.8 | 1.3 | – → 88 → 73 | – → 1254 → 890 |
+| night (storm): widest, pan | 60 → 113.3 → 117.8 | 1.7 | 58 → 89 → 75 | 1509 → 1303 → 893 |
+| peak RAM | 1509 → 1368 → 896 | | | |
+
+- **Frames**: 120 fps everywhere but the fast pans at the widest zoom, 118
+  with 1–2 % of frames late (the longest ~30 ms, as new ground and blobs come
+  into view); the worst hitch went from 233 ms to ~30 ms. The scene's own work
+  is 0.1–2.5 ms a frame (from 1–7 ms).
+- **CPU**: twice the frames for about the CPU 60 fps took. What's left is
+  mostly WebKit's: of 64–76 % at the widest, ~40–48 points are the page
+  process (our JS is ~24 of them) and ~20–28 the GPU process; close up,
+  ~17 + 10.
+- **RAM**: 896 MB at peak, from 1.37 GB with the cap lifted (1.51 GB before):
+  the GPU process went from ~360–470 MB to ~245–270 MB, the page from
+  ~500–770 MB to ~330–510 MB. The page still grows over a run (JS engine
+  memory kept after bursts of allocations), and a bare window costs ~230 MB.

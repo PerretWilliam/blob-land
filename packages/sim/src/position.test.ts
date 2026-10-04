@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstSegment, liveThrough, nextSolo, type Segment } from "./life";
-import { gardenSize, legIn, MAX_GARDEN, MIN_GARDEN, NEST, positionOn, REGION_CAP } from "./position";
+import { gardenSize, legIn, legProgress, MAX_GARDEN, MIN_GARDEN, NEST, positionOn, REGION_CAP } from "./position";
 import { seededRng } from "./rng";
 
 const T0 = Date.UTC(2026, 8, 25, 8);
@@ -93,5 +93,17 @@ describe("legIn", () => {
     }
     // The whole way is 1.13: a leg is its share of it, and a wander of at most 1 / zoom either way.
     expect(longest).toBeLessThan(0.15);
+  });
+
+  it("keeps a leg the same until it says, and its progress follows from start and ms", () => {
+    const explore: Segment = { start: T0, end: T0 + 10 * 60_000, activity: "explore", expression: "idle", x: 0.9, y: 0.9, rng: 7, with: null, detail: null };
+    for (const seg of [explore, meet]) {
+      for (let t = seg.start; t < seg.end; t += 3_700) {
+        const leg = legIn(seg, { x: 0.1, y: 0.2 }, t, undefined, 4);
+        expect(legProgress(leg, t)).toBeCloseTo(leg.e, 6);
+        const later = legIn(seg, { x: 0.1, y: 0.2 }, Math.min(leg.until - 1, t + 2_000), undefined, 4);
+        expect([later.from, later.to, later.start, later.ms]).toEqual([leg.from, leg.to, leg.start, leg.ms]);
+      }
+    }
   });
 });

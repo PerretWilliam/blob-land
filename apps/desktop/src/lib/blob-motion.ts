@@ -70,6 +70,11 @@ export class Affine {
     return this;
   }
 
+  /** Another transform, applied inside this one (an SVG group in a group). */
+  append(m: Affine): this {
+    return this.mul(m.a, m.b, m.c, m.d, m.e, m.f);
+  }
+
   translate(x: number, y: number): this {
     return this.mul(1, 0, 0, 1, x, y);
   }
@@ -77,7 +82,8 @@ export class Affine {
   /** Degrees, clockwise on screen, like SVG and CSS. */
   rotate(deg: number): this {
     const r = (deg * Math.PI) / 180;
-    const [cos, sin] = [Math.cos(r), Math.sin(r)];
+    const cos = Math.cos(r);
+    const sin = Math.sin(r);
     return this.mul(cos, sin, -sin, cos, 0, 0);
   }
 
