@@ -24,6 +24,7 @@ import {
   CORNERS,
   DECOR_KINDS,
   EDGES,
+  isSunken,
   OPPOSITE_EDGE,
   rampDirection,
   rampInside,
@@ -370,9 +371,20 @@ function terrainOf(layout: IslandLayout, island: IslandGeometry): Map<string, Ch
   };
   const items: TerrainItem[] = [];
   const add = (item: Omit<TerrainItem, "seq">) => items.push({ ...item, seq: items.length });
+  // Whether the cell at (i, j) has a whole block at `level`, in front of a
+  // block of its neighbour's there (water's surface sits lower than a block's).
+  const fills = (i: number, j: number, level: number) => {
+    const cell = cellAt(layout, i, j);
+    const height = cell?.height ?? 0;
+    return !!cell && (height > level || (height === level && !isSunken(cell.ground)));
+  };
   for (const { i, j } of cells) {
     if (openSea(i, j)) continue;
-    cellStack(layout, i, j).forEach((src, level) => {
+    const stack = cellStack(layout, i, j);
+    stack.forEach((src, level) => {
+      // A block under another, with blocks in front of both its sides, is
+      // never seen: under a hill, only the top and the cliffs are drawn.
+      if (level < stack.length - 1 && fills(i + 1, j, level) && fills(i, j + 1, level)) return;
       const at = island.at(i, j, level);
       // Shift so the image's top vertex (not its corner) lands on the grid point.
       const [x, y] = [at.x - TOP_X, at.y - TOP_Y];

@@ -288,3 +288,30 @@ capped at 60), then the same code with the cap lifted; after: this branch.
   the GPU process went from ~360–470 MB to ~245–270 MB, the page from
   ~500–770 MB to ~330–510 MB. The page still grows over a run (JS engine
   memory kept after bursts of allocations), and a bare window costs ~230 MB.
+
+## Garden relief — 2026-10-04
+
+The garden's islands now have relief (a mountain of up to 7 blocks, hills and
+mesas everywhere, see DECISIONS.md), which stacks more blocks per cell. A
+block under another, with blocks in front of both its sides, is never seen,
+so it is no longer drawn: under a hill, only the top and the cliffs are. On
+the 128×128 island that leaves ~16 500 ground sprites, about what the old
+island drew with its one mountain (~20 400 before the same culling). Laying
+an island out takes ~130 ms in the worker (from ~40 ms): its rivers and roads
+are searched for, not drawn straight.
+
+Release build, M4 Pro, ProMotion screen; before: the 120 fps run above.
+
+| Scenario | fps before → after | CPU % before → after | RAM MB before → after | GPU MB before → after |
+|---|---|---|---|---|
+| walking: close up | 120 → 120 | 32 → 40 | 721 → 739 | 244 → 234 |
+| walking: widest before map | 120 → 120 | 64 → 64 | 726 → 753 | 244 → 237 |
+| walking: widest, pan | 118 → 118.3 | 67 → 66 | 804 → 798 | 251 → 244 |
+| talking: widest before map | 121.8 → 120.2 | 76 → 82 | 886 → 767 | 266 → 137 |
+| night (storm): widest, pan | 117.8 → 117 | 75 → 75 | 893 → 838 | 250 → 180 |
+| peak RAM | 896 → 897 | | | |
+
+Frames are unchanged: 120 fps everywhere but the fast pans at the widest zoom
+(117–118, 1–2 % late). Walks route round more cliffs and water, so moving
+everyone costs a little more on the map (0.9 → 1.6 ms a frame), still well
+inside the frame. CPU and RAM are within a run's spread.

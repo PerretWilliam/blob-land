@@ -1,22 +1,23 @@
 import { useEffect, useState } from "react";
 import type { IslandLayout } from "./island";
 
-// Islands already laid out, by size: the same for everyone, so never twice.
-const laidOut = new Map<number, Promise<IslandLayout>>();
+// Islands already laid out, by region and size: the same for everyone, so never twice.
+const laidOut = new Map<string, Promise<IslandLayout>>();
 
 /**
- * The garden island of side `size`, laid out in a worker: a big one takes a
+ * Region `region`'s garden island of side `size`, laid out in a worker: a big one takes a
  * few hundred milliseconds of heavy arithmetic, which would freeze the page,
  * and the webview's engine keeps the memory that took long after it's done.
  * A worker's goes when it closes. Until it's ready, the last island shown
  * (or null, the first time).
  */
-export function useGardenIsland(size: number | null): IslandLayout | null {
+export function useGardenIsland(size: number | null, region = 0): IslandLayout | null {
   const [island, setIsland] = useState<IslandLayout | null>(null);
   useEffect(() => {
     if (size === null) return;
     let cancelled = false;
-    let job = laidOut.get(size);
+    const key = `${region}:${size}`;
+    let job = laidOut.get(key);
     if (!job) {
       job = new Promise<IslandLayout>((resolve, reject) => {
         const worker = new Worker(new URL("./world-gen.worker.ts", import.meta.url), { type: "module" });
@@ -28,10 +29,10 @@ export function useGardenIsland(size: number | null): IslandLayout | null {
           reject(new Error(e.message));
           worker.terminate();
         };
-        worker.postMessage(size);
+        worker.postMessage({ size, region });
       });
-      job.catch(() => laidOut.delete(size));
-      laidOut.set(size, job);
+      job.catch(() => laidOut.delete(key));
+      laidOut.set(key, job);
     }
     job.then(
       (layout) => !cancelled && setIsland(layout),
@@ -40,6 +41,6 @@ export function useGardenIsland(size: number | null): IslandLayout | null {
     return () => {
       cancelled = true;
     };
-  }, [size]);
+  }, [size, region]);
   return island;
 }
