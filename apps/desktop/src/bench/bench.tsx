@@ -12,7 +12,8 @@
  * VITE_BENCH=1 (see scripts/bench.mjs, which also reads RAM and CPU).
  * `?size=` and `?n=` change the island and the crowd; `?idle` shows it
  * without playing the moves, to look around by hand (`?talk` with everyone
- * talking, `?night` by night, `?rate=20` with garden time 20 times faster).
+ * talking, `?night` by night, `?rate=20` with garden time 20 times faster,
+ * `?region=3` on region 3's island).
  */
 import { GAITS, INTERACTIONS, MAX_GARDEN, playerPseudo, REGION_CAP, seededRng, type Segment } from "@blob-land/sim";
 import { BaseDirectory, mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -27,6 +28,7 @@ const COUNT = Number(params.get("n") ?? import.meta.env.VITE_BENCH_N ?? REGION_C
 const IDLE = params.has("idle");
 // Garden time's pace, like the API's TIME_SCALE in dev.
 const RATE = Number(params.get("rate") ?? 1);
+const REGION = Number(params.get("region") ?? 0);
 // The island the app shows before the server says the garden's size.
 const FIRST_SIZE = 24;
 
@@ -173,7 +175,7 @@ async function sample(name: string, ms: number, act?: (elapsed: number, n: numbe
 export default function Bench() {
   const [blobs] = useState(crowd);
   const [size, setSize] = useState(IDLE ? SIZE : FIRST_SIZE);
-  const layout = useGardenIsland(size);
+  const layout = useGardenIsland(size, REGION);
   const [base, setBase] = useState(params.has("night") ? NIGHT : params.has("talk") ? TALK : WALK);
   const [results, setResults] = useState<Result[] | null>(null);
   // The page without the garden first: what the webview costs on its own.

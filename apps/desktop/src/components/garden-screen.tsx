@@ -161,10 +161,10 @@ export function GardenScreen({
   // Losing the account (or never having one) means there's no garden to show.
   const inGarden = view === "garden" && account !== null;
   // The shared garden is never edited: everyone sees the same generated
-  // island, sized by the server for how many live there.
+  // island, the region's own, sized by the server for how many live there.
   const gardenSide = regions?.size ?? gardenSize(blobs.length);
   const atHome = !regions || regions.region === regions.home;
-  const gardenLayout = useGardenIsland(inGarden ? gardenSide : null);
+  const gardenLayout = useGardenIsland(inGarden ? gardenSide : null, regions?.region);
 
   useEffect(() => {
     if (!menuOpen) return;
