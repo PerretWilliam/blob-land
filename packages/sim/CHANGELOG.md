@@ -1,5 +1,19 @@
 # @blob-land/sim
 
+## 0.4.0
+
+### Minor Changes
+
+- 9b7d9b2: An album of your blob's big moments, in the game menu: its first friend, each best friend, its crushes, couples and children, the friends it made peace with, and its firsts, from a first kiss to a first snowball fight. Each moment is a card with everyone who was there, kept for good.
+- 111d03b: Blobs have more character. Three new traits, kindness, loyalty and curiosity, join the five they had: curious blobs wander and find more, kind ones pick fewer fights and make up sooner, and loyal ones take their time falling in love but stay together through more. Personalities now shape who gets on: playful blobs click, two hotheads clash. A blob in a couple flirts less, and if it does, its sweetheart may not like it. And a best friend is special now: one each, two for the most sociable, and a closer friendship can take that place.
+- b45ec82: Blobs share new moments. A kind blob cheers up a friend who's feeling low, a blob with a deep crush finally confesses (and it may or may not be mutual), friends tease each other and rivals take jabs, a blob shows off what it just found, and a tired couple or pair of best friends naps side by side. Each has its own little show and journal line. The garden now knows every blob's character, ready for the player to shape their own.
+- 1eb13b7: Blobs walk the way their character does: playful ones bounce along, quick-tempered ones stomp, solitary ones take shy little steps, and a few strut proudly. Pick your own blob's walk in Settings, or leave it to its character.
+- d3828dc: Meetings feel alive. Blobs now greet each other with a little hop when they arrive and waddle goodbye before they part. Pairs high-five, chase each other, whisper secrets, give piggyback rides and watch the stars at night, and groups tell stories, sing, play tag, dance in a ring, cheer a friend's find, or share a big group hug when they're all close. Each has its own little show and journal line.
+- 3cca5c7: The garden now moves at your screen's full rate, up to 120 frames a second on a ProMotion Mac, and stays smooth while you pan fast across a crowded island: no more hitches as blobs come into view. It also takes less work and memory to draw.
+- 6376664: Visits, and a blob in one place at a time. Once your blob lives in the garden, it comes home to your island while you're there, and leaves the garden meanwhile. From the game menu, invite up to five other players' blobs over by their pseudo: each leaves the garden for its stay, a few hours or up to two days for a close friend, and everyone goes back when it's over, when you say goodbye or when you leave your island. What happens there counts everywhere, firsts in the album included. Its player isn't told, and a blob hidden from the garden can't be invited.
+- 81b36ba: The weather brings its own moments. Blobs huddle under a big leaf when it rains, or splash in the puddles; they have snowball fights and build snow blobs while it snows, pick flowers in blossom time, jump into piles of leaves in the autumn, and watch the fireflies on summer nights. Stargazing needs a clear night now, and the shooting-stars season makes it a favourite.
+- 74e10e0: Seasons and weather. The year has nine seasons, from blossom time and firefly nights to shooting stars, falling leaves and misty days, and the sky changes every few hours: sunshine, clouds, rain, storms, snow and fog, the same for everyone on an island. Blobs feel it: they keep in when it rains, head out in the snow, and doze through a summer afternoon's heat. The season and the sky show at the top of the screen.
+
 ## 0.3.1
 
 ### Patch Changes
