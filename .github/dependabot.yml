@@ -3,7 +3,7 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     groups:
       # One pull request for the minor and patch updates, one each for majors.
       minor-and-patch:
@@ -23,7 +23,7 @@ updates:
   - package-ecosystem: cargo
     directory: /apps/desktop/src-tauri
     schedule:
-      interval: weekly
+      interval: monthly
     ignore:
       # Bumped by hand, with @tauri-apps/plugin-http: the two must match.
       - dependency-name: tauri-plugin-http
